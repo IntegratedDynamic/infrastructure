@@ -1,0 +1,20 @@
+[tools]
+kubectl = "1.35"
+minikube = "1.38"
+terraform = "1.14"
+
+[tasks.minikube]
+run = """
+minikube start --driver=docker
+kubectl wait --for=condition=Ready nodes --all --timeout=120s
+"""
+
+[tasks.terraform-init]
+run = "echo terraform init"
+
+[tasks.terraform-apply]
+run = "echo terraform apply -auto-approve"
+
+[tasks.dev]
+description = "Full dev environment"
+depends = ["minikube", "terraform-init", "terraform-apply"]
