@@ -8,6 +8,10 @@ on:
     paths:
       - '.github/workflows/**'
 
+permissions:
+  contents: read
+  security-events: write
+
 jobs:
   actionlint:
     runs-on: ubuntu-latest
@@ -16,3 +20,11 @@ jobs:
       
       - name: Run actionlint
         uses: raven-actions/actionlint@v2
+
+  zizmor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Run zizmor security check
+        uses: zizmorcore/zizmor-action@v0.5.2

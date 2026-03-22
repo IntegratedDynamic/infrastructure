@@ -9,16 +9,16 @@ changed_workflows=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\
 if [ -n "$changed_workflows" ]; then
     echo "🔍 Linting GitHub Actions workflows..."
     
+    # Check actionlint
     if ! command -v actionlint &> /dev/null; then
         echo "⚠️  actionlint not found. Installing via mise..."
         mise install actionlint
     fi
     
-    # Lint the changed workflows
     if actionlint -oneline $changed_workflows; then
-        echo "✅ Workflows lint passed!"
+        echo "✅ Actionlint passed!"
     else
-        echo "❌ Workflow lint failed. Fix the errors above and try again."
+        echo "❌ Actionlint failed. Fix the errors above and try again."
         exit 1
     fi
 else
