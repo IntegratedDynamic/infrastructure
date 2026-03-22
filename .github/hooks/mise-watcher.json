@@ -1,0 +1,11 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "type": "command",
+        "command": "./.github/hooks/check-mise-changes.sh",
+        "timeout": 30
+      }
+    ]
+  }
+}
