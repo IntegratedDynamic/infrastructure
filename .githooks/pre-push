@@ -1,0 +1,26 @@
+#!/bin/bash
+# Pre-push hook: Lint GitHub Actions workflows before pushing
+
+set -e
+
+# Get the list of changed workflow files
+changed_workflows=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.github/workflows/.*\.ya?ml$' || true)
+
+if [ -n "$changed_workflows" ]; then
+    echo "🔍 Linting GitHub Actions workflows..."
+    
+    if ! command -v actionlint &> /dev/null; then
+        echo "⚠️  actionlint not found. Installing via mise..."
+        mise install actionlint
+    fi
+    
+    # Lint the changed workflows
+    if actionlint -oneline $changed_workflows; then
+        echo "✅ Workflows lint passed!"
+    else
+        echo "❌ Workflow lint failed. Fix the errors above and try again."
+        exit 1
+    fi
+else
+    echo "✅ No workflow changes detected."
+fi

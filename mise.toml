@@ -2,6 +2,7 @@
 kubectl = "1.35"
 minikube = "1.38"
 terraform = "1.14"
+actionlint = "1.7"
 
 [tasks.minikube]
 run = """
