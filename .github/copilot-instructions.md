@@ -59,6 +59,8 @@ Types : `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `chore`
 
 **Body** : Contexte, changements, issues liées (via `Closes #123`), et instructions de test.
 
+**Comportement automatique** : Après chaque `commit` + `push` sur une branche, créer automatiquement une PR en **draft** (si elle n'existe pas déjà) avec titre et body appropriés.
+
 Utiliser [Conventional Comments](https://conventionalcomments.org/) pour les reviews :
 ```
 <label> [decorations]: <subject>
