@@ -6,6 +6,17 @@ actionlint = "1.7"
 
 [tasks.minikube]
 run = """
+# Start Docker if not running
+if ! docker info > /dev/null 2>&1; then
+  echo "Docker is not running. Starting Docker..."
+  open -a Docker
+  
+  # Wait until Docker is ready
+  echo "Waiting for Docker to be ready..."
+  while ! docker info > /dev/null 2>&1; do
+    sleep 2
+  done
+fi
 minikube start --driver=docker
 kubectl wait --for=condition=Ready nodes --all --timeout=120s
 """
