@@ -4,6 +4,7 @@ minikube = "1.38"
 terraform = "1.14"
 actionlint = "1.7"
 helm = "4.1.3"
+argocd = "3.3.6"
 
 [tasks.minikube]
 run = """
@@ -23,11 +24,25 @@ kubectl wait --for=condition=Ready nodes --all --timeout=120s
 """
 
 [tasks.terraform-init]
-run = "echo terraform init"
+dir = "terraform"
+run = "terraform init"
 
 [tasks.terraform-apply]
-run = "echo terraform apply -auto-approve"
+dir = "terraform"
+run = "terraform apply -auto-approve"
 
 [tasks.dev]
 description = "Full dev environment"
-depends = ["minikube", "terraform-init", "terraform-apply"]
+run = """
+mise run minikube
+mise run terraform-init
+mise run terraform-apply
+"""
+
+[tasks.tfa]
+description = "Full dev environment"
+depends = ["terraform-apply"]
+
+[tasks.reset]
+description = "Reset minikube cluster"
+run = "minikube delete"
