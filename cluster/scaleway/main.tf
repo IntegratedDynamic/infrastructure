@@ -52,6 +52,12 @@ resource "local_file" "kubeconfig" {
   file_permission = "0600"
 }
 
+# Scaleway regional IDs are "<region>/<uuid>"; the scw CLI wants the bare UUID,
+# and the generated kubeconfig context is named "<cluster-name>-<uuid>".
+locals {
+  cluster_uuid = split("/", scaleway_k8s_cluster.homelab.id)[1]
+}
+
 # Optional local DevX: merge this cluster into ~/.kube/config via the Scaleway
 # CLI (instead of juggling the standalone file above). Opt-in via
 # install_kubeconfig = true in your *.auto.tfvars. `scw k8s kubeconfig install`
@@ -68,10 +74,10 @@ resource "null_resource" "install_kubeconfig" {
 
   provisioner "local-exec" {
     command = <<-EOT
-      scw k8s kubeconfig install ${scaleway_k8s_cluster.homelab.id}
+      scw k8s kubeconfig install ${local.cluster_uuid}
       # Override any pre-existing context with the target name, then rename.
       kubectl config delete-context "${var.kubeconfig_context_name}" 2>/dev/null || true
-      kubectl config rename-context "${scaleway_k8s_cluster.homelab.name}-${scaleway_k8s_cluster.homelab.id}" "${var.kubeconfig_context_name}"
+      kubectl config rename-context "${scaleway_k8s_cluster.homelab.name}-${local.cluster_uuid}" "${var.kubeconfig_context_name}"
     EOT
   }
 }
