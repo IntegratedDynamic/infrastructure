@@ -57,6 +57,12 @@ applications:
       repoURL: https://github.com/IntegratedDynamic/gitops.git
       targetRevision: ${var.gitops_revision}
       path: bootstrap
+      helm:
+        parameters:
+          - name: env
+            value: local
+          - name: revision
+            value: ${var.gitops_revision}
 
     destination:
       server: https://kubernetes.default.svc
