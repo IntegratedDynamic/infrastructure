@@ -5,3 +5,8 @@ variable "infisical_client_id" {
 variable "infisical_client_secret" {
     type = string
 }
+
+variable "gitops_revision" {
+  type    = string
+  default = "main"
+}
