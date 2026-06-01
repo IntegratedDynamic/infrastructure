@@ -64,6 +64,10 @@ resource "helm_release" "argocd" {
   chart      = "argo-cd"
   version    = "9.4.17"
 
+  # Fail fast (under the 5m default) if ArgoCD doesn't come up. Transient blips
+  # (e.g. quay.io 502s) are absorbed by retrying the apply (see mise scaleway-up).
+  timeout = 240
+
   depends_on = [local_file.kubeconfig]
 
   # No admin password set: ArgoCD generates argocd-initial-admin-secret, which

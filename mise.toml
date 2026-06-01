@@ -55,7 +55,16 @@ run = "terraform init && terraform apply -auto-approve -var bootstrap_argocd=fal
 [tasks.scaleway-up]
 description = "Provision the Scaleway cluster + bootstrap ArgoCD"
 dir = "cluster/scaleway"
-run = "terraform init && terraform apply -auto-approve"
+run = """
+terraform init
+n=0
+until terraform apply -auto-approve; do
+  n=$((n + 1))
+  if [ "$n" -ge 3 ]; then echo "terraform apply failed after $n attempts"; exit 1; fi
+  echo "apply attempt $n failed (likely a transient registry/API blip); retrying in 15s..."
+  sleep 15
+done
+"""
 
 [tasks.scaleway-pause]
 description = "Scale Scaleway node pool to 0 (free tier)"
