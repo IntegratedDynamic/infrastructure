@@ -27,6 +27,18 @@ variable "bootstrap_argocd" {
   default     = true
 }
 
+variable "install_kubeconfig" {
+  description = "Merge this cluster into ~/.kube/config via `scw k8s kubeconfig install` for local DevX. Opt-in (set true in your *.auto.tfvars)."
+  type        = bool
+  default     = false
+}
+
+variable "kubeconfig_context_name" {
+  description = "Clean context name to rename the installed kubeconfig entry to (scw names it <cluster>-<id> and has no rename flag)."
+  type        = string
+  default     = "scaleway-homelab"
+}
+
 variable "gitops_revision" {
   type    = string
   default = "main"

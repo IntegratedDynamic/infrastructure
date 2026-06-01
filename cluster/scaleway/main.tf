@@ -52,6 +52,30 @@ resource "local_file" "kubeconfig" {
   file_permission = "0600"
 }
 
+# Optional local DevX: merge this cluster into ~/.kube/config via the Scaleway
+# CLI (instead of juggling the standalone file above). Opt-in via
+# install_kubeconfig = true in your *.auto.tfvars. `scw k8s kubeconfig install`
+# has no rename flag, so we rename the context cleanly with kubectl afterwards.
+resource "null_resource" "install_kubeconfig" {
+  count = var.install_kubeconfig ? 1 : 0
+
+  triggers = {
+    cluster_id   = scaleway_k8s_cluster.homelab.id
+    context_name = var.kubeconfig_context_name
+  }
+
+  depends_on = [null_resource.kubeconfig]
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      scw k8s kubeconfig install ${scaleway_k8s_cluster.homelab.id}
+      # Override any pre-existing context with the target name, then rename.
+      kubectl config delete-context "${var.kubeconfig_context_name}" 2>/dev/null || true
+      kubectl config rename-context "${scaleway_k8s_cluster.homelab.name}-${scaleway_k8s_cluster.homelab.id}" "${var.kubeconfig_context_name}"
+    EOT
+  }
+}
+
 # ── ArgoCD bootstrap (toggle with var.bootstrap_argocd) ─────────────────────
 
 data "infisical_secrets" "this" {
