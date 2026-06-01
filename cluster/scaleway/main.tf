@@ -54,6 +54,13 @@ resource "local_file" "kubeconfig" {
 
 # ── ArgoCD bootstrap (toggle with var.bootstrap_argocd) ─────────────────────
 
+data "infisical_secrets" "this" {
+  count        = var.bootstrap_argocd ? 1 : 0
+  env_slug     = "staging"
+  workspace_id = "7ecb6ed4-058a-46cd-ac9f-7e792469cf0f" // project ID
+  folder_path  = "/"
+}
+
 resource "helm_release" "argocd" {
   count            = var.bootstrap_argocd ? 1 : 0
   name             = "argocd"
@@ -70,8 +77,13 @@ resource "helm_release" "argocd" {
 
   depends_on = [local_file.kubeconfig]
 
-  # No admin password set: ArgoCD generates argocd-initial-admin-secret, which
-  # we read on demand. SSO comes later with the API gateway layer.
+  set_sensitive {
+    name = "configs.secret.argocdServerAdminPassword"
+    # ArgoCD expects a bcrypt() hash here. bcrypt() would regenerate on every
+    # run, so we store the hash directly in Infisical to avoid spurious diffs.
+    value = data.infisical_secrets.this[0].secrets["ArgoCD_admin_encrypted"].value
+  }
+
   values = [<<EOF
 configs:
   params:

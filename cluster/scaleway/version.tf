@@ -20,10 +20,23 @@ terraform {
       source  = "hashicorp/helm"
       version = "~> 2.0"
     }
+    infisical = {
+      source  = "infisical/infisical"
+      version = "~> 0.16"
+    }
   }
 }
 
 provider "scaleway" {}
+
+provider "infisical" {
+  auth = {
+    universal = {
+      client_id     = var.infisical_client_id
+      client_secret = var.infisical_client_secret
+    }
+  }
+}
 
 # kubernetes/helm talk to the cluster directly via its Scaleway-issued
 # kubeconfig attributes (no local-file dependency). On a from-scratch apply,

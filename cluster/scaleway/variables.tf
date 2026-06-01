@@ -1,3 +1,16 @@
+# Required only when bootstrap_argocd = true (to read the ArgoCD admin hash).
+# Default empty so a cluster-only provision (bootstrap_argocd = false) needs no creds.
+variable "infisical_client_id" {
+  type    = string
+  default = ""
+}
+
+variable "infisical_client_secret" {
+  type      = string
+  default   = ""
+  sensitive = true
+}
+
 variable "k8s_version" {
   type    = string
   default = "1.32.3"
