@@ -48,28 +48,30 @@ run = "minikube delete"
 # ── Scaleway (homelab) ──────────────────────────────────────────────────────
 
 [tasks.scaleway-provision]
-description = "Provision Scaleway Kapsule cluster"
-dir = "cluster/scaleway/kapsule"
-run = "terraform init && terraform apply -auto-approve"
-
-[tasks.scaleway-apps]
-description = "Bootstrap ArgoCD on Scaleway cluster"
-dir = "cluster/scaleway/apps"
-run = "terraform init && terraform apply -auto-approve"
+description = "Provision the Scaleway cluster only (no ArgoCD). Use for the first from-scratch apply."
+dir = "cluster/scaleway"
+run = "terraform init && terraform apply -auto-approve -var bootstrap_argocd=false"
 
 [tasks.scaleway-up]
-description = "Provision Scaleway cluster + deploy ArgoCD"
+description = "Provision the Scaleway cluster + bootstrap ArgoCD"
+dir = "cluster/scaleway"
 run = """
-mise run scaleway-provision
-mise run scaleway-apps
+terraform init
+n=0
+until terraform apply -auto-approve; do
+  n=$((n + 1))
+  if [ "$n" -ge 3 ]; then echo "terraform apply failed after $n attempts"; exit 1; fi
+  echo "apply attempt $n failed (likely a transient registry/API blip); retrying in 15s..."
+  sleep 15
+done
 """
 
 [tasks.scaleway-pause]
 description = "Scale Scaleway node pool to 0 (free tier)"
-dir = "cluster/scaleway/kapsule"
+dir = "cluster/scaleway"
 run = "terraform apply -auto-approve -var='node_count=0'"
 
 [tasks.scaleway-resume]
 description = "Scale Scaleway node pool back to 1"
-dir = "cluster/scaleway/kapsule"
+dir = "cluster/scaleway"
 run = "terraform apply -auto-approve -var='node_count=1'"
