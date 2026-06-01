@@ -51,3 +51,75 @@ resource "local_file" "kubeconfig" {
   filename        = pathexpand("~/.kube/scaleway-homelab.yaml")
   file_permission = "0600"
 }
+
+# ── ArgoCD bootstrap (toggle with var.bootstrap_argocd) ─────────────────────
+
+resource "helm_release" "argocd" {
+  count            = var.bootstrap_argocd ? 1 : 0
+  name             = "argocd"
+  namespace        = "argocd"
+  create_namespace = true
+
+  repository = "https://argoproj.github.io/argo-helm"
+  chart      = "argo-cd"
+  version    = "9.4.17"
+
+  depends_on = [local_file.kubeconfig]
+
+  # No admin password set: ArgoCD generates argocd-initial-admin-secret, which
+  # we read on demand. SSO comes later with the API gateway layer.
+  values = [<<EOF
+configs:
+  params:
+    server.insecure: true
+
+controller:
+  replicas: 1
+
+repoServer:
+  replicas: 1
+EOF
+  ]
+}
+
+resource "helm_release" "argocd_apps" {
+  count     = var.bootstrap_argocd ? 1 : 0
+  name      = "argocd-apps"
+  namespace = "argocd"
+
+  repository = "https://argoproj.github.io/argo-helm"
+  chart      = "argocd-apps"
+  version    = "2.0.4"
+
+  depends_on = [helm_release.argocd]
+
+  values = [<<EOF
+applications:
+  bootstrap:
+    namespace: argocd
+    project: default
+
+    source:
+      repoURL: https://github.com/IntegratedDynamic/gitops.git
+      targetRevision: ${var.gitops_revision}
+      path: bootstrap
+      helm:
+        parameters:
+          - name: env
+            value: scaleway
+          - name: revision
+            value: ${var.gitops_revision}
+
+    destination:
+      server: https://kubernetes.default.svc
+      namespace: argocd
+
+    syncPolicy:
+      automated:
+        prune: true
+        selfHeal: true
+      syncOptions:
+        - CreateNamespace=true
+EOF
+  ]
+}
