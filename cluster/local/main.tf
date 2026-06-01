@@ -55,7 +55,7 @@ applications:
 
     source:
       repoURL: https://github.com/IntegratedDynamic/gitops.git
-      targetRevision: main
+      targetRevision: ${var.gitops_revision}
       path: bootstrap
 
     destination:
