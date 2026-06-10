@@ -94,3 +94,13 @@ run = "terraform apply"
 description = "Tear down the Scaleway cluster (terraform destroy)"
 dir = "cluster/scaleway"
 run = "terraform destroy"
+
+# ── Provider locks ───────────────────────────────────────────────────────────
+
+[tasks.lock]
+description = "Re-generate all .terraform.lock.hcl files for darwin_arm64 + linux_amd64"
+run = """
+terraform -chdir=state-backend    providers lock -platform=darwin_arm64 -platform=linux_amd64
+terraform -chdir=cluster/local    providers lock -platform=darwin_arm64 -platform=linux_amd64
+terraform -chdir=cluster/scaleway providers lock -platform=darwin_arm64 -platform=linux_amd64
+"""

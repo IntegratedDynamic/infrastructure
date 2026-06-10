@@ -1,0 +1,43 @@
+name: Verify Terraform Lock Files
+
+# Fails if any root's .terraform.lock.hcl is incomplete or stale for the
+# expected platforms (darwin_arm64 + linux_amd64). Re-runs `providers lock`
+# for both platforms and fails on any diff, so a lock missing EITHER
+# platform's hashes is caught regardless of the runner OS (a plain
+# `init -lockfile=readonly` on a linux runner would miss a darwin-only lock).
+# `providers lock` only talks to the provider registry, so no backend creds.
+
+on:
+  pull_request:
+    paths:
+      - '**/.terraform.lock.hcl'
+      - '**/version.tf'
+      - '.github/workflows/terraform-lock.yml'
+
+jobs:
+  lock-check:
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        root:
+          - state-backend
+          - cluster/local
+          - cluster/scaleway
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with:
+          # Keep in sync with mise.toml [tools] terraform version.
+          terraform_version: "1.14"
+
+      - name: Re-lock providers for both platforms and assert no drift
+        run: |
+          terraform -chdir=${{ matrix.root }} providers lock \
+            -platform=darwin_arm64 -platform=linux_amd64
+          git diff --exit-code -- ${{ matrix.root }}/.terraform.lock.hcl
