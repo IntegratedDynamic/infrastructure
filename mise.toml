@@ -6,6 +6,15 @@ actionlint = "1.7"
 helm = "4.1.3"
 argocd = "3.3.6"
 
+# The s3 state backend (state-backend/) needs AWS-style creds — the Scaleway
+# provider reads the scw CLI config, the backend does not. Derive them here so
+# terraform just works; `|| true` keeps the local/minikube workflow usable
+# without scw configured (empty vars, which the local backend ignores).
+# https://registry.terraform.io/providers/scaleway/scaleway/2.75.0/docs/guides/backend_guide
+[env]
+AWS_ACCESS_KEY_ID = "{{ exec(command='scw config get access-key 2>/dev/null || true') }}"
+AWS_SECRET_ACCESS_KEY = "{{ exec(command='scw config get secret-key 2>/dev/null || true') }}"
+
 # ── Local (minikube) ────────────────────────────────────────────────────────
 
 [tasks.minikube]
@@ -75,3 +84,13 @@ run = "terraform apply -auto-approve -var='node_count=0'"
 description = "Scale Scaleway node pool back to 1"
 dir = "cluster/scaleway"
 run = "terraform apply -auto-approve -var='node_count=1'"
+
+[tasks.scaleway-apply]
+description = "Plain terraform apply on the Scaleway root"
+dir = "cluster/scaleway"
+run = "terraform apply"
+
+[tasks.scaleway-destroy]
+description = "Tear down the Scaleway cluster (terraform destroy)"
+dir = "cluster/scaleway"
+run = "terraform destroy"
