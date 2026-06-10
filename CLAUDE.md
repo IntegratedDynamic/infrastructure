@@ -16,9 +16,30 @@ mise install          # Install all tools (kubectl, minikube, terraform, helm, a
 mise run dev             # Full local env: start minikube + terraform init + apply
 mise run reset           # Destroy minikube cluster
 
+# Provider lock files
+mise run lock            # Re-generate all 3 roots' .terraform.lock.hcl for darwin_arm64 + linux_amd64
+
 # Linting
 actionlint .github/workflows/*.yml   # Lint GitHub Actions workflows (also runs as pre-push hook)
 ```
+
+### Re-running `providers lock`
+
+The `.terraform.lock.hcl` in each root must cover **both** `darwin_arm64` (local dev) and `linux_amd64` (CI). Re-run `mise run lock` whenever you:
+
+- bump a provider version constraint in any `version.tf`
+- add a new provider to a root
+- see a CI failure on the `Verify Terraform Lock Files` workflow
+
+`mise run lock` is equivalent to:
+
+```bash
+terraform -chdir=state-backend    providers lock -platform=darwin_arm64 -platform=linux_amd64
+terraform -chdir=cluster/local    providers lock -platform=darwin_arm64 -platform=linux_amd64
+terraform -chdir=cluster/scaleway providers lock -platform=darwin_arm64 -platform=linux_amd64
+```
+
+Commit the updated lock files alongside the version change.
 
 ## Architecture
 

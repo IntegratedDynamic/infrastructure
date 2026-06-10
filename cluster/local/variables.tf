@@ -1,9 +1,9 @@
 variable "infisical_client_id" {
-    type = string
+  type = string
 }
 
 variable "infisical_client_secret" {
-    type = string
+  type = string
 }
 
 variable "gitops_revision" {
