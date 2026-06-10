@@ -29,10 +29,18 @@ Key mise tasks:
 - `mise run scaleway-up` — Scaleway cluster + ArgoCD bootstrap (retries apply on transient blips)
 - `mise run scaleway-pause` / `scaleway-resume` — scale node pool to 0 / 1
 
+## Workflow (defaults — no need to be told)
+
+- **Step 0, every time:** `git fetch origin --prune` and verify the local repo is synced before doing anything. Then branch off an up-to-date `main` and open the PR back to `main`. One issue = one PR. Do NOT stack PRs or branch off a feature branch unless explicitly told (reserved for a single large task).
+- The deliverable is a **draft PR you create yourself**, built from the issue's info plus what you have to say in the PR body (problem, changes, how to verify, `Closes #N`).
+- Keep a PR scoped to its issue. Don't fold unrelated `fmt`/refactor noise from stuff you didn't touch. Instead, open an issue
+- Before reporting done: confirm the PR's CI is actually green (`gh run list --branch <branch>`), not just that local lint/validate passed.
+
 ## How you work
 
 - For any Terraform change: `terraform fmt`, `terraform validate`, then **`terraform plan`** and show the plan. Do NOT run `apply`/`destroy` unless the user explicitly asks — they are state-changing and (for Scaleway) cost money / can delete the cluster (`delete_additional_resources = true`).
 - Lint workflow edits with `actionlint .github/workflows/*.yml` (also a pre-push hook).
+- When adding a CI check, state in the PR **what invariant it guarantees and on which platform/OS it runs**. Prefer a check that holds regardless of runner OS over one that merely happens to pass (e.g. a multi-platform lock check belongs in `providers lock` + `git diff --exit-code`, not `init -lockfile=readonly` on a single OS).
 - Look up provider/chart/tool docs with the context7 MCP tools rather than guessing versions or arguments.
 - Prefer editing existing files and matching surrounding style (HCL comments are dense and explanatory here — keep that).
 
