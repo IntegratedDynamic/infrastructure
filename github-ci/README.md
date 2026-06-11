@@ -34,7 +34,10 @@ Revisit OIDC if/when Scaleway ships it (see the link above).
   scoped to `var.project_id` (and **no** broader set).
 - `scaleway_iam_api_key.github_ci` — the API key for that application, with
   `default_project_id` baked in so `scw object bucket list` resolves the right
-  scope without the workflow passing a project ID.
+  scope without the workflow passing a project ID. The org enforces an expiry on
+  every key, so `time_rotating.api_key` drives `expires_at` (default 365 days,
+  `var.api_key_rotation_days`) and rotates the key on the next apply after it
+  lapses — see [Rotation / revocation](#rotation--revocation).
 - `infisical_secret.scw_access_key` / `infisical_secret.scw_secret_key` — the key
   written into Infisical (env `staging`, folder `/ci` by default). The secret half
   is Terraform-`sensitive`; it's never printed or committed (state-only, per the
@@ -109,12 +112,20 @@ missing, so a green run means real authentication succeeded.
 
 ## Rotation / revocation
 
-The API key lives entirely in this root's state. To rotate:
+The API key lives entirely in this root's state.
 
-```bash
-terraform -chdir=github-ci apply -replace=scaleway_iam_api_key.github_ci
-```
+- **Automatic** — `time_rotating.api_key` expires the key after
+  `var.api_key_rotation_days` (default 365). Once that window lapses, the next
+  `terraform apply` rolls the expiry forward, which (since `expires_at` is
+  ForceNew) creates fresh key material.
+- **On demand** — force it early with:
 
-then re-run the `gh secret set` steps above. To kill access entirely, destroy
-the application (revokes the key) — but mind that any workflow depending on it
-will start failing.
+  ```bash
+  terraform -chdir=github-ci apply -replace=scaleway_iam_api_key.github_ci
+  ```
+
+Either way the key material changes, so **re-run the `gh secret set` steps above**
+afterwards (the Infisical copies update automatically; the GitHub secrets don't).
+
+To kill access entirely, destroy the application (revokes the key) — but mind
+that any workflow depending on it will start failing.

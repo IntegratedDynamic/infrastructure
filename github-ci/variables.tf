@@ -34,3 +34,11 @@ variable "project_id" {
   type        = string
   default     = "6283c05b-a4c7-4f83-a75f-83adad236d54"
 }
+
+# Scaleway's org policy requires every API key to carry an expiry. This drives
+# the key's expires_at; once the window elapses, the next apply rotates the key.
+variable "api_key_rotation_days" {
+  description = "Lifetime (days) of the CI API key before terraform rotates it on the next apply."
+  type        = number
+  default     = 365
+}

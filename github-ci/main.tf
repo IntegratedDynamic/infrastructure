@@ -21,6 +21,15 @@ resource "scaleway_iam_policy" "github_ci" {
   }
 }
 
+# The org enforces an expiry on every API key, and `expires_at` is ForceNew, so
+# the key inherently rotates when the expiry moves. time_rotating makes that
+# concrete and self-renewing: the timestamp holds steady until the window
+# elapses, then the next apply pushes it forward and rotates the key (re-run
+# `gh secret set` afterwards — see README).
+resource "time_rotating" "api_key" {
+  rotation_days = var.api_key_rotation_days
+}
+
 resource "scaleway_iam_api_key" "github_ci" {
   application_id = scaleway_iam_application.github_ci.id
   description    = "Consumed from GitHub Actions secrets (SCW_ACCESS_KEY / SCW_SECRET_KEY)."
@@ -28,6 +37,8 @@ resource "scaleway_iam_api_key" "github_ci" {
   # Bakes the project into the key so `scw object bucket list` resolves the right
   # scope without the workflow passing a project ID.
   default_project_id = var.project_id
+
+  expires_at = time_rotating.api_key.rotation_rfc3339
 }
 
 # ── Write the key into Infisical ────────────────────────────────────────────
