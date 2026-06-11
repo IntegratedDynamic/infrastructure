@@ -89,15 +89,23 @@ from stdin.)
 
 ## Verify end to end
 
-Trigger the smoke-test workflow and confirm it lists the `fr-par` buckets:
+The smoke-test workflow (`.github/workflows/scaleway-auth-check.yml`) runs the
+`scw object bucket list region=fr-par` against the key. It triggers two ways:
 
-```bash
-gh workflow run "Scaleway Auth Check" --repo IntegratedDynamic/infrastructure
-gh run watch --repo IntegratedDynamic/infrastructure
-```
+- **On any PR** that touches `github-ci/**` or the workflow itself — so you can
+  validate before merge (`workflow_dispatch` can't be triggered from a branch).
+- **Manual dispatch**, once the workflow is on `main`:
 
-The workflow (`.github/workflows/scaleway-auth-check.yml`) fails clearly if the
-secrets are missing, so a green run means real authentication succeeded.
+  ```bash
+  gh workflow run "Scaleway Auth Check" --repo IntegratedDynamic/infrastructure
+  gh run watch --repo IntegratedDynamic/infrastructure
+  ```
+
+So the validation order is: `apply` → `gh secret set` (above) → push the branch /
+re-run the PR check. The job runs in the `scaleway` GitHub Environment (so its
+secret usage is scoped — secrets can be set at repo or environment level; the
+repo-level commands above work either way). It fails clearly if the secrets are
+missing, so a green run means real authentication succeeded.
 
 ## Rotation / revocation
 
