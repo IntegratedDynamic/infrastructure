@@ -58,9 +58,7 @@ jobs:
       - name: Use CLI
         uses: scaleway/action-scw@v0
         with:
-          save-config: true
-          export-config: true
-          version: v2.24.0
+          version: v2.56.0
           access-key: ${{ secrets.SCW_ACCESS_KEY }}
           secret-key: ${{ secrets.SCW_SECRET_KEY }}
           default-organization-id: ${{ vars.SCW_DEFAULT_ORGANIZATION_ID }}
