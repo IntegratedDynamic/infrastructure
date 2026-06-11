@@ -34,9 +34,9 @@ jobs:
       - uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: "1.14.8"
-      - name: test
+      - name: init
         working-directory: cluster/scaleway
-        run: terraform plan
+        run: terraform init
 
 
   # list-buckets:
