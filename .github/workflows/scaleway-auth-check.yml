@@ -37,6 +37,12 @@ jobs:
       - name: init
         working-directory: cluster/scaleway
         run: terraform init
+        # Terraform "s3" backend, which is used by the infrastructure to store the state remotely, is primarily integrated with AWS, and not with Scaleway.
+        # This imply to have AWS credentials environments variable containing Scaleway credentials.
+        # See documentation here : https://registry.terraform.io/providers/scaleway/scaleway/latest/docs/guides/backend_guide#alternative-store-terraform-state-in-scaleway-object-storage-with-locking
+        env:
+          AWS_ACCESS_KEY_ID: $SCW_SECRET_KEY
+          AWS_SECRET_ACCESS_KEY: $SCW_ACCESS_KEY
 
 
   # list-buckets:
