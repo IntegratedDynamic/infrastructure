@@ -13,9 +13,24 @@ on:
       - 'github-ci/**'
 
 permissions:
-  contents: read
+  contents: write # Required for Infinisical OIDC
+
 
 jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: Infisical/secrets-action@v1.0.7
+        with:
+          method: "oidc"
+          env-slug: "staging"
+          project-slug: "platform-p-qc1"
+          identity-id: "7bd0594e-a8d2-48f9-aa26-da309bca7094"
+      - name: test
+        run: |
+          env
+
+
   list-buckets:
     runs-on: ubuntu-latest
     # Reference a dedicated environment so secret usage is scoped to it
