@@ -95,6 +95,23 @@ description = "Tear down the Scaleway cluster (terraform destroy)"
 dir = "cluster/scaleway"
 run = "terraform destroy"
 
+# ── GitHub CI identity (github-ci/) ─────────────────────────────────────────
+
+[tasks.github-ci-init]
+description = "terraform init on the github-ci root"
+dir = "github-ci"
+run = "terraform init"
+
+[tasks.github-ci-plan]
+description = "terraform plan on the github-ci root"
+dir = "github-ci"
+run = "terraform init && terraform plan"
+
+[tasks.github-ci-apply]
+description = "terraform apply on the github-ci root (provisions the Scaleway CI IAM key)"
+dir = "github-ci"
+run = "terraform apply"
+
 # ── Provider locks ───────────────────────────────────────────────────────────
 
 [tasks.lock]
@@ -103,4 +120,5 @@ run = """
 terraform -chdir=state-backend    providers lock -platform=darwin_arm64 -platform=linux_amd64
 terraform -chdir=cluster/local    providers lock -platform=darwin_arm64 -platform=linux_amd64
 terraform -chdir=cluster/scaleway providers lock -platform=darwin_arm64 -platform=linux_amd64
+terraform -chdir=github-ci        providers lock -platform=darwin_arm64 -platform=linux_amd64
 """
