@@ -45,4 +45,8 @@ jobs:
           version: v2.41.0
           access-key: ${{ secrets.SCW_ACCESS_KEY }}
           secret-key: ${{ secrets.SCW_SECRET_KEY }}
+          # Public identifiers, not credentials (the scw CLI wants an org ID even
+          # for project-scoped calls). Same UUID as github-ci/variables.tf.
+          default-organization-id: 6283c05b-a4c7-4f83-a75f-83adad236d54
+          default-project-id: 6283c05b-a4c7-4f83-a75f-83adad236d54
           args: object bucket list region=fr-par
