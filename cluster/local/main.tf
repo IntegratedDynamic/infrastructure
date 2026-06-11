@@ -13,12 +13,12 @@ resource "helm_release" "argocd" {
   chart      = "argo-cd"
   version    = "9.4.17"
 
-  set_sensitive {
+  set_sensitive = [{
     name = "configs.secret.argocdServerAdminPassword"
     # ArgoCD require a `bcrypt()` hashed password here. But `bcrypt` generate a new hash at each execution
     # So instead, we store the hash directly, so terraform is not confused anymore by fake changes
     value = data.infisical_secrets.this.secrets["ArgoCD_admin_encrypted"].value
-  }
+  }]
 
   values = [<<EOF
 # server:
