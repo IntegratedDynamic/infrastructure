@@ -17,7 +17,7 @@ resource "scaleway_iam_policy" "github_ci" {
 
   rule {
     project_ids          = [var.project_id]
-    permission_set_names = ["KubernetesFullAccess","VPCFullAccess", "ObjectStorageObjectsWrite"]
+    permission_set_names = ["KubernetesFullAccess","VPCFullAccess", "ObjectStorageObjectsWrite", "ObjectStorageBucketsRead"]
   }
 }
 
