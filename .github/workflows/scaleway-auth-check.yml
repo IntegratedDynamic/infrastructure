@@ -45,6 +45,7 @@ jobs:
           AWS_SECRET_ACCESS_KEY: $SCW_ACCESS_KEY
   test: 
     runs-on: ubuntu-latest
+    environment: scaleway
     steps:
       # - uses: actions/checkout@v6
       # - uses: Infisical/secrets-action@v1.0.7
