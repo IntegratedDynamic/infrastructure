@@ -45,12 +45,22 @@ resource "scaleway_iam_api_key" "github_ci" {
 # GitHub secrets themselves are still set manually via `gh secret set` (see
 # README) — automating that push is deferred to avoid a GitHub token here.
 
+# infisical_secret does not create missing folders, so the CI folder must exist
+# first. var.infisical_folder_path is "/<name>"; create that name under root.
+resource "infisical_secret_folder" "ci" {
+  project_id       = var.infisical_workspace_id
+  environment_slug = var.infisical_env_slug
+  folder_path      = "/"
+  name             = trimprefix(var.infisical_folder_path, "/")
+  description      = "CI secrets for GitHub Actions (managed by terraform: github-ci/)."
+}
+
 resource "infisical_secret" "scw_access_key" {
   name         = "SCW_ACCESS_KEY"
   value        = scaleway_iam_api_key.github_ci.access_key
   env_slug     = var.infisical_env_slug
   workspace_id = var.infisical_workspace_id
-  folder_path  = var.infisical_folder_path
+  folder_path  = infisical_secret_folder.ci.path
 }
 
 resource "infisical_secret" "scw_secret_key" {
@@ -58,5 +68,5 @@ resource "infisical_secret" "scw_secret_key" {
   value        = scaleway_iam_api_key.github_ci.secret_key
   env_slug     = var.infisical_env_slug
   workspace_id = var.infisical_workspace_id
-  folder_path  = var.infisical_folder_path
+  folder_path  = infisical_secret_folder.ci.path
 }
