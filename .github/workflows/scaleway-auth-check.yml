@@ -1,0 +1,35 @@
+name: Scaleway Auth Check
+
+# Validates the github-ci/ Scaleway IAM key end to end: authenticate with the
+# scoped API key from GitHub secrets and list the fr-par Object Storage buckets.
+# Manual trigger only — this is a smoke test, not part of any pipeline yet.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  list-buckets:
+    runs-on: ubuntu-latest
+    steps:
+      # Fail fast and clearly if the secrets aren't set, instead of letting the
+      # CLI emit a confusing auth error (or worse, appear to pass).
+      - name: Assert credentials are present
+        env:
+          SCW_ACCESS_KEY: ${{ secrets.SCW_ACCESS_KEY }}
+          SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
+        run: |
+          if [ -z "$SCW_ACCESS_KEY" ] || [ -z "$SCW_SECRET_KEY" ]; then
+            echo "::error::SCW_ACCESS_KEY and/or SCW_SECRET_KEY are not set. Run 'gh secret set' (see github-ci/README.md)."
+            exit 1
+          fi
+
+      - name: List fr-par Object Storage buckets
+        uses: scaleway/action-scw@2e34a1eb35cf3cac627f24643a101fea269cbd83 # v0.0.3
+        with:
+          version: v2.41.0
+          access-key: ${{ secrets.SCW_ACCESS_KEY }}
+          secret-key: ${{ secrets.SCW_SECRET_KEY }}
+          args: object bucket list region=fr-par

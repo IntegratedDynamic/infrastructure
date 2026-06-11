@@ -37,6 +37,7 @@ The `.terraform.lock.hcl` in each root must cover **both** `darwin_arm64` (local
 terraform -chdir=state-backend    providers lock -platform=darwin_arm64 -platform=linux_amd64
 terraform -chdir=cluster/local    providers lock -platform=darwin_arm64 -platform=linux_amd64
 terraform -chdir=cluster/scaleway providers lock -platform=darwin_arm64 -platform=linux_amd64
+terraform -chdir=github-ci        providers lock -platform=darwin_arm64 -platform=linux_amd64
 ```
 
 Commit the updated lock files alongside the version change.
@@ -63,6 +64,10 @@ Terraform here is only a **one-time bootstrapper** — everything after ArgoCD i
 ### `cluster/scaleway/`
 
 Same bootstrap pattern as `local/`, plus the Kapsule cluster + node pool (`DEV1-M`, min=0/max=3) in one consolidated module. Writes the kubeconfig to `~/.kube/scaleway-homelab.yaml`. Scaleway credentials are read from the `scw` CLI config (`~/.config/scw/config.yaml`), not from tfvars. Still early — intentionally undocumented in the commands above for now.
+
+### `github-ci/`
+
+Standalone root (not under `cluster/` — provisions no cluster) that stands up the **Scaleway IAM identity GitHub Actions uses to authenticate to Scaleway**: a dedicated IAM application + a least-privilege policy (`ObjectStorageReadOnly`, project-scoped) + an API key, with the key written into Infisical. GitHub secrets (`SCW_ACCESS_KEY` / `SCW_SECRET_KEY`) are still set manually via `gh secret set`. Keyless GitHub-OIDC → Scaleway is a non-goal — blocked upstream (Scaleway IAM is not an OIDC relying party). See `github-ci/README.md`.
 
 ## Conventions
 
