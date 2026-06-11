@@ -2,10 +2,19 @@ name: Scaleway Auth Check
 
 # Validates the github-ci/ Scaleway IAM key end to end: authenticate with the
 # scoped API key from GitHub secrets and list the fr-par Object Storage buckets.
-# Manual trigger only — this is a smoke test, not part of any pipeline yet.
+# This is a smoke test, not part of any pipeline yet.
+#
+# Runs on PRs that touch the CI identity (workflow_dispatch can't be triggered
+# from a branch — it only runs once the workflow is on the default branch — so a
+# pull_request trigger is what actually lets us validate before merge), plus
+# manual dispatch once it's on main.
 
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/scaleway-auth-check.yml'
+      - 'github-ci/**'
 
 permissions:
   contents: read
@@ -13,6 +22,10 @@ permissions:
 jobs:
   list-buckets:
     runs-on: ubuntu-latest
+    # Reference a dedicated environment so secret usage is scoped to it
+    # (satisfies zizmor's secrets-outside-env audit, and gives a place to attach
+    # protection rules later). Auto-created on first run with no protection.
+    environment: scaleway
     steps:
       # Fail fast and clearly if the secrets aren't set, instead of letting the
       # CLI emit a confusing auth error (or worse, appear to pass).
