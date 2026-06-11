@@ -65,9 +65,6 @@ jobs:
           default-organization-id: ${{ vars.SCW_DEFAULT_ORGANIZATION_ID }}
           default-project-id: ${{ vars.SCW_DEFAULT_PROJECT_ID }}
           args: object bucket list region=fr-par
-      - name: b
-        run: | 
-         scw 
   # list-buckets:
   #   runs-on: ubuntu-latest
   #   # Reference a dedicated environment so secret usage is scoped to it
