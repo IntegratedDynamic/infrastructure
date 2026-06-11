@@ -43,8 +43,31 @@ jobs:
         env:
           AWS_ACCESS_KEY_ID: $SCW_SECRET_KEY
           AWS_SECRET_ACCESS_KEY: $SCW_ACCESS_KEY
-
-
+  test: 
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: Infisical/secrets-action@v1.0.7
+        with:
+          method: "oidc"
+          identity-id: "7bd0594e-a8d2-48f9-aa26-da309bca7094"
+          env-slug: "staging"
+          secret-path: "ci"
+          project-slug: "platform-p-qc1"
+      - name: Use CLI
+        uses: scaleway/action-scw@v0
+        with:
+          save-config: true
+          export-config: true
+          version: v2.24.0
+          # access-key: ${{ secrets.SCW_ACCESS_KEY }}
+          # secret-key: ${{ secrets.SCW_SECRET_KEY }}
+          default-organization-id: ${{ vars.SCW_DEFAULT_ORGANIZATION_ID }}
+          default-project-id: ${{ vars.SCW_DEFAULT_PROJECT_ID }}
+          args: object bucket list region=fr-par
+      - name: b
+        run: | 
+         scw 
   # list-buckets:
   #   runs-on: ubuntu-latest
   #   # Reference a dedicated environment so secret usage is scoped to it
