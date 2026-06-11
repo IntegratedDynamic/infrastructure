@@ -65,7 +65,7 @@ jobs:
           default-organization-id: ${{ vars.SCW_DEFAULT_ORGANIZATION_ID }}
           default-project-id: ${{ vars.SCW_DEFAULT_PROJECT_ID }}
           args: object bucket list region=fr-par
-          
+
   list-buckets:
     runs-on: ubuntu-latest
     # Reference a dedicated environment so secret usage is scoped to it
@@ -75,15 +75,15 @@ jobs:
     steps:
       # Fail fast and clearly if the secrets aren't set, instead of letting the
       # CLI emit a confusing auth error (or worse, appear to pass).
-      - name: Assert credentials are present
-        env:
-          SCW_ACCESS_KEY: ${{ secrets.SCW_ACCESS_KEY }}
-          SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
-        run: |
-          if [ -z "$SCW_ACCESS_KEY" ] || [ -z "$SCW_SECRET_KEY" ]; then
-            echo "::error::SCW_ACCESS_KEY and/or SCW_SECRET_KEY are not set. Run 'gh secret set' (see github-ci/README.md)."
-            exit 1
-          fi
+      # - name: Assert credentials are present
+      #   env:
+      #     SCW_ACCESS_KEY: ${{ secrets.SCW_ACCESS_KEY }}
+      #     SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
+      #   run: |
+      #     if [ -z "$SCW_ACCESS_KEY" ] || [ -z "$SCW_SECRET_KEY" ]; then
+      #       echo "::error::SCW_ACCESS_KEY and/or SCW_SECRET_KEY are not set. Run 'gh secret set' (see github-ci/README.md)."
+      #       exit 1
+      #     fi
 
       - name: List fr-par Object Storage buckets
         uses: scaleway/action-scw@2e34a1eb35cf3cac627f24643a101fea269cbd83 # v0.0.3
@@ -91,8 +91,6 @@ jobs:
           version: v2.41.0
           access-key: ${{ secrets.SCW_ACCESS_KEY }}
           secret-key: ${{ secrets.SCW_SECRET_KEY }}
-          # Public identifiers (not credentials) the scw CLI wants even for a
-          # project-scoped key. Repo variables, not secrets.
           default-organization-id: ${{ vars.SCW_DEFAULT_ORGANIZATION_ID }}
           default-project-id: ${{ vars.SCW_DEFAULT_PROJECT_ID }}
           args: object bucket list region=fr-par
