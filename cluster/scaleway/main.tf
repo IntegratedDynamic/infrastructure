@@ -107,12 +107,12 @@ resource "helm_release" "argocd" {
 
   depends_on = [local_file.kubeconfig]
 
-  set_sensitive {
+  set_sensitive = [{
     name = "configs.secret.argocdServerAdminPassword"
     # ArgoCD expects a bcrypt() hash here. bcrypt() would regenerate on every
     # run, so we store the hash directly in Infisical to avoid spurious diffs.
     value = data.infisical_secrets.this[0].secrets["ArgoCD_admin_encrypted"].value
-  }
+  }]
 
   values = [<<EOF
 configs:
