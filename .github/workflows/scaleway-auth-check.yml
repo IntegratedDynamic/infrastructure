@@ -4,13 +4,9 @@ name: Scaleway Auth Check
 # scoped API key from GitHub secrets and list the fr-par Object Storage buckets.
 # This is a smoke test, not part of any pipeline yet.
 #
-# Runs on PRs that touch the CI identity (workflow_dispatch can't be triggered
-# from a branch — it only runs once the workflow is on the default branch — so a
-# pull_request trigger is what actually lets us validate before merge), plus
-# manual dispatch once it's on main.
+# Runs on PRs that touch the CI identity so it can be validated before merge.
 
 on:
-  workflow_dispatch:
   pull_request:
     paths:
       - '.github/workflows/scaleway-auth-check.yml'
@@ -45,8 +41,8 @@ jobs:
           version: v2.41.0
           access-key: ${{ secrets.SCW_ACCESS_KEY }}
           secret-key: ${{ secrets.SCW_SECRET_KEY }}
-          # Public identifiers, not credentials (the scw CLI wants an org ID even
-          # for project-scoped calls). Same UUID as github-ci/variables.tf.
-          default-organization-id: 6283c05b-a4c7-4f83-a75f-83adad236d54
-          default-project-id: 6283c05b-a4c7-4f83-a75f-83adad236d54
+          # Public identifiers (not credentials) the scw CLI wants even for a
+          # project-scoped key. Repo variables, not secrets.
+          default-organization-id: ${{ vars.SCW_DEFAULT_ORGANIZATION_ID }}
+          default-project-id: ${{ vars.SCW_DEFAULT_PROJECT_ID }}
           args: object bucket list region=fr-par

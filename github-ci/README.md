@@ -92,17 +92,18 @@ from stdin.)
 
 ## Verify end to end
 
-The smoke-test workflow (`.github/workflows/scaleway-auth-check.yml`) runs the
-`scw object bucket list region=fr-par` against the key. It triggers two ways:
+The smoke-test workflow (`.github/workflows/scaleway-auth-check.yml`) runs
+`scw object bucket list region=fr-par` against the key. It triggers on any PR
+that touches `github-ci/**` or the workflow itself, so you can validate before
+merge.
 
-- **On any PR** that touches `github-ci/**` or the workflow itself — so you can
-  validate before merge (`workflow_dispatch` can't be triggered from a branch).
-- **Manual dispatch**, once the workflow is on `main`:
+It needs two **repo variables** (public identifiers, not secrets — the scw CLI
+wants them even for a project-scoped key). Set once:
 
-  ```bash
-  gh workflow run "Scaleway Auth Check" --repo IntegratedDynamic/infrastructure
-  gh run watch --repo IntegratedDynamic/infrastructure
-  ```
+```bash
+gh variable set SCW_DEFAULT_ORGANIZATION_ID --repo IntegratedDynamic/infrastructure --body "<org-id>"
+gh variable set SCW_DEFAULT_PROJECT_ID      --repo IntegratedDynamic/infrastructure --body "<project-id>"
+```
 
 So the validation order is: `apply` → `gh secret set` (above) → push the branch /
 re-run the PR check. The job runs in the `scaleway` GitHub Environment (so its
