@@ -17,7 +17,7 @@ mise run dev             # Full local env: start minikube + terraform init + app
 mise run reset           # Destroy minikube cluster
 
 # Provider lock files
-mise run lock            # Re-generate all 3 roots' .terraform.lock.hcl for darwin_arm64 + linux_amd64
+mise run lock            # Re-generate all 4 roots' .terraform.lock.hcl for darwin_arm64 + linux_amd64
 
 # Linting
 actionlint .github/workflows/*.yml   # Lint GitHub Actions workflows (also runs as pre-push hook)
@@ -34,36 +34,45 @@ The `.terraform.lock.hcl` in each root must cover **both** `darwin_arm64` (local
 `mise run lock` is equivalent to:
 
 ```bash
-terraform -chdir=state-backend    providers lock -platform=darwin_arm64 -platform=linux_amd64
-terraform -chdir=cluster/local    providers lock -platform=darwin_arm64 -platform=linux_amd64
-terraform -chdir=cluster/scaleway providers lock -platform=darwin_arm64 -platform=linux_amd64
-terraform -chdir=github-ci        providers lock -platform=darwin_arm64 -platform=linux_amd64
+terraform -chdir=terraform-state-bucket providers lock -platform=darwin_arm64 -platform=linux_amd64
+terraform -chdir=cluster/local          providers lock -platform=darwin_arm64 -platform=linux_amd64
+terraform -chdir=cluster/scaleway       providers lock -platform=darwin_arm64 -platform=linux_amd64
+terraform -chdir=github-ci              providers lock -platform=darwin_arm64 -platform=linux_amd64
 ```
 
 Commit the updated lock files alongside the version change.
 
 ## Architecture
 
-Two cluster environments, each its own Terraform root module:
+Several Terraform root modules. One (./terraform-state-bucket) manage the shared terraform state bucket; any
+others cloud-based environments will store it's data on it.
 
 ```
+terraform-state-bucket/   # shared AWS S3 bucket holding every root's remote state
 cluster/
-  local/      # minikube — local dev and debugging
+  local/      # minikube — local dev and debugging. Using local backend (e.g. local files)
   scaleway/   # Scaleway Kapsule cluster + ArgoCD bootstrap (homelab; WIP, not yet wired into mise)
+github-ci/    # Scaleway IAM identity GitHub Actions authenticates with
 ```
+
+Otherwise, this repo, for now, is an agregate of terraform root modules without specific structure yet.
+
+### `./clusters/*`
+
+Terraform here is only a **one-time bootstrapper** — everything after ArgoCD is up lives in the `gitops` repo. The cluster internal state nor status will be reflected in the terraform state. 
 
 ### `cluster/local/`
+
+Warning : This environment expect you an accessible local kubernetes cluster access, likely configured within your ~/.kube/config. This is automatically handled via `mise run dev`
 
 Two-step, one-time bootstrap:
 1. Fetch secrets from **Infisical** (universal auth machine identity). Credentials come from `nico.auto.tfvars` (per-developer, not shared).
 2. Deploy **ArgoCD** via Helm with the admin bcrypt password hash from Infisical (pre-hashed to prevent Terraform drift).
-3. Deploy the **argocd-apps bootstrap** chart, pointing ArgoCD at `https://github.com/IntegratedDynamic/gitops.git`. ArgoCD then self-manages all further cluster state from that separate GitOps repo.
-
-Terraform here is only a **one-time bootstrapper** — everything after ArgoCD is up lives in the `gitops` repo.
+3. Deploy the **argocd-apps bootstrap** Application, pointing ArgoCD at `https://github.com/IntegratedDynamic/gitops.git`. ArgoCD then self-manages all further cluster state from that separate GitOps repo.
 
 ### `cluster/scaleway/`
 
-Same bootstrap pattern as `local/`, plus the Kapsule cluster + node pool (`DEV1-M`, min=0/max=3) in one consolidated module. Writes the kubeconfig to `~/.kube/scaleway-homelab.yaml`. Scaleway credentials are read from the `scw` CLI config (`~/.config/scw/config.yaml`), not from tfvars. Still early — intentionally undocumented in the commands above for now.
+Same bootstrap pattern as `local/`, but with the Kapsule cluster + node pool (`DEV1-M`, min=0/max=3) instead.
 
 ### `github-ci/`
 
