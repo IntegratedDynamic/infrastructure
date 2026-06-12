@@ -1,23 +1,14 @@
 terraform {
-  # Remote state in the org-wide bucket (state-backend/). Creds: see mise.toml.
   backend "s3" {
-    bucket = "id-terraform-state"
-    key    = "github-ci/terraform.tfstate"
-    region = "fr-par"
-
-    # Root-specific prefix so this root's workspaces don't mix with others'.
+    bucket = "id-terraform-state20260612164136440800000001"
+    region = "eu-west-3"
     workspace_key_prefix = "github-ci"
-
-    endpoints = { s3 = "https://s3.fr-par.scw.cloud" }
-
-    # Disable the backend's AWS-only preflight checks (IMDS, STS account-id,
-    # region allowlist): Scaleway speaks the S3 API but isn't AWS itself.
-    skip_credentials_validation = true
-    skip_region_validation      = true
-    skip_requesting_account_id  = true
-    skip_metadata_api_check     = true
-    skip_s3_checksum            = true
+    key    = "terraform.tfstate"
+    encrypt = true
+    use_lockfile = true
   }
+
+  
 
   required_providers {
     scaleway = {
