@@ -23,7 +23,7 @@ jobs:
       fail-fast: false
       matrix:
         root:
-          - state-backend
+          - terraform-state-bucket
           - cluster/local
           - cluster/scaleway
           - github-ci
@@ -39,6 +39,7 @@ jobs:
 
       - name: Re-lock providers for both platforms and assert no drift
         run: |
+          terraform -chdir=${{ matrix.root }} init -backend=false
           terraform -chdir=${{ matrix.root }} providers lock \
             -platform=darwin_arm64 -platform=linux_amd64
           git diff --exit-code -- ${{ matrix.root }}/.terraform.lock.hcl
