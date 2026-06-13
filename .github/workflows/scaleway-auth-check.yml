@@ -13,36 +13,55 @@ on:
       - 'github-ci/**'
 
 permissions:
+  id-token: write
   contents: read
 
+
+env:
+  SCW_DEFAULT_PROJECT_ID: 
 jobs:
-  list-buckets:
+  build:
     runs-on: ubuntu-latest
-    # Reference a dedicated environment so secret usage is scoped to it
-    # (satisfies zizmor's secrets-outside-env audit, and gives a place to attach
-    # protection rules later). Auto-created on first run with no protection.
+    steps:
+      - uses: actions/checkout@v6
+      - uses: Infisical/secrets-action@v1.0.7
+        with:
+          method: "oidc"
+          identity-id: "7bd0594e-a8d2-48f9-aa26-da309bca7094"
+          env-slug: "staging"
+          secret-path: "ci"
+          project-slug: "platform-p-qc1"
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: "1.14.8"
+      - name: init
+        working-directory: cluster/scaleway
+        run: |
+          AWS_ACCESS_KEY_ID=$SCW_SECRET_KEY AWS_SECRET_ACCESS_KEY=$SCW_ACCESS_KEY terraform init
+        # Terraform "s3" backend, which is used by the infrastructure to store the state remotely, is primarily integrated with AWS, and not with Scaleway.
+        # This imply to have AWS credentials environments variable containing Scaleway credentials.
+        # See documentation here : https://registry.terraform.io/providers/scaleway/scaleway/latest/docs/guides/backend_guide#alternative-store-terraform-state-in-scaleway-object-storage-with-locking
+        # env:
+        #   AWS_ACCESS_KEY_ID: $SCW_SECRET_KEY
+        #   AWS_SECRET_ACCESS_KEY: $SCW_ACCESS_KEY
+  test: 
+    runs-on: ubuntu-latest
     environment: scaleway
     steps:
-      # Fail fast and clearly if the secrets aren't set, instead of letting the
-      # CLI emit a confusing auth error (or worse, appear to pass).
-      - name: Assert credentials are present
-        env:
-          SCW_ACCESS_KEY: ${{ secrets.SCW_ACCESS_KEY }}
-          SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
-        run: |
-          if [ -z "$SCW_ACCESS_KEY" ] || [ -z "$SCW_SECRET_KEY" ]; then
-            echo "::error::SCW_ACCESS_KEY and/or SCW_SECRET_KEY are not set. Run 'gh secret set' (see github-ci/README.md)."
-            exit 1
-          fi
-
-      - name: List fr-par Object Storage buckets
-        uses: scaleway/action-scw@2e34a1eb35cf3cac627f24643a101fea269cbd83 # v0.0.3
+      # - uses: actions/checkout@v6
+      # - uses: Infisical/secrets-action@v1.0.7
+      #   with:
+      #     method: "oidc"
+      #     identity-id: "7bd0594e-a8d2-48f9-aa26-da309bca7094"
+      #     env-slug: "staging"
+      #     secret-path: "ci"
+      #     project-slug: "platform-p-qc1"
+      - name: Use CLI
+        uses: scaleway/action-scw@v0
         with:
-          version: v2.41.0
+          version: v2.56.0
           access-key: ${{ secrets.SCW_ACCESS_KEY }}
           secret-key: ${{ secrets.SCW_SECRET_KEY }}
-          # Public identifiers (not credentials) the scw CLI wants even for a
-          # project-scoped key. Repo variables, not secrets.
           default-organization-id: ${{ vars.SCW_DEFAULT_ORGANIZATION_ID }}
           default-project-id: ${{ vars.SCW_DEFAULT_PROJECT_ID }}
           args: object bucket list region=fr-par
