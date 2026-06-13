@@ -2,8 +2,9 @@ name: Scaleway Auth Check
 
 # Validates the Scaleway IAM keys end to end: authenticate with each scoped API
 # key from GitHub secrets and list the fr-par Object Storage buckets.
-#   - list-buckets                 → github-ci/ read-only key (SCW_*)
-#   - list-state-bucket-terraform-ci → terraform-ci/ R/W key (TF_SCW_*)
+#   - list-buckets                   → github-ci/ read-only key (SCW_*), via scw CLI
+#   - list-state-bucket-terraform-ci → terraform-ci/ R/W key (TF_SCW_*), via aws CLI
+#     (the Terraform state backend is now AWS S3, Scaleway-hosted)
 # These are smoke tests, not part of any pipeline yet.
 #
 # Runs on PRs that touch a CI identity so it can be validated before merge.
@@ -50,35 +51,21 @@ jobs:
           default-project-id: ${{ vars.SCW_DEFAULT_PROJECT_ID }}
           args: object bucket list region=fr-par
 
-  # Validates the terraform-ci/ R/W key: authenticate with TF_SCW_* and list the
-  # fr-par Object Storage buckets (the Terraform state backend lives there), which
-  # exercises the ObjectStorageReadWrite grant before the Terraform CI workflows
-  # (#29) ever consume the key.
+  # Validates the terraform-ci/ R/W key against the AWS S3 backend. The Terraform
+  # state migrated from the Scaleway CLI to AWS S3 (Scaleway-hosted, S3-compatible),
+  # so we exercise the key the same way Terraform does: an `aws s3 ls` against the
+  # S3 endpoint. This confirms the ObjectStorageReadWrite grant works before the
+  # Terraform CI workflows (#29) ever consume the key. AWS CLI is pre-installed on
+  # ubuntu-latest, so no setup step is needed.
   list-state-bucket-terraform-ci:
     runs-on: ubuntu-latest
     # Same dedicated environment as above so secret usage stays scoped.
     environment: scaleway
     steps:
-      # Fail fast and clearly if the secrets aren't set, instead of letting the
-      # CLI emit a confusing auth error (or worse, appear to pass).
-      - name: Assert credentials are present
+      - name: List S3 buckets (Terraform state backend)
         env:
-          TF_SCW_ACCESS_KEY: ${{ secrets.TF_SCW_ACCESS_KEY }}
-          TF_SCW_SECRET_KEY: ${{ secrets.TF_SCW_SECRET_KEY }}
-        run: |
-          if [ -z "$TF_SCW_ACCESS_KEY" ] || [ -z "$TF_SCW_SECRET_KEY" ]; then
-            echo "::error::TF_SCW_ACCESS_KEY and/or TF_SCW_SECRET_KEY are not set. Run 'gh secret set' (see terraform-ci/README.md)."
-            exit 1
-          fi
-
-      - name: List fr-par Object Storage buckets (Terraform state backend)
-        uses: scaleway/action-scw@2e34a1eb35cf3cac627f24643a101fea269cbd83 # v0.0.3
-        with:
-          version: v2.41.0
-          access-key: ${{ secrets.TF_SCW_ACCESS_KEY }}
-          secret-key: ${{ secrets.TF_SCW_SECRET_KEY }}
-          # Public identifiers (not credentials) the scw CLI wants even for a
-          # project-scoped key. Repo variables, not secrets.
-          default-organization-id: ${{ vars.SCW_DEFAULT_ORGANIZATION_ID }}
-          default-project-id: ${{ vars.SCW_DEFAULT_PROJECT_ID }}
-          args: object bucket list region=fr-par
+          AWS_ACCESS_KEY_ID: ${{ secrets.TF_SCW_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.TF_SCW_SECRET_KEY }}
+          AWS_DEFAULT_REGION: eu-west-3
+          AWS_ENDPOINT_URL_S3: https://s3.fr-par.scw.cloud
+        run: aws s3 ls
