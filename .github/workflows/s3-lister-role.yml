@@ -25,10 +25,6 @@ jobs:
     permissions:
       id-token: write # mint the OIDC token exchanged for temporary AWS creds
       contents: read
-    env:
-      # Fed straight from the repo slug -> /tf-managed/IntegratedDynamic/infrastructure/.
-      # This is the path the CI grant requires every managed role to sit under.
-      TF_VAR_role_path: /tf-managed/${{ github.repository }}/
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -45,13 +41,9 @@ jobs:
           role-to-assume: ${{ vars.AWS_GITHUB_ACTIONS_ROLE_ARN }}
           aws-region: eu-west-3
 
-      - name: Terraform init
-        run: terraform -chdir=s3-lister-role init -input=false
-
-      - name: Terraform plan
-        run: terraform -chdir=s3-lister-role plan -input=false
-
-      # Only mutate AWS on a merge to main, never from a PR.
-      - name: Terraform apply
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: terraform -chdir=s3-lister-role apply -auto-approve -input=false
+      # Workspace + variables are derived from s3-lister-role/workspace/*.tfvars.
+      # plan on PRs; apply only on a merge to main.
+      - uses: ./.github/actions/terraform
+        with:
+          root: s3-lister-role
+          apply: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}

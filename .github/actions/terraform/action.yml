@@ -1,0 +1,54 @@
+name: Terraform (workspace-driven)
+description: >
+  Run terraform for a root, deriving the workspace(s) AND their variables from
+  the root's workspace/ folder. Each workspace/<name>.tfvars file means: the
+  terraform workspace is <name>, and that file holds <name>'s variable values.
+  One file -> one workspace; loop over all of them. This keeps workspace
+  selection declarative and version-controlled instead of relying on a local,
+  gitignored .terraform/environment.
+
+inputs:
+  root:
+    description: Path to the terraform root to run (passed to -chdir).
+    required: true
+  apply:
+    description: 'When "true", apply; otherwise plan only.'
+    required: false
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        ROOT: ${{ inputs.root }}
+        APPLY: ${{ inputs.apply }}
+      run: |
+        set -euo pipefail
+
+        # Discover the workspaces declared for this root.
+        shopt -s nullglob
+        files=("$ROOT"/workspace/*.tfvars)
+        if [ "${#files[@]}" -eq 0 ]; then
+          echo "::error::no workspace/*.tfvars found under '$ROOT' — nothing to run." \
+               "Create workspace/<name>.tfvars (filename = workspace name)."
+          exit 1
+        fi
+
+        terraform -chdir="$ROOT" init -input=false
+
+        for file in "${files[@]}"; do
+          ws="$(basename "$file" .tfvars)"
+          # -var-file is resolved relative to -chdir, hence "workspace/<ws>.tfvars".
+          var_file="workspace/${ws}.tfvars"
+
+          echo "::group::terraform workspace '$ws' ($([ "$APPLY" = "true" ] && echo apply || echo plan))"
+          terraform -chdir="$ROOT" workspace select -or-create "$ws"
+
+          if [ "$APPLY" = "true" ]; then
+            terraform -chdir="$ROOT" apply -auto-approve -input=false -var-file="$var_file"
+          else
+            terraform -chdir="$ROOT" plan -input=false -var-file="$var_file"
+          fi
+          echo "::endgroup::"
+        done
