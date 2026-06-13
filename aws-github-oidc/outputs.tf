@@ -4,5 +4,5 @@
 # README). Not a secret: an ARN is a public identifier.
 output "role_arn" {
   description = "ARN of the IAM role GitHub Actions assumes via OIDC (set as vars.AWS_GITHUB_ACTIONS_ROLE_ARN)."
-  value       = aws_iam_role.github_actions.arn
+  value       = module.iam_role_github_oidc.arn
 }
