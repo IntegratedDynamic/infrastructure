@@ -22,24 +22,71 @@ so those keep using a scoped, static Scaleway API key (see `terraform-ci/` /
 `github-ci/`). OIDC here covers **only** the AWS/S3 side. Revisit Scaleway OIDC
 if/when Scaleway ships it.
 
+All resources are built from the [`terraform-aws-modules/iam`](https://registry.terraform.io/modules/terraform-aws-modules/iam/aws/latest)
+modules (`iam-oidc-provider`, `iam-role`, `iam-policy`).
+
 ## What it creates
 
-- `aws_iam_openid_connect_provider.github_actions` — the GitHub Actions OIDC
-  provider (`https://token.actions.githubusercontent.com`, audience
-  `sts.amazonaws.com`). **One per AWS account** — if one already exists in the
-  account, import it rather than creating a duplicate.
-- `aws_iam_role.github_actions` (`github-actions-terraform`) — the role CI
-  assumes. Its **trust policy** is scoped to exactly this repo
-  (`repo:IntegratedDynamic/infrastructure:*`) with audience `sts.amazonaws.com`,
-  so only workflows in this repo can assume it.
-- `aws_iam_role_policy.github_actions_s3` (`terraform-state-s3`) — least
-  privilege on exactly the state bucket: `s3:ListBucket` +
-  `s3:GetBucketVersioning` on the bucket, and `s3:GetObject` / `s3:PutObject` /
-  `s3:DeleteObject` on its objects (the S3-native locking the backend uses with
-  `use_lockfile = true` rides on object R/W, so no DynamoDB table is needed).
+- **OIDC provider** (`iam-oidc-provider`) — the GitHub Actions OIDC issuer
+  (`https://token.actions.githubusercontent.com`, audience `sts.amazonaws.com`).
+  **One per AWS account** — if one already exists, import it rather than
+  duplicating.
+- **CI role** `github-actions-terraform` (`iam-role`, `enable_github_oidc`) — the
+  role CI assumes. Its **trust policy** is scoped to exactly this repo
+  (`repo:IntegratedDynamic/infrastructure:*`), so only this repo's workflows can
+  assume it. Permissions come from the CI grant below.
+- **CI grant** `tf-managed-ci` (`iam-policy`) — a tight policy: Terraform state
+  R/W on the state bucket only, plus **privilege-escalation-safe** IAM role
+  management (see next section). The S3-native lock (`use_lockfile = true`) rides
+  on object R/W, so no DynamoDB table is needed.
+- **Permissions boundary** `tf-managed-boundary` (`iam-policy`) — the ceiling
+  attached to every role the CI creates.
 
-`role_arn` is exposed as a Terraform output — it's a public identifier, not a
-secret.
+Outputs `role_arn`, `permissions_boundary_arn`, and `managed_path` are all public
+identifiers, not secrets.
+
+## Creating IAM roles from CI — the permissions-boundary contract
+
+The CI role can run `terraform apply` that **creates IAM roles**, without being
+able to escalate its own privileges. This rests on two mechanisms (full rationale
+inline in [`iam-ci.tf`](./iam-ci.tf)):
+
+1. **Permissions boundary** (`tf-managed-boundary`) caps every CI-created role:
+   effective perms = `intersection(attached policies, boundary)`. Even
+   `AdministratorAccess` on a child role is clamped. The boundary is
+   "admin minus a hardened deny-list" (no IAM users, no boundary tampering, no
+   org/account actions, can't edit itself).
+2. **A repo-scoped path** `/tf-managed/IntegratedDynamic/infrastructure/`. The CI
+   grant only allows `iam:CreateRole` / `Attach*` / `Put*` **when the request
+   stamps our boundary**, and only on ARNs under this path. `iam:PassRole` is
+   likewise path-scoped. A global backstop Deny refuses to touch any role whose
+   boundary isn't ours.
+
+> ⚠️ **Contract for every root that creates roles:** each `aws_iam_role` the CI
+> applies **must** set `permissions_boundary = <permissions_boundary_arn>` and
+> `path = <managed_path>`, or the apply is rejected. With the `iam-role` module
+> those are the `permissions_boundary` and `path` inputs. In CI, feed the path
+> automatically:
+>
+> ```yaml
+> env:
+>   TF_VAR_role_path: /tf-managed/${{ github.repository }}/
+> ```
+>
+> `${{ github.repository }}` resolves to `IntegratedDynamic/infrastructure`,
+> matching the pin exactly. IAM paths are **case-sensitive**.
+
+Verify the guardrails with the IAM policy simulator, e.g.:
+
+```bash
+ROLE=$(terraform -chdir=aws-github-oidc output -raw role_arn)
+B=$(terraform -chdir=aws-github-oidc output -raw permissions_boundary_arn)
+# CreateRole without our boundary -> explicitDeny
+aws iam simulate-principal-policy --policy-source-arn "$ROLE" \
+  --action-names iam:CreateRole \
+  --resource-arns "arn:aws:iam::503577850357:role/tf-managed/IntegratedDynamic/infrastructure/x" \
+  --query 'EvaluationResults[0].EvalDecision' --output text
+```
 
 ## Credentials
 
@@ -90,7 +137,7 @@ No `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` secrets are required.
 
 The role and provider live entirely in this root's state.
 
-- **Revoke CI access** — delete the role (or tighten/detach the inline policy);
+- **Revoke CI access** — delete the role (or detach the `tf-managed-ci` policy);
   any workflow assuming it then fails.
 - **Revoke everything** — `terraform destroy` removes the role and the OIDC
   provider. Mind that the OIDC provider is account-wide; only destroy it if no
