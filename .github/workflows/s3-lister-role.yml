@@ -1,9 +1,9 @@
 name: Apply s3-lister-role
 
 # Terraform GitOps for the s3-lister-role/ root: the role is created/synchronised
-# from the remote. On a PR we `plan` (proving the CI role can read state + plan);
-# on a push to main we `apply` it for real. Credentials come from the
-# aws-github-oidc CI role assumed via OIDC — no static AWS keys.
+# from the remote. Runs `apply` on every trigger (PRs included) so the CI role
+# actually creates the role via OIDC. Credentials come from the aws-github-oidc
+# CI role assumed via OIDC — no static AWS keys.
 
 on:
   push:
@@ -42,8 +42,9 @@ jobs:
           aws-region: eu-west-3
 
       # Workspace + variables are derived from s3-lister-role/workspace/*.tfvars.
-      # plan on PRs; apply only on a merge to main.
+      # apply on every run (PRs included) — the point of this PR is to watch the
+      # CI role actually create the role via OIDC, not just plan it.
       - uses: ./.github/actions/terraform
         with:
           root: s3-lister-role
-          apply: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          apply: "true"
