@@ -4,70 +4,46 @@
 # GitHub secrets for the S3 backend.
 #
 # This covers ONLY the AWS/S3 side. Scaleway resources (Kapsule, VPC) still use a
-# static Scaleway API key (terraform-ci/), because Scaleway IAM is not an OIDC
+# static Scaleway API key (github-ci/), because Scaleway IAM is not an OIDC
 # relying party — see README.md.
 
 # OIDC identity provider for GitHub Actions. One per AWS account; this is the
-# canonical GitHub OIDC issuer + the STS audience. The thumbprints are GitHub's
-# CA chain leaves; AWS no longer strictly verifies them for this issuer, but they
-# are kept for compatibility. Idempotent: a single provider per account.
-resource "aws_iam_openid_connect_provider" "github_actions" {
-  url            = "https://token.actions.githubusercontent.com"
-  client_id_list = ["sts.amazonaws.com"]
-  thumbprint_list = ["6938fd4d98bab03faadb97b34396831e3780aea1",
-  "1c58a3a8518e8759bf075b76b750d4f2df264fcd"]
+# canonical GitHub OIDC issuer. The audience (sts.amazonaws.com) and GitHub's
+# thumbprints are defaulted by the module.
+module "iam_oidc_provider" {
+  source  = "terraform-aws-modules/iam/aws//modules/iam-oidc-provider"
+  version = "6.6.1"
+
+  url = "https://token.actions.githubusercontent.com"
+
+  tags = {
+    Terraform   = "true"
+    Environment = "dev"
+  }
 }
 
-resource "aws_iam_role" "github_actions" {
+# Role GitHub Actions assumes via OIDC. Trust is scoped to this repo only
+# (repo:<org>/<repo>:* — the module prefixes "repo:" itself). S3 read access is
+# account-wide for now (intentional; tighten to the state bucket later).
+module "iam_role_github_oidc" {
+  source  = "terraform-aws-modules/iam/aws//modules/iam-role"
+  version = "6.6.1"
+
   name               = "github-actions-terraform"
-  description        = "Assumed by GitHub Actions (IntegratedDynamic/infrastructure) via OIDC for Terraform S3 state access."
-  assume_role_policy = data.aws_iam_policy_document.github_actions_trust.json
-}
+  description        = "Assumed by GitHub Actions (${var.github_org}/${var.github_repo}) via OIDC for Terraform S3 state access."
+  enable_github_oidc = true
 
-# Trust policy — only workflows in this specific repo (any branch/PR/tag) may
-# assume the role, and only with the sts.amazonaws.com audience.
-data "aws_iam_policy_document" "github_actions_trust" {
-  statement {
-    effect  = "Allow"
-    actions = ["sts:AssumeRoleWithWebIdentity"]
+  oidc_wildcard_subjects = ["${var.github_org}/${var.github_repo}:*"]
 
-    principals {
-      type        = "Federated"
-      identifiers = [aws_iam_openid_connect_provider.github_actions.arn]
-    }
-
-    condition {
-      test     = "StringLike"
-      variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${var.github_org}/${var.github_repo}:*"]
-    }
-
-    condition {
-      test     = "StringEquals"
-      variable = "token.actions.githubusercontent.com:aud"
-      values   = ["sts.amazonaws.com"]
-    }
-  }
-}
-
-# Least privilege: read/write/lock on exactly the Terraform state bucket, nothing
-# else. ListBucket + GetBucketVersioning on the bucket; object R/W/D on its keys.
-resource "aws_iam_role_policy" "github_actions_s3" {
-  name   = "terraform-state-s3"
-  role   = aws_iam_role.github_actions.id
-  policy = data.aws_iam_policy_document.github_actions_s3.json
-}
-
-data "aws_iam_policy_document" "github_actions_s3" {
-  statement {
-    effect    = "Allow"
-    actions   = ["s3:ListBucket", "s3:GetBucketVersioning"]
-    resources = [var.state_bucket_arn]
+  policies = {
+    S3ReadOnly = "arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess"
   }
 
-  statement {
-    effect    = "Allow"
-    actions   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
-    resources = ["${var.state_bucket_arn}/*"]
+  tags = {
+    Terraform   = "true"
+    Environment = "dev"
   }
+
+  # The trust policy references the OIDC provider by ARN; it must exist first.
+  depends_on = [module.iam_oidc_provider]
 }
