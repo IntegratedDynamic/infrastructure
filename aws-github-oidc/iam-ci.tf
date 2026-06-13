@@ -259,7 +259,7 @@ module "ci_policy" {
 
   name        = "tf-managed-ci"
   path        = "/"
-  description = "Grant for the GitHub Actions CI role: Terraform state R/W + privilege-escalation-safe IAM management under ${local.managed_path}."
+  description = "Grant for the GitHub Actions CI role: Terraform state R/W + Ability to create role under ${local.managed_path} + privilege-escalation-safe IAM management under ${local.managed_path}."
   policy      = data.aws_iam_policy_document.ci.json
 
   tags = {
