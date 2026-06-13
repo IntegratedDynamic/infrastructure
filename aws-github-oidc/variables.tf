@@ -33,3 +33,13 @@ variable "state_bucket_arn" {
   type        = string
   default     = "arn:aws:s3:::id-terraform-state20260612164136440800000001"
 }
+
+# Name of the permissions-boundary managed policy. Kept as a stable, fixed name
+# (not a generated one) so its ARN can be constructed deterministically — the
+# boundary references its own ARN in a Deny, and the CI grant references it in
+# every guardrail condition. See iam-ci.tf.
+variable "boundary_name" {
+  description = "Name of the permissions-boundary policy capping all CI-created roles."
+  type        = string
+  default     = "tf-managed-boundary"
+}

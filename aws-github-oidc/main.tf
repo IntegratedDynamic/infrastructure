@@ -23,20 +23,26 @@ module "iam_oidc_provider" {
 }
 
 # Role GitHub Actions assumes via OIDC. Trust is scoped to this repo only
-# (repo:<org>/<repo>:* — the module prefixes "repo:" itself). S3 read access is
-# account-wide for now (intentional; tighten to the state bucket later).
+# (repo:<org>/<repo>:* — the module prefixes "repo:" itself). Its permissions
+# come from the tight, escalation-safe CI grant (see iam-ci.tf): Terraform state
+# R/W + IAM role management bounded under the managed path.
+#
+# Note: this role deliberately carries NO permissions boundary. The boundary
+# Denies PutRolePermissionsBoundary, which the CI role itself needs in order to
+# stamp the boundary onto the roles it creates. The CI role is constrained by
+# module.ci_policy instead. See iam-ci.tf for the full rationale.
 module "iam_role_github_oidc" {
   source  = "terraform-aws-modules/iam/aws//modules/iam-role"
   version = "6.6.1"
 
   name               = "github-actions-terraform"
-  description        = "Assumed by GitHub Actions (${var.github_org}/${var.github_repo}) via OIDC for Terraform S3 state access."
+  description        = "Assumed by GitHub Actions (${var.github_org}/${var.github_repo}) via OIDC: Terraform state + bounded IAM role creation."
   enable_github_oidc = true
 
   oidc_wildcard_subjects = ["${var.github_org}/${var.github_repo}:*"]
 
   policies = {
-    S3ReadOnly = "arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess"
+    tf-managed-ci = module.ci_policy.arn
   }
 
   tags = {

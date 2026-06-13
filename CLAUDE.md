@@ -52,7 +52,8 @@ terraform-state-bucket/   # shared AWS S3 bucket holding every root's remote sta
 cluster/
   local/      # minikube — local dev and debugging. Using local backend (e.g. local files)
   scaleway/   # Scaleway Kapsule cluster + ArgoCD bootstrap (homelab; WIP, not yet wired into mise)
-github-ci/    # Scaleway IAM identity GitHub Actions authenticates with
+github-ci/        # Scaleway IAM identity GitHub Actions authenticates with
+aws-github-oidc/  # keyless GitHub-OIDC -> AWS role for CI (Terraform state + bounded IAM)
 ```
 
 Otherwise, this repo, for now, is an agregate of terraform root modules without specific structure yet.
@@ -77,6 +78,12 @@ Same bootstrap pattern as `local/`, but with the Kapsule cluster + node pool (`D
 ### `github-ci/`
 
 Standalone root (not under `cluster/` — provisions no cluster) that stands up the **Scaleway IAM identity GitHub Actions uses to authenticate to Scaleway**: a dedicated IAM application + a least-privilege policy (`ObjectStorageReadOnly`, project-scoped) + an API key, with the key written into Infisical. GitHub secrets (`SCW_ACCESS_KEY` / `SCW_SECRET_KEY`) are still set manually via `gh secret set`. Keyless GitHub-OIDC → Scaleway is a non-goal — blocked upstream (Scaleway IAM is not an OIDC relying party). See `github-ci/README.md`.
+
+### `aws-github-oidc/`
+
+Standalone root (provisions no cluster) for **keyless GitHub-OIDC → AWS** CI access, built on the `terraform-aws-modules/iam` modules: an OIDC provider + a role (`github-actions-terraform`) GitHub Actions assumes via short-lived tokens (trust scoped to `repo:IntegratedDynamic/infrastructure:*`). The role grant (`tf-managed-ci`) gives Terraform-state R/W on the state bucket **plus privilege-escalation-safe IAM role management**. Applied locally by an admin; `role_arn` is wired to CI via `vars.AWS_GITHUB_ACTIONS_ROLE_ARN`. See `aws-github-oidc/README.md`.
+
+**Permissions-boundary contract (repo-wide):** any `aws_iam_role` that the CI applies **must** set `permissions_boundary` (= the `permissions_boundary_arn` output, `tf-managed-boundary`) and `path` (= the `managed_path` output, `/tf-managed/<org>/<repo>/`), or the apply is rejected by the CI grant's conditions. In CI, feed the path via `TF_VAR_role_path=/tf-managed/${{ github.repository }}/`. The boundary caps every CI-created role to "admin minus a hardened deny-list" so a role-creating role can't escalate. Rationale is documented inline in `aws-github-oidc/iam-ci.tf`.
 
 ## Conventions
 
