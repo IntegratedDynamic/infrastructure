@@ -1,16 +1,20 @@
 name: Scaleway Auth Check
 
-# Validates the github-ci/ Scaleway IAM key end to end: authenticate with the
-# scoped API key from GitHub secrets and list the fr-par Object Storage buckets.
-# This is a smoke test, not part of any pipeline yet.
+# Validates the Scaleway IAM keys end to end: authenticate with each scoped API
+# key from GitHub secrets and list the fr-par Object Storage buckets.
+#   - list-buckets                   → github-ci/ read-only key (SCW_*), via scw CLI
+#   - list-state-bucket-terraform-ci → terraform-ci/ R/W key (TF_SCW_*), via aws CLI
+#     (the Terraform state backend is now AWS S3, Scaleway-hosted)
+# These are smoke tests, not part of any pipeline yet.
 #
-# Runs on PRs that touch the CI identity so it can be validated before merge.
+# Runs on PRs that touch a CI identity so it can be validated before merge.
 
 on:
   pull_request:
     paths:
       - '.github/workflows/scaleway-auth-check.yml'
       - 'github-ci/**'
+      - 'terraform-ci/**'
 
 permissions:
   contents: read
@@ -46,3 +50,22 @@ jobs:
           default-organization-id: ${{ vars.SCW_DEFAULT_ORGANIZATION_ID }}
           default-project-id: ${{ vars.SCW_DEFAULT_PROJECT_ID }}
           args: object bucket list region=fr-par
+
+  # Validates the terraform-ci/ R/W key against the AWS S3 backend. The Terraform
+  # state migrated from the Scaleway CLI to AWS S3 (Scaleway-hosted, S3-compatible),
+  # so we exercise the key the same way Terraform does: an `aws s3 ls` against the
+  # S3 endpoint. This confirms the ObjectStorageReadWrite grant works before the
+  # Terraform CI workflows (#29) ever consume the key. AWS CLI is pre-installed on
+  # ubuntu-latest, so no setup step is needed.
+  list-state-bucket-terraform-ci:
+    runs-on: ubuntu-latest
+    # Same dedicated environment as above so secret usage stays scoped.
+    environment: scaleway
+    steps:
+      - name: List S3 buckets (Terraform state backend)
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.TF_SCW_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.TF_SCW_SECRET_KEY }}
+          AWS_DEFAULT_REGION: eu-west-3
+          AWS_ENDPOINT_URL_S3: https://s3.fr-par.scw.cloud
+        run: aws s3 ls

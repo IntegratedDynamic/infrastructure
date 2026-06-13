@@ -103,6 +103,23 @@ description = "terraform apply on the github-ci root (provisions the Scaleway CI
 dir = "github-ci"
 run = "terraform apply"
 
+# ── Terraform CI identity (terraform-ci/) ────────────────────────────────────
+
+[tasks.terraform-ci-init]
+description = "terraform init on the terraform-ci root"
+dir = "terraform-ci"
+run = "terraform init"
+
+[tasks.terraform-ci-plan]
+description = "terraform plan on the terraform-ci root"
+dir = "terraform-ci"
+run = "terraform init && terraform plan"
+
+[tasks.terraform-ci-apply]
+description = "terraform apply on the terraform-ci root (provisions the Scaleway Terraform CI IAM key)"
+dir = "terraform-ci"
+run = "terraform apply"
+
 # ── Provider locks ───────────────────────────────────────────────────────────
 
 [tasks.lock]
@@ -112,4 +129,5 @@ terraform -chdir=terraform-state-bucket providers lock -platform=darwin_arm64 -p
 terraform -chdir=cluster/local          providers lock -platform=darwin_arm64 -platform=linux_amd64
 terraform -chdir=cluster/scaleway       providers lock -platform=darwin_arm64 -platform=linux_amd64
 terraform -chdir=github-ci              providers lock -platform=darwin_arm64 -platform=linux_amd64
+terraform -chdir=terraform-ci           providers lock -platform=darwin_arm64 -platform=linux_amd64
 """
