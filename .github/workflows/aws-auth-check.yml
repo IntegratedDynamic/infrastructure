@@ -39,5 +39,8 @@ jobs:
           role-to-assume: ${{ vars.AWS_GITHUB_ACTIONS_ROLE_ARN }}
           aws-region: eu-west-3
 
-      - name: List S3 buckets
-        run: aws s3 ls
+      # List the state bucket specifically (s3:ListBucket on that bucket) rather
+      # than `aws s3 ls` with no arg, which needs account-wide s3:ListAllMyBuckets
+      # — the CI grant is intentionally scoped to the state bucket only.
+      - name: List the Terraform state bucket
+        run: aws s3 ls s3://id-terraform-state20260612164136440800000001
