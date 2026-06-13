@@ -103,6 +103,23 @@ description = "terraform apply on the github-ci root (provisions the Scaleway CI
 dir = "github-ci"
 run = "terraform apply"
 
+# ── AWS GitHub OIDC identity (aws-github-oidc/) ──────────────────────────────
+
+[tasks.aws-github-oidc-init]
+description = "terraform init on the aws-github-oidc root"
+dir = "aws-github-oidc"
+run = "terraform init"
+
+[tasks.aws-github-oidc-plan]
+description = "terraform plan on the aws-github-oidc root"
+dir = "aws-github-oidc"
+run = "terraform init && terraform plan"
+
+[tasks.aws-github-oidc-apply]
+description = "terraform apply on the aws-github-oidc root (provisions the GitHub OIDC provider + IAM role)"
+dir = "aws-github-oidc"
+run = "terraform apply"
+
 # ── Provider locks ───────────────────────────────────────────────────────────
 
 [tasks.lock]
@@ -112,4 +129,5 @@ terraform -chdir=terraform-state-bucket providers lock -platform=darwin_arm64 -p
 terraform -chdir=cluster/local          providers lock -platform=darwin_arm64 -platform=linux_amd64
 terraform -chdir=cluster/scaleway       providers lock -platform=darwin_arm64 -platform=linux_amd64
 terraform -chdir=github-ci              providers lock -platform=darwin_arm64 -platform=linux_amd64
+terraform -chdir=aws-github-oidc        providers lock -platform=darwin_arm64 -platform=linux_amd64
 """
