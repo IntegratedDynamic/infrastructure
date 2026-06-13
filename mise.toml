@@ -130,4 +130,5 @@ terraform -chdir=cluster/local          providers lock -platform=darwin_arm64 -p
 terraform -chdir=cluster/scaleway       providers lock -platform=darwin_arm64 -platform=linux_amd64
 terraform -chdir=github-ci              providers lock -platform=darwin_arm64 -platform=linux_amd64
 terraform -chdir=aws-github-oidc        providers lock -platform=darwin_arm64 -platform=linux_amd64
+terraform -chdir=s3-lister-role         providers lock -platform=darwin_arm64 -platform=linux_amd64
 """
