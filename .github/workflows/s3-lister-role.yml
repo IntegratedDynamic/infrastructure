@@ -1,0 +1,57 @@
+name: Apply s3-lister-role
+
+# Terraform GitOps for the s3-lister-role/ root: the role is created/synchronised
+# from the remote. On a PR we `plan` (proving the CI role can read state + plan);
+# on a push to main we `apply` it for real. Credentials come from the
+# aws-github-oidc CI role assumed via OIDC — no static AWS keys.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 's3-lister-role/**'
+      - '.github/workflows/s3-lister-role.yml'
+  pull_request:
+    paths:
+      - 's3-lister-role/**'
+      - '.github/workflows/s3-lister-role.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # mint the OIDC token exchanged for temporary AWS creds
+      contents: read
+    env:
+      # Fed straight from the repo slug -> /tf-managed/IntegratedDynamic/infrastructure/.
+      # This is the path the CI grant requires every managed role to sit under.
+      TF_VAR_role_path: /tf-managed/${{ github.repository }}/
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with:
+          # Keep in sync with mise.toml [tools] terraform version.
+          terraform_version: "1.14"
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+        with:
+          role-to-assume: ${{ vars.AWS_GITHUB_ACTIONS_ROLE_ARN }}
+          aws-region: eu-west-3
+
+      - name: Terraform init
+        run: terraform -chdir=s3-lister-role init -input=false
+
+      - name: Terraform plan
+        run: terraform -chdir=s3-lister-role plan -input=false
+
+      # Only mutate AWS on a merge to main, never from a PR.
+      - name: Terraform apply
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: terraform -chdir=s3-lister-role apply -auto-approve -input=false

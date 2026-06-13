@@ -17,7 +17,7 @@ mise run dev             # Full local env: start minikube + terraform init + app
 mise run reset           # Destroy minikube cluster
 
 # Provider lock files
-mise run lock            # Re-generate all 4 roots' .terraform.lock.hcl for darwin_arm64 + linux_amd64
+mise run lock            # Re-generate every root's .terraform.lock.hcl for darwin_arm64 + linux_amd64
 
 # Linting
 actionlint .github/workflows/*.yml   # Lint GitHub Actions workflows (also runs as pre-push hook)
@@ -38,6 +38,8 @@ terraform -chdir=terraform-state-bucket providers lock -platform=darwin_arm64 -p
 terraform -chdir=cluster/local          providers lock -platform=darwin_arm64 -platform=linux_amd64
 terraform -chdir=cluster/scaleway       providers lock -platform=darwin_arm64 -platform=linux_amd64
 terraform -chdir=github-ci              providers lock -platform=darwin_arm64 -platform=linux_amd64
+terraform -chdir=aws-github-oidc        providers lock -platform=darwin_arm64 -platform=linux_amd64
+terraform -chdir=s3-lister-role         providers lock -platform=darwin_arm64 -platform=linux_amd64
 ```
 
 Commit the updated lock files alongside the version change.
