@@ -1,0 +1,50 @@
+name: Apply s3-lister-role
+
+# Terraform GitOps for the s3-lister-role/ root: the role is created/synchronised
+# from the remote. Runs `apply` on every trigger (PRs included) so the CI role
+# actually creates the role via OIDC. Credentials come from the aws-github-oidc
+# CI role assumed via OIDC — no static AWS keys.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 's3-lister-role/**'
+      - '.github/workflows/s3-lister-role.yml'
+  pull_request:
+    paths:
+      - 's3-lister-role/**'
+      - '.github/workflows/s3-lister-role.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # mint the OIDC token exchanged for temporary AWS creds
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with:
+          # Keep in sync with mise.toml [tools] terraform version.
+          terraform_version: "1.14"
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+        with:
+          role-to-assume: ${{ vars.AWS_GITHUB_ACTIONS_ROLE_ARN }}
+          aws-region: eu-west-3
+
+      # Workspace + variables are derived from s3-lister-role/workspace/*.tfvars.
+      # apply on every run (PRs included) — the point of this PR is to watch the
+      # CI role actually create the role via OIDC, not just plan it.
+      - uses: ./.github/actions/terraform
+        with:
+          root: s3-lister-role
+          apply: "true"

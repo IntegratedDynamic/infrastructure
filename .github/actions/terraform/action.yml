@@ -1,0 +1,33 @@
+name: Terraform (workspace-driven)
+description: >
+  Run terraform for a root. The workspace and its variables come from the root's
+  workspace/<name>.tfvars: the filename is the terraform workspace, the contents
+  are its variables. Keeps workspace selection declarative and version-controlled
+  (not a local, gitignored .terraform/environment).
+
+inputs:
+  root:
+    description: Path to the terraform root (passed to -chdir).
+    required: true
+  apply:
+    description: 'When "true", apply; otherwise plan.'
+    required: false
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        ROOT: ${{ inputs.root }}
+        APPLY: ${{ inputs.apply }}
+      run: |
+        set -euo pipefail
+        ws="$(basename "$ROOT"/workspace/*.tfvars .tfvars)"
+        terraform -chdir="$ROOT" init -input=false
+        terraform -chdir="$ROOT" workspace select -or-create "$ws"
+        if [ "$APPLY" = "true" ]; then
+          terraform -chdir="$ROOT" apply -auto-approve -input=false -var-file="workspace/$ws.tfvars"
+        else
+          terraform -chdir="$ROOT" plan -input=false -var-file="workspace/$ws.tfvars"
+        fi

@@ -17,7 +17,7 @@ mise run dev             # Full local env: start minikube + terraform init + app
 mise run reset           # Destroy minikube cluster
 
 # Provider lock files
-mise run lock            # Re-generate all 4 roots' .terraform.lock.hcl for darwin_arm64 + linux_amd64
+mise run lock            # Re-generate every root's .terraform.lock.hcl for darwin_arm64 + linux_amd64
 
 # Linting
 actionlint .github/workflows/*.yml   # Lint GitHub Actions workflows (also runs as pre-push hook)
@@ -38,6 +38,8 @@ terraform -chdir=terraform-state-bucket providers lock -platform=darwin_arm64 -p
 terraform -chdir=cluster/local          providers lock -platform=darwin_arm64 -platform=linux_amd64
 terraform -chdir=cluster/scaleway       providers lock -platform=darwin_arm64 -platform=linux_amd64
 terraform -chdir=github-ci              providers lock -platform=darwin_arm64 -platform=linux_amd64
+terraform -chdir=aws-github-oidc        providers lock -platform=darwin_arm64 -platform=linux_amd64
+terraform -chdir=s3-lister-role         providers lock -platform=darwin_arm64 -platform=linux_amd64
 ```
 
 Commit the updated lock files alongside the version change.
@@ -83,7 +85,7 @@ Standalone root (not under `cluster/` — provisions no cluster) that stands up 
 
 Standalone root (provisions no cluster) for **keyless GitHub-OIDC → AWS** CI access, built on the `terraform-aws-modules/iam` modules: an OIDC provider + a role (`github-actions-terraform`) GitHub Actions assumes via short-lived tokens (trust scoped to `repo:IntegratedDynamic/infrastructure:*`). The role grant (`tf-managed-ci`) gives Terraform-state R/W on the state bucket **plus privilege-escalation-safe IAM role management**. Applied locally by an admin; `role_arn` is wired to CI via `vars.AWS_GITHUB_ACTIONS_ROLE_ARN`. See `aws-github-oidc/README.md`.
 
-**Permissions-boundary contract (repo-wide):** any `aws_iam_role` that the CI applies **must** set `permissions_boundary` (= the `permissions_boundary_arn` output, `tf-managed-boundary`) and `path` (= the `managed_path` output, `/tf-managed/<org>/<repo>/`), or the apply is rejected by the CI grant's conditions. In CI, feed the path via `TF_VAR_role_path=/tf-managed/${{ github.repository }}/`. The boundary caps every CI-created role to "admin minus a hardened deny-list" so a role-creating role can't escalate. Rationale is documented inline in `aws-github-oidc/iam-ci.tf`.
+**Permissions-boundary contract (repo-wide):** any `aws_iam_role` that the CI applies **must** set `permissions_boundary` (= the `permissions_boundary_arn` output, `tf-managed-boundary`) and `path` (= the `managed_path` output, `/tf-managed/<org>/<repo>/`), or the apply is rejected by the CI grant's conditions. Set both via the root's `workspace/<name>.tfvars` (see the Terraform workspaces convention below). The boundary caps every CI-created role to "admin minus a hardened deny-list" so a role-creating role can't escalate. Rationale is documented inline in `aws-github-oidc/iam-ci.tf`.
 
 ## Conventions
 
@@ -92,3 +94,5 @@ Standalone root (provisions no cluster) for **keyless GitHub-OIDC → AWS** CI a
 **Commits**: Conventional Commits — `<type>[scope]: <description>`. Types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `chore`, `ci`.
 
 **PRs**: After each commit + push on a branch, create a draft PR if none exists. Title: `<type>: description`. Body: context, changes, linked issues (`Closes #123`), test instructions. Use [Conventional Comments](https://conventionalcomments.org/) in reviews (`praise`, `nitpick`, `suggestion`, `issue`, `todo`, `question`, `thought`).
+
+**Terraform workspaces**: a root that runs through CI declares its workspaces declaratively in a `workspace/` folder — one `workspace/<name>.tfvars` per workspace. The **filename is the terraform workspace name** (so state lands at `<workspace_key_prefix>/<name>/<key>`, isolated per root) and the **file contents are that workspace's variable values**. The reusable composite action `.github/actions/terraform` loops over these files, doing `workspace select -or-create <name>` + `plan`/`apply -var-file=workspace/<name>.tfvars`. This replaces the old reliance on a local, gitignored `.terraform/environment` (invisible to CI — a `default`-workspace run collides on the state key). `s3-lister-role/` is the reference example.
