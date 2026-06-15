@@ -38,3 +38,14 @@ variable "org_id" {
   type        = string
   default     = "o-f9lb1e5es9"
 }
+
+# GitHub OIDC subjects allowed to assume the role via web identity. Values are
+# org/repo globs; the iam-role module prepends `repo:` and matches the token
+# `sub` claim with StringLike. The org-wide default (`<org>/*`) lets ANY repo on
+# ANY branch in the GitHub org assume the role keylessly — the GitHub-org
+# analogue of the aws:PrincipalOrgID trust. Tighten to specific repos if needed.
+variable "github_oidc_subjects" {
+  description = "GitHub OIDC sub globs (org/repo, module prepends `repo:`) allowed to assume the role."
+  type        = list(string)
+  default     = ["IntegratedDynamic/*"]
+}
