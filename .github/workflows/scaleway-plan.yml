@@ -46,6 +46,12 @@ jobs:
       SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
       SCW_DEFAULT_ORGANIZATION_ID: ${{ vars.SCW_DEFAULT_ORGANIZATION_ID }}
       SCW_DEFAULT_PROJECT_ID: ${{ vars.SCW_DEFAULT_PROJECT_ID }}
+      # The infisical provider authenticates eagerly even with bootstrap_argocd
+      # off (the gated data source still pulls the provider into the graph), so
+      # it needs valid machine-identity creds just to configure. With
+      # bootstrap_argocd=false no secret is actually read.
+      TF_VAR_infisical_client_id: ${{ secrets.INFISICAL_CLIENT_ID }}
+      TF_VAR_infisical_client_secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
     steps:
       # Fail fast and clearly if creds/vars aren't set, instead of letting the
       # tooling emit a confusing assume-role or provider auth error.
