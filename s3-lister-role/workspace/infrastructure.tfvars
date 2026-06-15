@@ -15,3 +15,6 @@ permissions_boundary_arn = "arn:aws:iam::503577850357:policy/tf-managed-boundary
 
 # Anyone in this AWS Organization may assume the role.
 org_id = "o-f9lb1e5es9"
+
+# Any repo in this GitHub org may assume the role directly via OIDC web identity.
+github_oidc_subjects = ["IntegratedDynamic/*"]
