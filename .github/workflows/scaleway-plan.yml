@@ -1,0 +1,86 @@
+name: Scaleway Plan (via s3-lister role)
+
+# Plans cluster/scaleway using the org-wide s3-lister IAM role, assumed DIRECTLY
+# via GitHub OIDC — no static AWS keys, and no routing through the bootstrap CI
+# role (that role exists only to create/update roles, not to power pipelines).
+#
+# The s3-lister role is READ-ONLY on S3, which shapes the whole job:
+#   - state is read but never written        -> plan only, never apply
+#   - the S3-native lock can't be written     -> -lock=false
+#   - the workspace already exists in S3       -> select it via TF_WORKSPACE;
+#     never `terraform workspace new` (a write the read-only role can't do)
+#   - bootstrap_argocd=false                    -> skip the Infisical data source
+#     and the in-cluster helm/kubernetes providers (no cluster, no secrets in CI)
+#
+# Scaleway API access for the refresh still uses the static SCW key from secrets
+# (Scaleway is not an OIDC relying party) — same creds as scaleway-auth-check.yml.
+
+on:
+  pull_request:
+    paths:
+      - 'cluster/scaleway/**'
+      - 's3-lister-role/**'
+      - '.github/workflows/scaleway-plan.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    # Scope SCW secret usage to a dedicated environment (matches
+    # scaleway-auth-check.yml; satisfies zizmor's secrets-outside-env audit).
+    environment: scaleway
+    permissions:
+      id-token: write # mint the OIDC token exchanged for temporary AWS creds
+      contents: read
+    env:
+      # Select the existing remote workspace without `workspace new` (a write the
+      # read-only role can't perform). The default workspace would collide with
+      # the state bucket's own state at the bucket root.
+      TF_WORKSPACE: infrastructure
+      # Scaleway provider creds for the refresh. Keys are secrets; the public
+      # org/project IDs are repo variables (not secrets).
+      SCW_ACCESS_KEY: ${{ secrets.SCW_ACCESS_KEY }}
+      SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
+      SCW_DEFAULT_ORGANIZATION_ID: ${{ vars.SCW_DEFAULT_ORGANIZATION_ID }}
+      SCW_DEFAULT_PROJECT_ID: ${{ vars.SCW_DEFAULT_PROJECT_ID }}
+    steps:
+      # Fail fast and clearly if creds/vars aren't set, instead of letting the
+      # tooling emit a confusing assume-role or provider auth error.
+      - name: Assert credentials are present
+        env:
+          ROLE_ARN: ${{ vars.AWS_S3_LISTER_ROLE_ARN }}
+        run: |
+          if [ -z "$ROLE_ARN" ]; then
+            echo "::error::vars.AWS_S3_LISTER_ROLE_ARN is not set. Set it to the s3-lister role ARN (see s3-lister-role/README.md)."
+            exit 1
+          fi
+          if [ -z "$SCW_ACCESS_KEY" ] || [ -z "$SCW_SECRET_KEY" ]; then
+            echo "::error::SCW_ACCESS_KEY and/or SCW_SECRET_KEY are not set (see github-ci/README.md)."
+            exit 1
+          fi
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with:
+          # Keep in sync with mise.toml [tools] terraform version.
+          terraform_version: "1.14"
+
+      # Direct OIDC -> s3-lister. Works because the role's trust now includes a
+      # GitHub-OIDC statement scoped org-wide (repo:IntegratedDynamic/*).
+      - name: Assume the s3-lister role via OIDC
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+        with:
+          role-to-assume: ${{ vars.AWS_S3_LISTER_ROLE_ARN }}
+          aws-region: eu-west-3
+
+      - name: Terraform plan (read-only role -> no lock, no apply)
+        run: |
+          terraform -chdir=cluster/scaleway init -input=false
+          terraform -chdir=cluster/scaleway plan \
+            -lock=false -input=false -var bootstrap_argocd=false
