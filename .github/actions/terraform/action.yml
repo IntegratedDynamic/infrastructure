@@ -1,33 +1,65 @@
-name: Terraform (workspace-driven)
+name: Terraform plan/apply
 description: >
-  Run terraform for a root. The workspace and its variables come from the root's
-  workspace/<name>.tfvars: the filename is the terraform workspace, the contents
-  are its variables. Keeps workspace selection declarative and version-controlled
-  (not a local, gitignored .terraform/environment).
+  Set up Terraform, assume an AWS role via OIDC, then run
+  init → workspace select → plan (or apply).
+  The repository must already be checked out before calling this action.
+  Extra provider credentials (SCW_*, INFISICAL_AUTH_JWT…) must be set in the calling job env.
 
 inputs:
   root:
-    description: Path to the terraform root (passed to -chdir).
+    description: Path to the Terraform root (passed to -chdir).
     required: true
+  tfvars-file:
+    description: >
+      Filename of the .tfvars under env/ (e.g. 02-cluster-staging.tfvars).
+      Workspace name is derived by stripping the .tfvars extension.
+    required: true
+  aws-role-arn:
+    description: ARN of the IAM role to assume via OIDC.
+    required: true
+  aws-region:
+    description: AWS region for the assumed role.
+    required: false
+    default: eu-west-3
   apply:
-    description: 'When "true", apply; otherwise plan.'
+    description: 'When "true", terraform apply; otherwise terraform plan.'
     required: false
     default: "false"
+  lock:
+    description: 'When "false", pass -lock=false (for read-only roles that cannot acquire the S3 state lock).'
+    required: false
+    default: "true"
 
 runs:
   using: composite
   steps:
-    - shell: bash
+    - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+      with:
+        # Keep in sync with mise.toml [tools] terraform version.
+        terraform_version: "1.14"
+
+    - name: Assume AWS role via OIDC
+      uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+      with:
+        role-to-assume: ${{ inputs.aws-role-arn }}
+        aws-region: ${{ inputs.aws-region }}
+
+    - name: Terraform plan/apply
+      shell: bash
       env:
         ROOT: ${{ inputs.root }}
+        TFVARS: ${{ inputs.tfvars-file }}
         APPLY: ${{ inputs.apply }}
+        LOCK: ${{ inputs.lock }}
       run: |
         set -euo pipefail
-        ws="$(basename "$ROOT"/workspace/*.tfvars .tfvars)"
+        ws="${TFVARS%.tfvars}"
         terraform -chdir="$ROOT" init -input=false
-        terraform -chdir="$ROOT" workspace select -or-create "$ws"
+        terraform -chdir="$ROOT" workspace select "$ws"
         if [ "$APPLY" = "true" ]; then
-          terraform -chdir="$ROOT" apply -auto-approve -input=false -var-file="workspace/$ws.tfvars"
+          terraform -chdir="$ROOT" apply -auto-approve -input=false -var-file="env/${TFVARS}"
+        elif [ "$LOCK" = "false" ]; then
+          terraform -chdir="$ROOT" plan -input=false -lock=false -var-file="env/${TFVARS}"
         else
-          terraform -chdir="$ROOT" plan -input=false -var-file="workspace/$ws.tfvars"
+          terraform -chdir="$ROOT" plan -input=false -var-file="env/${TFVARS}"
         fi
