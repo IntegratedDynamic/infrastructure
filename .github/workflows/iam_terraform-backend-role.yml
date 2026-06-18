@@ -16,6 +16,10 @@ on:
       - '00-remote_state/1-iam/**'
       - '.github/workflows/iam_terraform-backend-role.yml'
 
+concurrency:
+  group: tf-backend-role-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
@@ -40,36 +44,11 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
+          fetch-depth: 1
 
-      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+      - uses: ./.github/actions/terraform
         with:
-          # Keep in sync with mise.toml [tools] terraform version.
-          terraform_version: "1.14"
-
-      - name: Assume the CI role via OIDC
-        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
-        with:
-          role-to-assume: ${{ vars.AWS_GITHUB_ACTIONS_ROLE_ARN }}
-          aws-region: eu-west-3
-
-      - name: Terraform plan
-        if: github.event_name == 'pull_request'
-        env:
-          TF_CHDIR: "00-remote_state/1-iam"
-          TF_ENVIRONMENT: "00-remote-state-iam.tfvars"
-        run: |
-          set -euo pipefail
-          terraform -chdir="${TF_CHDIR}" init -input=false
-          terraform -chdir="${TF_CHDIR}" workspace select "${TF_ENVIRONMENT%.*}"
-          terraform -chdir="${TF_CHDIR}" plan -input=false -var-file="env/${TF_ENVIRONMENT}"
-
-      - name: Terraform apply
-        if: github.event_name == 'push'
-        env:
-          TF_CHDIR: "00-remote_state/1-iam"
-          TF_ENVIRONMENT: "00-remote-state-iam.tfvars"
-        run: |
-          set -euo pipefail
-          terraform -chdir="${TF_CHDIR}" init -input=false
-          terraform -chdir="${TF_CHDIR}" workspace select "${TF_ENVIRONMENT%.*}"
-          terraform -chdir="${TF_CHDIR}" apply -auto-approve -input=false -var-file="env/${TF_ENVIRONMENT}"
+          root: 00-remote_state/1-iam
+          tfvars-file: 00-remote-state-iam.tfvars
+          aws-role-arn: ${{ vars.AWS_GITHUB_ACTIONS_ROLE_ARN }}
+          apply: ${{ github.event_name == 'push' && 'true' || 'false' }}

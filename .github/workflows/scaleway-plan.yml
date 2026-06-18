@@ -7,8 +7,7 @@ name: Scaleway Plan (via s3-lister role)
 # The s3-lister role is READ-ONLY on S3, which shapes the whole job:
 #   - state is read but never written        -> plan only, never apply
 #   - the S3-native lock can't be written     -> -lock=false
-#   - the workspace already exists in S3       -> select it via TF_WORKSPACE;
-#     never `terraform workspace new` (a write the read-only role can't do)
+#   - the workspace already exists in S3       -> workspace select (never new)
 #   - bootstrap_argocd=false                    -> skip the Infisical data source
 #     and the in-cluster helm/kubernetes providers (no cluster, no secrets in CI)
 #
@@ -70,19 +69,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
-
-      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
-        with:
-          # Keep in sync with mise.toml [tools] terraform version.
-          terraform_version: "1.14"
-
-      # Direct OIDC -> s3-lister. Works because the role's trust now includes a
-      # GitHub-OIDC statement scoped org-wide (repo:IntegratedDynamic/*).
-      - name: Assume the s3-lister role via OIDC
-        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
-        with:
-          role-to-assume: ${{ vars.AWS_S3_LISTER_ROLE_ARN }}
-          aws-region: eu-west-3
+          fetch-depth: 1
 
       # Mint a GitHub OIDC JWT for the Infisical machine identity and stash it in
       # $INFISICAL_AUTH_JWT (the provider's default token env var). audience must
@@ -97,12 +84,9 @@ jobs:
             const jwt = await core.getIDToken('https://github.com/IntegratedDynamic')
             core.exportVariable('INFISICAL_AUTH_JWT', jwt)
 
-      - name: Terraform plan (read-only role -> no lock, no apply)
-        env:
-          TF_CHDIR: "02-cluster/scaleway/"
-          TF_ENVIRONMENT: "02-cluster-staging.tfvars"
-        run: |
-          set -euo pipefail
-          terraform -chdir="${TF_CHDIR}" init -input=false
-          terraform -chdir="${TF_CHDIR}" workspace select "${TF_ENVIRONMENT%.*}" 
-          terraform -chdir="${TF_CHDIR}" destroy -auto-approve -input=false -var-file="env/${TF_ENVIRONMENT}"
+      - uses: ./.github/actions/terraform
+        with:
+          root: 02-cluster/scaleway
+          tfvars-file: 02-cluster-staging.tfvars
+          aws-role-arn: ${{ vars.AWS_S3_LISTER_ROLE_ARN }}
+          lock: "false"
