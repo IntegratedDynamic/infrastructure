@@ -18,13 +18,14 @@ name: Scaleway Plan (via s3-lister role)
 on:
   pull_request:
     paths:
-      - 'cluster/scaleway/**'
-      - 's3-lister-role/**'
+      - '02-cluster/scaleway/**'
+      - '01-iam/aws/**'
       - '.github/workflows/scaleway-plan.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
+  id-token: write # This is required for requesting the JWT
 
 jobs:
   plan:
@@ -36,10 +37,8 @@ jobs:
       id-token: write # mint the OIDC token exchanged for temporary AWS creds
       contents: read
     env:
-      # Select the existing remote workspace without `workspace new` (a write the
-      # read-only role can't perform). The default workspace would collide with
-      # the state bucket's own state at the bucket root.
-      TF_WORKSPACE: infrastructure
+      INFISICAL_MACHINE_IDENTITY_ID: ${{ vars.INFISICAL_MACHINE_IDENTITY_ID }}
+
       # Scaleway provider creds for the refresh. Keys are secrets; the public
       # org/project IDs are repo variables (not secrets).
       SCW_ACCESS_KEY: ${{ secrets.SCW_ACCESS_KEY }}
@@ -48,10 +47,10 @@ jobs:
       SCW_DEFAULT_PROJECT_ID: ${{ vars.SCW_DEFAULT_PROJECT_ID }}
       # The infisical provider authenticates eagerly even with bootstrap_argocd
       # off (the gated data source still pulls the provider into the graph), so
-      # it needs valid machine-identity creds just to configure. With
-      # bootstrap_argocd=false no secret is actually read.
-      TF_VAR_infisical_client_id: ${{ secrets.INFISICAL_CLIENT_ID }}
-      TF_VAR_infisical_client_secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+      # it needs to configure successfully — here via keyless GitHub-OIDC (see
+      # the "Mint Infisical OIDC token" step). With bootstrap_argocd=false no
+      # secret is actually read.
+
     steps:
       # Fail fast and clearly if creds/vars aren't set, instead of letting the
       # tooling emit a confusing assume-role or provider auth error.
@@ -60,11 +59,11 @@ jobs:
           ROLE_ARN: ${{ vars.AWS_S3_LISTER_ROLE_ARN }}
         run: |
           if [ -z "$ROLE_ARN" ]; then
-            echo "::error::vars.AWS_S3_LISTER_ROLE_ARN is not set. Set it to the s3-lister role ARN (see s3-lister-role/README.md)."
+            echo "::error::vars.AWS_S3_LISTER_ROLE_ARN is not set. Set it to the s3-lister role ARN (provisioned by state/10-access)."
             exit 1
           fi
           if [ -z "$SCW_ACCESS_KEY" ] || [ -z "$SCW_SECRET_KEY" ]; then
-            echo "::error::SCW_ACCESS_KEY and/or SCW_SECRET_KEY are not set (see github-ci/README.md)."
+            echo "::error::SCW_ACCESS_KEY and/or SCW_SECRET_KEY are not set (see ci/10-scaleway/README.md)."
             exit 1
           fi
 
@@ -85,8 +84,25 @@ jobs:
           role-to-assume: ${{ vars.AWS_S3_LISTER_ROLE_ARN }}
           aws-region: eu-west-3
 
+      # Mint a GitHub OIDC JWT for the Infisical machine identity and stash it in
+      # $INFISICAL_AUTH_JWT (the provider's default token env var). audience must
+      # match the identity's boundAudiences. This is the keyless counterpart to
+      # the universal-auth client_id/secret used locally — no static Infisical
+      # secret in CI. core.getIDToken is the official @actions/core way to mint
+      # the token (it masks the value automatically).
+      - name: Mint Infisical OIDC token
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const jwt = await core.getIDToken('https://github.com/IntegratedDynamic')
+            core.exportVariable('INFISICAL_AUTH_JWT', jwt)
+
       - name: Terraform plan (read-only role -> no lock, no apply)
+        env:
+          TF_CHDIR: "02-cluster/scaleway/"
+          TF_ENVIRONMENT: "02-cluster-staging.tfvars"
         run: |
-          terraform -chdir=cluster/scaleway init -input=false
-          terraform -chdir=cluster/scaleway plan \
-            -lock=false -input=false -var bootstrap_argocd=false
+          set -euo pipefail
+          terraform -chdir="${TF_CHDIR}" init -input=false
+          terraform -chdir="${TF_CHDIR}" workspace select "${TF_ENVIRONMENT%.*}" 
+          terraform -chdir="${TF_CHDIR}" destroy -auto-approve -input=false -var-file="env/${TF_ENVIRONMENT}"
