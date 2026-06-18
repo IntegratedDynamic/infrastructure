@@ -26,12 +26,21 @@ kubectl wait --for=condition=Ready nodes --all --timeout=120s
 """
 
 [tasks.local-init]
-dir = "cluster/local"
-run = "terraform init"
+dir = "02_cluster/local"
+run = """
+terraform init
+"""
 
 [tasks.local-apply]
-dir = "cluster/local"
-run = "terraform apply -auto-approve"
+dir = "02_cluster/local"
+run = """
+ws=$(terraform workspace show)
+if [ "$ws" = "default" ]; then
+  echo "error: terraform workspace is 'default' — select a real workspace first (terraform workspace select <env>)" >&2
+  exit 1
+fi
+terraform apply -auto-approve -var-file="env/${ws}.tfvars"
+"""
 
 [tasks.dev]
 description = "Full local dev environment (minikube + ArgoCD)"
@@ -45,90 +54,17 @@ mise run local-apply
 description = "Reset local minikube cluster"
 run = "minikube delete"
 
-# ── Scaleway (homelab) ──────────────────────────────────────────────────────
-
-[tasks.scaleway-provision]
-description = "Provision the Scaleway cluster only (no ArgoCD). Use for the first from-scratch apply."
-dir = "cluster/scaleway"
-run = "terraform init && terraform apply -auto-approve -var bootstrap_argocd=false"
-
-[tasks.scaleway-up]
-description = "Provision the Scaleway cluster + bootstrap ArgoCD"
-dir = "cluster/scaleway"
-run = """
-terraform init
-n=0
-until terraform apply -auto-approve; do
-  n=$((n + 1))
-  if [ "$n" -ge 3 ]; then echo "terraform apply failed after $n attempts"; exit 1; fi
-  echo "apply attempt $n failed (likely a transient registry/API blip); retrying in 15s..."
-  sleep 15
-done
-"""
-
-[tasks.scaleway-pause]
-description = "Scale Scaleway node pool to 0 (free tier)"
-dir = "cluster/scaleway"
-run = "terraform apply -auto-approve -var='node_count=0'"
-
-[tasks.scaleway-resume]
-description = "Scale Scaleway node pool back to 1"
-dir = "cluster/scaleway"
-run = "terraform apply -auto-approve -var='node_count=1'"
-
-[tasks.scaleway-apply]
-description = "Plain terraform apply on the Scaleway root"
-dir = "cluster/scaleway"
-run = "terraform apply"
-
-[tasks.scaleway-destroy]
-description = "Tear down the Scaleway cluster (terraform destroy)"
-dir = "cluster/scaleway"
-run = "terraform destroy"
-
-# ── GitHub CI identity (github-ci/) ─────────────────────────────────────────
-
-[tasks.github-ci-init]
-description = "terraform init on the github-ci root"
-dir = "github-ci"
-run = "terraform init"
-
-[tasks.github-ci-plan]
-description = "terraform plan on the github-ci root"
-dir = "github-ci"
-run = "terraform init && terraform plan"
-
-[tasks.github-ci-apply]
-description = "terraform apply on the github-ci root (provisions the Scaleway CI IAM key)"
-dir = "github-ci"
-run = "terraform apply"
-
-# ── AWS GitHub OIDC identity (aws-github-oidc/) ──────────────────────────────
-
-[tasks.aws-github-oidc-init]
-description = "terraform init on the aws-github-oidc root"
-dir = "aws-github-oidc"
-run = "terraform init"
-
-[tasks.aws-github-oidc-plan]
-description = "terraform plan on the aws-github-oidc root"
-dir = "aws-github-oidc"
-run = "terraform init && terraform plan"
-
-[tasks.aws-github-oidc-apply]
-description = "terraform apply on the aws-github-oidc root (provisions the GitHub OIDC provider + IAM role)"
-dir = "aws-github-oidc"
-run = "terraform apply"
 
 # ── Provider locks ───────────────────────────────────────────────────────────
 
 [tasks.lock]
 description = "Re-generate all .terraform.lock.hcl files for darwin_arm64 + linux_amd64"
 run = """
-terraform -chdir=terraform-state-bucket providers lock -platform=darwin_arm64 -platform=linux_amd64
-terraform -chdir=cluster/local          providers lock -platform=darwin_arm64 -platform=linux_amd64
-terraform -chdir=cluster/scaleway       providers lock -platform=darwin_arm64 -platform=linux_amd64
-terraform -chdir=github-ci              providers lock -platform=darwin_arm64 -platform=linux_amd64
-terraform -chdir=aws-github-oidc        providers lock -platform=darwin_arm64 -platform=linux_amd64
-terraform -chdir=s3-lister-role         providers lock -platform=darwin_arm64 -platform=linux_amd64
+terraform -chdir=00-remote_state/0-backend     providers lock -platform=darwin_arm64 -platform=linux_amd64
+terraform -chdir=00-remote_state/1-iam       providers lock -platform=darwin_arm64 -platform=linux_amd64
+terraform -chdir=01-iam/aws providers lock -platform=darwin_arm64 -platform=linux_amd64
+terraform -chdir=01-iam/scaleway       providers lock -platform=darwin_arm64 -platform=linux_amd64
+terraform -chdir=01-iam/infisical      providers lock -platform=darwin_arm64 -platform=linux_amd64
+terraform -chdir=02-cluster/local         providers lock -platform=darwin_arm64 -platform=linux_amd64
+terraform -chdir=02-cluster/scaleway      providers lock -platform=darwin_arm64 -platform=linux_amd64
 """
