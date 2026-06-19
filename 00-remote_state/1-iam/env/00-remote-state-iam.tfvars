@@ -6,7 +6,7 @@
 # .github/actions/terraform — see that action and CLAUDE.md.
 
 region    = "eu-west-3"
-role_name = "s3-lister"
+role_name = "tf_state_access"
 
 # Repo-scoped path + boundary required by the CI grant (identity/00-ci-trust/). Must
 # match the grant's pins exactly or the apply is denied.
