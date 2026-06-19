@@ -34,48 +34,68 @@ The `.terraform.lock.hcl` in each root must cover **both** `darwin_arm64` (local
 `mise run lock` is equivalent to:
 
 ```bash
-terraform -chdir=state/00-backend      providers lock -platform=darwin_arm64 -platform=linux_amd64
-terraform -chdir=state/10-access       providers lock -platform=darwin_arm64 -platform=linux_amd64
-terraform -chdir=identity/00-ci-trust  providers lock -platform=darwin_arm64 -platform=linux_amd64
-terraform -chdir=ci/10-scaleway        providers lock -platform=darwin_arm64 -platform=linux_amd64
-terraform -chdir=cluster/local         providers lock -platform=darwin_arm64 -platform=linux_amd64
-terraform -chdir=cluster/scaleway      providers lock -platform=darwin_arm64 -platform=linux_amd64
+terraform -chdir=00-remote_state                    providers lock -platform=darwin_arm64 -platform=linux_amd64
+terraform -chdir=01-iam/bootstrap/aws               providers lock -platform=darwin_arm64 -platform=linux_amd64
+terraform -chdir=01-iam/bootstrap/scaleway          providers lock -platform=darwin_arm64 -platform=linux_amd64
+terraform -chdir=01-iam/bootstrap/infisical         providers lock -platform=darwin_arm64 -platform=linux_amd64
+terraform -chdir=01-iam/ci-managed/aws-state-access providers lock -platform=darwin_arm64 -platform=linux_amd64
+terraform -chdir=02-cluster/local                   providers lock -platform=darwin_arm64 -platform=linux_amd64
+terraform -chdir=02-cluster/scaleway                providers lock -platform=darwin_arm64 -platform=linux_amd64
 ```
 
 Commit the updated lock files alongside the version change.
 
 ## Architecture
 
-Terraform roots are organized by **domain** (top-level folder = what the root is
-responsible for) with a **numeric strata prefix** on each root (apply order /
-blast-radius / who applies it: `00` = admin-applied foundation, `10`+ = built on
-top). The shared S3 state bucket (`state/00-backend`) holds every root's remote
-state.
+Terraform roots are organized by **domain** — the top-level folder is a numeric
+**pseudo-ID** for what that domain owns (`00-remote_state`, `01-iam`,
+`02-cluster`). The number encodes apply order / blast-radius across domains
+(`00` first, built on by `01`, then `02`). The shared S3 state bucket
+(`00-remote_state`) holds every root's remote state.
+
+Within a domain, sub-folders split roots by the **second axis: lifecycle / who
+applies them** — `bootstrap/` = human/admin-applied trust anchors (rare changes,
+need admin creds), `ci-managed/` = roots minted BY the CI (GitOps, capped by the
+permissions boundary). A domain with a single root is flattened (the domain
+folder *is* the root, e.g. `00-remote_state`).
 
 ```
-modules/                 # reusable Terraform modules (empty for now)
-state/                   # domain: Terraform state
-  00-backend/            #   shared AWS S3 bucket holding every root's remote state (admin-applied)
-  10-access/             #   org-wide read-only state-access IAM role (created BY CI)
-identity/                # domain: CI identity & governance
-  00-ci-trust/           #   GitHub OIDC provider + role-creator role + permissions boundary + CI grant
-ci/                      # domain: CI access
-  10-scaleway/           #   Scaleway IAM identity (static API key) GitHub Actions authenticates with
-cluster/                 # domain: the Kubernetes platform (de-facto strata 20)
-  local/                 #   minikube — local dev and debugging. Local backend (local files)
-  scaleway/              #   Scaleway Kapsule cluster + ArgoCD bootstrap (homelab; WIP)
+modules/                       # reusable Terraform modules (empty for now)
+00-remote_state/               # domain: Terraform state backend — the shared AWS
+                               #   S3 bucket holding every root's remote state (admin-applied)
+01-iam/                        # domain: IAM identities & grants
+  bootstrap/                   #   human-applied trust anchors
+    aws/                       #     GitHub-OIDC → AWS: OIDC provider + role-creator role
+                               #       + permissions boundary + CI grant
+    scaleway/                  #     Scaleway CI identity (IAM app + project policy + static API key)
+    infisical/                 #     Infisical CI identity (keyless GitHub-OIDC → Infisical)
+  ci-managed/                  #   minted BY the CI, capped by the boundary
+    aws-state-access/          #     org-wide tf-state-access role (the first CI-minted role)
+02-cluster/                    # domain: the Kubernetes platform
+  local/                       #   minikube — local dev and debugging. Local backend (local files)
+  scaleway/                    #   Scaleway Kapsule cluster + ArgoCD bootstrap (homelab; WIP)
 ```
 
-**Backend keys are decoupled from paths.** Each root keeps its original
-`workspace_key_prefix` (e.g. `state/10-access` still uses prefix `s3-lister-role`)
-so the by-domain restructure was a pure move with no state migration. Don't
-"fix" a prefix to match its path unless you also migrate the state.
+**The dependency spine** runs strictly forward: `00-remote_state` (bucket) →
+`01-iam/bootstrap/aws` (the trust anchor that lets CI apply anything) →
+`01-iam/ci-managed/*` (roles the anchor mints) → `02-cluster/*`. `bootstrap/aws`
+is the root of trust — nothing CI-applied can exist before it.
 
-### `cluster/*`
+**Backend keys are decoupled from paths.** Each root pins its own
+`workspace_key_prefix` in `version.tf` (e.g. `01-iam/ci-managed/aws-state-access`
+still uses prefix `s3-lister-role`), and the workspace name comes from the
+`env/<name>.tfvars` filename — **neither is tied to the directory**. The
+restructure was a pure `git mv` with no state migration. Don't "fix" a prefix or
+rename a tfvars file to match its new path unless you also migrate the state
+(renaming the tfvars file changes the workspace, hence the state key). This is
+why some workspace names look dated (e.g. `aws-state-access` still uses the
+`00-remote-state-iam` workspace).
+
+### `02-cluster/*`
 
 Terraform here is only a **one-time bootstrapper** — everything after ArgoCD is up lives in the `gitops` repo. The cluster internal state nor status will be reflected in the terraform state. 
 
-### `cluster/local/`
+### `02-cluster/local/`
 
 Warning : This environment expect you an accessible local kubernetes cluster access, likely configured within your ~/.kube/config. This is automatically handled via `mise run dev`
 
@@ -84,27 +104,31 @@ Two-step, one-time bootstrap:
 2. Deploy **ArgoCD** via Helm with the admin bcrypt password hash from Infisical (pre-hashed to prevent Terraform drift).
 3. Deploy the **argocd-apps bootstrap** Application, pointing ArgoCD at `https://github.com/IntegratedDynamic/gitops.git`. ArgoCD then self-manages all further cluster state from that separate GitOps repo.
 
-### `cluster/scaleway/`
+### `02-cluster/scaleway/`
 
 Same bootstrap pattern as `local/`, but with the Kapsule cluster + node pool (`DEV1-M`, min=0/max=3) instead.
 
-### `state/00-backend/`
+### `00-remote_state/`
 
 The shared org S3 bucket holding **every** root's remote state (built on `terraform-aws-modules/s3-bucket`: versioning, SSE, public-access block, TLS-only). Chicken-and-egg: its own state lives in the bucket it creates (one-time local-state bootstrap — see its README). Applied by an admin.
 
-### `state/10-access/`
+### `01-iam/ci-managed/aws-state-access/`
 
-Org-wide Terraform-state **access** IAM **role created BY the CI** (the first role minted by `identity/00-ci-trust`'s role-creator rather than by a human). Named `tf-state-access`, it grants `AmazonS3FullAccess` — **read/write on the state bucket plus the state lock** — so every state-touching workflow assumes it for `plan` AND `apply`/`destroy` alike (e.g. the `scaleway` workflow), wired via `vars.AWS_TF_STATE_ROLE_ARN`. Assumable org-wide via two trust doors: AWS principals in the org (`aws:PrincipalOrgID`) and GitHub Actions in the org via OIDC (`repo:IntegratedDynamic/*`). Applied by CI (`iam_terraform-backend-role.yml`).
+Org-wide Terraform-state **access** IAM **role created BY the CI** (the first role minted by `01-iam/bootstrap/aws`'s role-creator rather than by a human). Named `tf-state-access`, it grants `AmazonS3FullAccess` — **read/write on the state bucket plus the state lock** — so every state-touching workflow assumes it for `plan` AND `apply`/`destroy` alike (e.g. the `scaleway` workflow), wired via `vars.AWS_TF_STATE_ROLE_ARN`. Assumable org-wide via two trust doors: AWS principals in the org (`aws:PrincipalOrgID`) and GitHub Actions in the org via OIDC (`repo:IntegratedDynamic/*`). Applied by CI (`iam_terraform-backend-role.yml`).
 
-### `ci/10-scaleway/`
+### `01-iam/bootstrap/scaleway/`
 
-Standalone root that stands up the **Scaleway IAM identity GitHub Actions uses to authenticate to Scaleway**: a dedicated IAM application + a project-scoped policy (`Kubernetes`/`VPC`/`PrivateNetworks` FullAccess + `IPAMReadOnly`, enough for CI to create/destroy the Kapsule cluster) + an API key, with the key written into Infisical. GitHub secrets (`SCW_ACCESS_KEY` / `SCW_SECRET_KEY`) are still set manually via `gh secret set`. Keyless GitHub-OIDC → Scaleway is a non-goal — blocked upstream (Scaleway IAM is not an OIDC relying party). See `ci/10-scaleway/README.md`.
+Standalone root that stands up the **Scaleway IAM identity GitHub Actions uses to authenticate to Scaleway**: a dedicated IAM application + a project-scoped policy (`Kubernetes`/`VPC`/`PrivateNetworks` FullAccess + `IPAMReadOnly`, enough for CI to create/destroy the Kapsule cluster) + an API key, with the key written into Infisical. GitHub secrets (`SCW_ACCESS_KEY` / `SCW_SECRET_KEY`) are still set manually via `gh secret set`. Keyless GitHub-OIDC → Scaleway is a non-goal — blocked upstream (Scaleway IAM is not an OIDC relying party). See `01-iam/bootstrap/scaleway/README.md`.
 
-### `identity/00-ci-trust/`
+### `01-iam/bootstrap/infisical/`
 
-The CI **identity & governance foundation**: **keyless GitHub-OIDC → AWS** access, built on the `terraform-aws-modules/iam` modules. An OIDC provider + a role (`github-actions-terraform`) GitHub Actions assumes via short-lived tokens (trust scoped to `repo:IntegratedDynamic/infrastructure:*`). The role grant (`tf-managed-ci`) gives Terraform-state R/W on the state bucket **plus privilege-escalation-safe IAM role management** — i.e. it is the role that **creates other CI roles** (e.g. `state/10-access`). Applied locally by an admin; `role_arn` is wired to CI via `vars.AWS_GITHUB_ACTIONS_ROLE_ARN`. See `identity/00-ci-trust/README.md`.
+The **keyless GitHub-OIDC → Infisical** counterpart to `bootstrap/scaleway`: a Infisical machine identity + OIDC auth trusting GitHub Actions tokens, so the composite action can mint a short-lived Infisical token (no static Infisical secret) to read the secrets cluster bootstraps need. See `01-iam/bootstrap/infisical/README.md`.
 
-**Permissions-boundary contract (repo-wide):** any `aws_iam_role` that the CI applies **must** set `permissions_boundary` (= the `permissions_boundary_arn` output, `tf-managed-boundary`) and `path` (= the `managed_path` output, `/tf-managed/<org>/<repo>/`), or the apply is rejected by the CI grant's conditions. Set both via the root's `env/<name>.tfvars` (see the Terraform workspaces convention below). The boundary caps every CI-created role to "admin minus a hardened deny-list" so a role-creating role can't escalate. Rationale is documented inline in `identity/00-ci-trust/iam-ci.tf`.
+### `01-iam/bootstrap/aws/`
+
+The CI **identity & governance foundation**: **keyless GitHub-OIDC → AWS** access, built on the `terraform-aws-modules/iam` modules. An OIDC provider + a role (`github-actions-terraform`) GitHub Actions assumes via short-lived tokens (trust scoped to `repo:IntegratedDynamic/infrastructure:*`). The role grant (`tf-managed-ci`) gives Terraform-state R/W on the state bucket **plus privilege-escalation-safe IAM role management** — i.e. it is the role that **creates other CI roles** (e.g. `01-iam/ci-managed/aws-state-access`). Applied locally by an admin; `role_arn` is wired to CI via `vars.AWS_GITHUB_ACTIONS_ROLE_ARN`. See `01-iam/bootstrap/aws/README.md`.
+
+**Permissions-boundary contract (repo-wide):** any `aws_iam_role` that the CI applies **must** set `permissions_boundary` (= the `permissions_boundary_arn` output, `tf-managed-boundary`) and `path` (= the `managed_path` output, `/tf-managed/<org>/<repo>/`), or the apply is rejected by the CI grant's conditions. Set both via the root's `env/<name>.tfvars` (see the Terraform workspaces convention below). The boundary caps every CI-created role to "admin minus a hardened deny-list" so a role-creating role can't escalate. Rationale is documented inline in `01-iam/bootstrap/aws/iam-ci.tf`.
 
 ## Conventions
 

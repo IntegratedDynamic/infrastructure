@@ -1,11 +1,11 @@
-# 01-iam/infisical — GitHub Actions → Infisical (OIDC)
+# 01-iam/bootstrap/infisical — GitHub Actions → Infisical (OIDC)
 
 A standalone Terraform root that sets up **keyless GitHub-OIDC → Infisical**: a
 dedicated Infisical machine identity that GitHub Actions authenticates as by
 presenting its short-lived OIDC token — no long-lived Infisical secret stored in
 CI.
 
-This is the keyless counterpart to [`01-iam/scaleway`](../scaleway) (which has to
+This is the keyless counterpart to [`01-iam/bootstrap/scaleway`](../scaleway) (which has to
 use a static API key because Scaleway IAM isn't an OIDC relying party). Infisical
 **is**, so we get the real keyless flow here.
 
@@ -48,9 +48,9 @@ with it instead of any static secret.
 ## Apply
 
 ```bash
-terraform -chdir=01-iam/infisical init
-terraform -chdir=01-iam/infisical plan  -var-file=env/01-iam-infisical.tfvars
-terraform -chdir=01-iam/infisical apply -var-file=env/01-iam-infisical.tfvars
+terraform -chdir=01-iam/bootstrap/infisical init
+terraform -chdir=01-iam/bootstrap/infisical plan  -var-file=env/01-iam-infisical.tfvars
+terraform -chdir=01-iam/bootstrap/infisical apply -var-file=env/01-iam-infisical.tfvars
 ```
 
 > Never `apply`/`destroy` here without explicit approval.

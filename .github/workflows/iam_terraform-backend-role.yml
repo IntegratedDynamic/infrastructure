@@ -1,20 +1,21 @@
 name: Apply Terraform Backend Role
 
-# Terraform GitOps for the 00-remote_state/1-iam/ root: the org-wide state-access
-# role is created/synchronised from remote via the .github/actions/terraform
-# composite action. Plans on PR, applies on push to main. Credentials come from
-# the identity/00-ci-trust CI role assumed via OIDC — no static AWS keys.
+# Terraform GitOps for the 01-iam/ci-managed/aws-state-access/ root: the org-wide
+# state-access role is created/synchronised from remote via the
+# .github/actions/terraform composite action. Plans on PR, applies on push to main.
+# Credentials come from the 01-iam/bootstrap/aws CI role assumed via OIDC — no
+# static AWS keys.
 
 on:
   push:
     branches: [main]
     paths:
-      - '00-remote_state/1-iam/**'
+      - '01-iam/ci-managed/aws-state-access/**'
       - '.github/actions/terraform/**'
       - '.github/workflows/iam_terraform-backend-role.yml'
   pull_request:
     paths:
-      - '00-remote_state/1-iam/**'
+      - '01-iam/ci-managed/aws-state-access/**'
       - '.github/actions/terraform/**'
       - '.github/workflows/iam_terraform-backend-role.yml'
 
@@ -38,7 +39,7 @@ jobs:
           ROLE_ARN: ${{ vars.AWS_GITHUB_ACTIONS_ROLE_ARN }}
         run: |
           if [ -z "$ROLE_ARN" ]; then
-            echo "::error::vars.AWS_GITHUB_ACTIONS_ROLE_ARN is not set (provisioned by identity/00-ci-trust/)."
+            echo "::error::vars.AWS_GITHUB_ACTIONS_ROLE_ARN is not set (provisioned by 01-iam/bootstrap/aws/)."
             exit 1
           fi
 
@@ -49,7 +50,7 @@ jobs:
 
       - uses: ./.github/actions/terraform
         with:
-          root: 00-remote_state/1-iam
+          root: 01-iam/ci-managed/aws-state-access
           tfvars-file: 00-remote-state-iam.tfvars
           aws-role-arn: ${{ vars.AWS_GITHUB_ACTIONS_ROLE_ARN }}
           command: ${{ github.event_name == 'push' && 'apply' || 'plan' }}

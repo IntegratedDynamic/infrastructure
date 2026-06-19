@@ -7,9 +7,9 @@ name: Terraform — Scaleway cluster
 #   - workflow_dispatch     → up/down on demand (plan | apply | destroy)
 #
 # State R/W + lock uses the org state role (vars.AWS_TF_STATE_ROLE_ARN —
-# AmazonS3FullAccess, see 00-remote_state/1-iam). Scaleway cluster lifecycle uses
-# the CI API key from the `scaleway` environment (Kubernetes/VPC/PrivateNetwork
-# FullAccess, see 01-iam/scaleway). Provider creds are set as job env (read by the
+# AmazonS3FullAccess, see 01-iam/ci-managed/aws-state-access). Scaleway cluster
+# lifecycle uses the CI API key from the `scaleway` environment (Kubernetes/VPC/
+# PrivateNetwork FullAccess, see 01-iam/bootstrap/scaleway). Provider creds are set as job env (read by the
 # action) — never passed as plain action inputs. No static AWS keys.
 
 on:
@@ -70,7 +70,7 @@ jobs:
           ROLE_ARN: ${{ vars.AWS_TF_STATE_ROLE_ARN }}
         run: |
           if [ -z "$ROLE_ARN" ]; then
-            echo "::error::vars.AWS_TF_STATE_ROLE_ARN is not set (provisioned by 00-remote_state/1-iam)."
+            echo "::error::vars.AWS_TF_STATE_ROLE_ARN is not set (provisioned by 01-iam/ci-managed/aws-state-access)."
             exit 1
           fi
 

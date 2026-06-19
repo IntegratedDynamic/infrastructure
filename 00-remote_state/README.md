@@ -1,12 +1,13 @@
-# state/00-backend — Terraform state bucket
+# 00-remote_state — Terraform state bucket
 
 A standalone Terraform root that provisions a single **AWS S3 bucket** to hold
 the Terraform remote state for the **whole org**. Every other root
-(`cluster/local/`, `cluster/scaleway/`, `ci/10-scaleway/`, and future ones) points
-its `backend "s3"` at this bucket.
+(`02-cluster/local/`, `02-cluster/scaleway/`, `01-iam/bootstrap/scaleway/`, and
+future ones) points its `backend "s3"` at this bucket.
 
-It is the shared substrate every other root depends on — strata `00` of the
-`state/` domain, applied by an admin.
+It is the shared substrate every other root depends on — the `00-remote_state`
+domain (a single-root domain, so it is flattened: the domain folder *is* the
+root), applied by an admin.
 
 ## What it creates
 
@@ -57,13 +58,13 @@ This root creates the very bucket it then stores its state in. Bootstrap order:
 2. Apply once with **local state** — temporarily comment out the `backend "s3"`
    block in `version.tf` so the bucket gets created:
    ```bash
-   terraform -chdir=state/00-backend init
-   terraform -chdir=state/00-backend apply   # creates the bucket (billable)
+   terraform -chdir=00-remote_state init
+   terraform -chdir=00-remote_state apply   # creates the bucket (billable)
    ```
 3. Re-add the `backend "s3"` block and migrate the local state into the bucket
    it now manages:
    ```bash
-   terraform -chdir=state/00-backend init -migrate-state
+   terraform -chdir=00-remote_state init -migrate-state
    ```
 
 After that, this root's own state lives at `state-backend/terraform.tfstate`

@@ -1,12 +1,13 @@
-# identity/00-ci-trust — CI identity & governance
+# 01-iam/bootstrap/aws — CI identity & governance
 
 A standalone Terraform root that provisions **keyless GitHub-OIDC → AWS** access
 for this repo's CI: an IAM OIDC identity provider, plus an IAM role GitHub
 Actions assumes (via short-lived OIDC tokens) to read/write the Terraform
 **remote state on AWS S3** — **no static AWS keys in GitHub secrets**.
 
-This is **not** under `cluster/` — it provisions no cluster. It's a CI-platform
-concern, kept as its own root so its state and blast radius stay small.
+This is **not** under `02-cluster/` — it provisions no cluster. It's the trust
+anchor of the `01-iam` domain (`bootstrap/` = human-applied), kept as its own
+root so its state and blast radius stay small.
 
 ## Why OIDC here (and why Scaleway still uses a static key)
 
@@ -18,7 +19,7 @@ GitHub secrets.
 
 Scaleway resources (Kapsule, VPC) are a different story: **Scaleway IAM is not an
 OIDC relying party** ([feature request](https://feature-request.scaleway.com/posts/761/oidc-provider-for-external-ci-cd)),
-so those keep using a scoped, static Scaleway API key (see `ci/10-scaleway/`).
+so those keep using a scoped, static Scaleway API key (see `01-iam/bootstrap/scaleway/`).
 OIDC here covers **only** the AWS/S3 side. Revisit Scaleway OIDC
 if/when Scaleway ships it.
 
@@ -79,8 +80,8 @@ inline in [`iam-ci.tf`](./iam-ci.tf)):
 Verify the guardrails with the IAM policy simulator, e.g.:
 
 ```bash
-ROLE=$(terraform -chdir=identity/00-ci-trust output -raw role_arn)
-B=$(terraform -chdir=identity/00-ci-trust output -raw permissions_boundary_arn)
+ROLE=$(terraform -chdir=01-iam/bootstrap/aws output -raw role_arn)
+B=$(terraform -chdir=01-iam/bootstrap/aws output -raw permissions_boundary_arn)
 # CreateRole without our boundary -> explicitDeny
 aws iam simulate-principal-policy --policy-source-arn "$ROLE" \
   --action-names iam:CreateRole \
@@ -99,8 +100,9 @@ aws iam simulate-principal-policy --policy-source-arn "$ROLE" \
 ## Apply
 
 ```bash
-mise run ci-trust-plan    # terraform init && plan — review first
-mise run ci-trust-apply   # terraform apply (creates IAM resources)
+terraform -chdir=01-iam/bootstrap/aws init
+terraform -chdir=01-iam/bootstrap/aws plan    # review first
+terraform -chdir=01-iam/bootstrap/aws apply   # creates IAM resources
 ```
 
 > Never `terraform apply`/`destroy` here without explicit approval.
@@ -113,7 +115,7 @@ variable (an ARN is a public identifier, not a secret). Set it once:
 ```bash
 gh variable set AWS_GITHUB_ACTIONS_ROLE_ARN \
   --repo IntegratedDynamic/infrastructure \
-  --body "$(terraform -chdir=identity/00-ci-trust output -raw role_arn)"
+  --body "$(terraform -chdir=01-iam/bootstrap/aws output -raw role_arn)"
 ```
 
 Workflows then assume the role with `aws-actions/configure-aws-credentials`:
