@@ -1,7 +1,7 @@
 name: Terraform
 description: >
   Run Terraform for a workspace-driven root: set up Terraform, mint an Infisical
-  OIDC token, assume an AWS role via OIDC, then init → workspace select →
+  OIDC token, assume an AWS role via OIDC (for remote state access) and retrieve Scaleway Machine Identity credentials, then init → workspace select →
   plan/apply/destroy. The repository must already be checked out.
 
   This action takes NO secret inputs. Provider credentials are read from the
@@ -24,10 +24,6 @@ inputs:
     description: 'Terraform command to run: plan | apply | destroy.'
     required: false
     default: plan
-  lock:
-    description: 'When "false", pass -lock=false (read-only roles that cannot acquire the S3 state lock).'
-    required: false
-    default: "true"
   aws-role-arn:
     description: ARN of the IAM role to assume via OIDC (Terraform-state R/W).
     required: true
@@ -76,12 +72,10 @@ runs:
         ROOT: ${{ inputs.root }}
         TFVARS: ${{ inputs.tfvars-file }}
         COMMAND: ${{ inputs.command }}
-        LOCK: ${{ inputs.lock }}
         # SCW_* and INFISICAL_MACHINE_IDENTITY_ID are inherited from the job env.
       run: |
         set -euo pipefail
         ws="${TFVARS%.tfvars}"
-        lock_arg=""; [ "$LOCK" = "false" ] && lock_arg="-lock=false"
         terraform -chdir="$ROOT" init -input=false
         # apply may target a brand-new env whose workspace doesn't exist yet;
         # read paths (plan/destroy) select an existing one.
@@ -91,8 +85,8 @@ runs:
           terraform -chdir="$ROOT" workspace select "$ws"
         fi
         case "$COMMAND" in
-          plan)    terraform -chdir="$ROOT" plan    -input=false $lock_arg -var-file="env/${TFVARS}" ;;
+          plan)    terraform -chdir="$ROOT" plan    -input=false -var-file="env/${TFVARS}" ;;
           apply)   terraform -chdir="$ROOT" apply   -input=false -auto-approve -var-file="env/${TFVARS}" ;;
-          destroy) terraform -chdir="$ROOT" destroy -input=false -auto-approve $lock_arg -var-file="env/${TFVARS}" ;;
+          destroy) terraform -chdir="$ROOT" destroy -input=false -auto-approve -var-file="env/${TFVARS}" ;;
           *) echo "::error::unknown command '$COMMAND' (expected plan|apply|destroy)"; exit 1 ;;
         esac
