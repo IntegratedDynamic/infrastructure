@@ -26,13 +26,13 @@ kubectl wait --for=condition=Ready nodes --all --timeout=120s
 """
 
 [tasks.local-init]
-dir = "02_cluster/local"
+dir = "02-cluster/local"
 run = """
 terraform init
 """
 
 [tasks.local-apply]
-dir = "02_cluster/local"
+dir = "02-cluster/local"
 run = """
 ws=$(terraform workspace show)
 if [ "$ws" = "default" ]; then
@@ -60,11 +60,11 @@ run = "minikube delete"
 [tasks.lock]
 description = "Re-generate all .terraform.lock.hcl files for darwin_arm64 + linux_amd64"
 run = """
-terraform -chdir=00-remote_state/0-backend     providers lock -platform=darwin_arm64 -platform=linux_amd64
-terraform -chdir=00-remote_state/1-iam       providers lock -platform=darwin_arm64 -platform=linux_amd64
-terraform -chdir=01-iam/aws providers lock -platform=darwin_arm64 -platform=linux_amd64
-terraform -chdir=01-iam/scaleway       providers lock -platform=darwin_arm64 -platform=linux_amd64
-terraform -chdir=01-iam/infisical      providers lock -platform=darwin_arm64 -platform=linux_amd64
-terraform -chdir=02-cluster/local         providers lock -platform=darwin_arm64 -platform=linux_amd64
-terraform -chdir=02-cluster/scaleway      providers lock -platform=darwin_arm64 -platform=linux_amd64
+terraform -chdir=00-remote_state                    providers lock -platform=darwin_arm64 -platform=linux_amd64
+terraform -chdir=01-iam/bootstrap/aws               providers lock -platform=darwin_arm64 -platform=linux_amd64
+terraform -chdir=01-iam/bootstrap/scaleway          providers lock -platform=darwin_arm64 -platform=linux_amd64
+terraform -chdir=01-iam/bootstrap/infisical         providers lock -platform=darwin_arm64 -platform=linux_amd64
+terraform -chdir=01-iam/ci-managed/aws-state-access providers lock -platform=darwin_arm64 -platform=linux_amd64
+terraform -chdir=02-cluster/local                   providers lock -platform=darwin_arm64 -platform=linux_amd64
+terraform -chdir=02-cluster/scaleway                providers lock -platform=darwin_arm64 -platform=linux_amd64
 """

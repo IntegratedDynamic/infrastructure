@@ -1,19 +1,22 @@
 name: Apply Terraform Backend Role
 
-# Terraform GitOps for the 00-remote_state/1-iam/ root: the org-wide S3 state
-# access role is created/synchronised from remote. Plans on PR, applies on push
-# to main. Credentials come from the identity/00-ci-trust CI role assumed via
-# OIDC — no static AWS keys.
+# Terraform GitOps for the 01-iam/ci-managed/aws-state-access/ root: the org-wide
+# state-access role is created/synchronised from remote via the
+# .github/actions/terraform composite action. Plans on PR, applies on push to main.
+# Credentials come from the 01-iam/bootstrap/aws CI role assumed via OIDC — no
+# static AWS keys.
 
 on:
   push:
     branches: [main]
     paths:
-      - '00-remote_state/1-iam/**'
+      - '01-iam/ci-managed/aws-state-access/**'
+      - '.github/actions/terraform/**'
       - '.github/workflows/iam_terraform-backend-role.yml'
   pull_request:
     paths:
-      - '00-remote_state/1-iam/**'
+      - '01-iam/ci-managed/aws-state-access/**'
+      - '.github/actions/terraform/**'
       - '.github/workflows/iam_terraform-backend-role.yml'
 
 concurrency:
@@ -26,18 +29,17 @@ permissions:
 jobs:
   terraform:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       id-token: write # mint the OIDC token exchanged for temporary AWS creds
       contents: read
     steps:
-      # Fail fast and clearly if creds aren't set, instead of letting the
-      # tooling emit a confusing assume-role error.
-      - name: Assert credentials are present
+      - name: Assert state role ARN is present
         env:
           ROLE_ARN: ${{ vars.AWS_GITHUB_ACTIONS_ROLE_ARN }}
         run: |
           if [ -z "$ROLE_ARN" ]; then
-            echo "::error::vars.AWS_GITHUB_ACTIONS_ROLE_ARN is not set. Set it to the github-actions-terraform role ARN (provisioned by identity/00-ci-trust/)."
+            echo "::error::vars.AWS_GITHUB_ACTIONS_ROLE_ARN is not set (provisioned by 01-iam/bootstrap/aws/)."
             exit 1
           fi
 
@@ -48,7 +50,9 @@ jobs:
 
       - uses: ./.github/actions/terraform
         with:
-          root: 00-remote_state/1-iam
+          root: 01-iam/ci-managed/aws-state-access
           tfvars-file: 00-remote-state-iam.tfvars
           aws-role-arn: ${{ vars.AWS_GITHUB_ACTIONS_ROLE_ARN }}
-          apply: ${{ github.event_name == 'push' && 'true' || 'false' }}
+          command: ${{ github.event_name == 'push' && 'apply' || 'plan' }}
+          # This root touches neither Infisical nor Scaleway — skip the OIDC mint.
+          infisical-oidc-audience: ""

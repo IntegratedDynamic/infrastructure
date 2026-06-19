@@ -5,9 +5,9 @@ variable "region" {
 }
 
 variable "role_name" {
-  description = "Name of the org-wide S3-lister role."
+  description = "Name of the org-wide Terraform-state access role (R/W + lock). Renaming it changes the ARN — keep vars.AWS_TF_STATE_ROLE_ARN in sync."
   type        = string
-  default     = "s3-lister"
+  default     = "tf-state-access"
 }
 
 # IAM path every CI-managed role must sit under. The CI grant (identity/00-ci-trust/)

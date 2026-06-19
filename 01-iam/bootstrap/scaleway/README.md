@@ -1,12 +1,13 @@
-# ci/10-scaleway — Scaleway CI identity
+# 01-iam/bootstrap/scaleway — Scaleway CI identity
 
 A standalone Terraform root that provisions the **Scaleway identity GitHub
 Actions uses to authenticate to Scaleway**. First real consumer: a smoke-test
 workflow that lists Object Storage buckets; the Terraform CI/CD pipeline itself
 is a separate, later concern.
 
-This is **not** under `cluster/` — it provisions no cluster. It's a CI-platform
-concern, kept as its own root so its state and blast radius stay small.
+This is **not** under `02-cluster/` — it provisions no cluster. It's a
+`01-iam/bootstrap/` trust anchor (human-applied), kept as its own root so its
+state and blast radius stay small.
 
 ## Why a static key and not OIDC
 
@@ -58,8 +59,9 @@ Same as the other roots:
 ## Apply
 
 ```bash
-mise run scaleway-ci-plan    # terraform init && plan — review first
-mise run scaleway-ci-apply   # terraform apply (billable: creates an IAM key)
+terraform -chdir=01-iam/bootstrap/scaleway init
+terraform -chdir=01-iam/bootstrap/scaleway plan    # review first
+terraform -chdir=01-iam/bootstrap/scaleway apply   # billable: creates an IAM key
 ```
 
 > Never `terraform apply`/`destroy` here without explicit approval.
@@ -77,12 +79,12 @@ them into your shell history or echo them**:
 # SCW_ACCESS_KEY is a public identifier, exposed as a Terraform output:
 gh secret set SCW_ACCESS_KEY \
   --repo IntegratedDynamic/infrastructure \
-  --body "$(terraform -chdir=ci/10-scaleway output -raw access_key)"
+  --body "$(terraform -chdir=01-iam/bootstrap/scaleway output -raw access_key)"
 
 # SCW_SECRET_KEY is sensitive — pipe it from the API key resource without printing:
 gh secret set SCW_SECRET_KEY \
   --repo IntegratedDynamic/infrastructure \
-  --body "$(terraform -chdir=ci/10-scaleway state show -no-color scaleway_iam_api_key.github_ci \
+  --body "$(terraform -chdir=01-iam/bootstrap/scaleway state show -no-color scaleway_iam_api_key.github_ci \
             | awk '/secret_key/ {print $3; exit}' | tr -d '\"')"
 ```
 
@@ -94,7 +96,7 @@ from stdin.)
 
 The smoke-test workflow (`.github/workflows/scaleway-auth-check.yml`) runs
 `scw object bucket list region=fr-par` against the key. It triggers on any PR
-that touches `ci/10-scaleway/**` or the workflow itself, so you can validate before
+that touches `01-iam/bootstrap/scaleway/**` or the workflow itself, so you can validate before
 merge.
 
 It needs two **repo variables** (public identifiers, not secrets — the scw CLI
@@ -122,7 +124,7 @@ The API key lives entirely in this root's state.
 - **On demand** — force it early with:
 
   ```bash
-  terraform -chdir=ci/10-scaleway apply -replace=scaleway_iam_api_key.github_ci
+  terraform -chdir=01-iam/bootstrap/scaleway apply -replace=scaleway_iam_api_key.github_ci
   ```
 
 Either way the key material changes, so **re-run the `gh secret set` steps above**

@@ -1,9 +1,15 @@
-name: Terraform plan/apply
+name: Terraform
 description: >
-  Set up Terraform, assume an AWS role via OIDC, then run
-  init → workspace select → plan (or apply).
-  The repository must already be checked out before calling this action.
-  Extra provider credentials (SCW_*, INFISICAL_AUTH_JWT…) must be set in the calling job env.
+  Run Terraform for a workspace-driven root: set up Terraform, mint an Infisical
+  OIDC token, assume an AWS role via OIDC (for remote state access) and retrieve Scaleway Machine Identity credentials, then init → workspace select →
+  plan/apply/destroy. The repository must already be checked out.
+
+  This action takes NO secret inputs. Provider credentials are read from the
+  calling job's environment (set them there — the reusable terraform.yml workflow
+  does, sourcing SCW_ACCESS_KEY/SCW_SECRET_KEY from its `secrets:` block):
+    - SCW_ACCESS_KEY / SCW_SECRET_KEY          (Scaleway API key)
+    - SCW_DEFAULT_ORGANIZATION_ID / _PROJECT_ID
+    - INFISICAL_MACHINE_IDENTITY_ID            (for the minted INFISICAL_AUTH_JWT)
 
 inputs:
   root:
@@ -14,21 +20,24 @@ inputs:
       Filename of the .tfvars under env/ (e.g. 02-cluster-staging.tfvars).
       Workspace name is derived by stripping the .tfvars extension.
     required: true
+  command:
+    description: 'Terraform command to run: plan | apply | destroy.'
+    required: false
+    default: plan
   aws-role-arn:
-    description: ARN of the IAM role to assume via OIDC.
+    description: ARN of the IAM role to assume via OIDC (Terraform-state R/W).
     required: true
   aws-region:
     description: AWS region for the assumed role.
     required: false
     default: eu-west-3
-  apply:
-    description: 'When "true", terraform apply; otherwise terraform plan.'
+  infisical-oidc-audience:
+    description: >
+      OIDC audience for the Infisical machine identity. When set (the default),
+      mint a GitHub OIDC JWT into INFISICAL_AUTH_JWT. Set to "" to skip it for
+      roots that don't read Infisical.
     required: false
-    default: "false"
-  lock:
-    description: 'When "false", pass -lock=false (for read-only roles that cannot acquire the S3 state lock).'
-    required: false
-    default: "true"
+    default: https://github.com/IntegratedDynamic
 
 runs:
   using: composite
@@ -38,28 +47,46 @@ runs:
         # Keep in sync with mise.toml [tools] terraform version.
         terraform_version: "1.14"
 
+    # Keyless Infisical auth: mint a GitHub OIDC JWT into INFISICAL_AUTH_JWT (the
+    # provider's default token env var). The audience must match the identity's
+    # boundAudiences. getIDToken masks the value automatically.
+    - name: Mint Infisical OIDC token
+      if: inputs.infisical-oidc-audience != ''
+      uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+      env:
+        AUDIENCE: ${{ inputs.infisical-oidc-audience }}
+      with:
+        script: |
+          const jwt = await core.getIDToken(process.env.AUDIENCE)
+          core.exportVariable('INFISICAL_AUTH_JWT', jwt)
+
     - name: Assume AWS role via OIDC
       uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
       with:
         role-to-assume: ${{ inputs.aws-role-arn }}
         aws-region: ${{ inputs.aws-region }}
 
-    - name: Terraform plan/apply
+    - name: Terraform ${{ inputs.command }}
       shell: bash
       env:
         ROOT: ${{ inputs.root }}
         TFVARS: ${{ inputs.tfvars-file }}
-        APPLY: ${{ inputs.apply }}
-        LOCK: ${{ inputs.lock }}
+        COMMAND: ${{ inputs.command }}
+        # SCW_* and INFISICAL_MACHINE_IDENTITY_ID are inherited from the job env.
       run: |
         set -euo pipefail
         ws="${TFVARS%.tfvars}"
         terraform -chdir="$ROOT" init -input=false
-        terraform -chdir="$ROOT" workspace select "$ws"
-        if [ "$APPLY" = "true" ]; then
-          terraform -chdir="$ROOT" apply -auto-approve -input=false -var-file="env/${TFVARS}"
-        elif [ "$LOCK" = "false" ]; then
-          terraform -chdir="$ROOT" plan -input=false -lock=false -var-file="env/${TFVARS}"
+        # apply may target a brand-new env whose workspace doesn't exist yet;
+        # read paths (plan/destroy) select an existing one.
+        if [ "$COMMAND" = "apply" ]; then
+          terraform -chdir="$ROOT" workspace select -or-create "$ws"
         else
-          terraform -chdir="$ROOT" plan -input=false -var-file="env/${TFVARS}"
+          terraform -chdir="$ROOT" workspace select "$ws"
         fi
+        case "$COMMAND" in
+          plan)    terraform -chdir="$ROOT" plan    -input=false -var-file="env/${TFVARS}" ;;
+          apply)   terraform -chdir="$ROOT" apply   -input=false -auto-approve -var-file="env/${TFVARS}" ;;
+          destroy) terraform -chdir="$ROOT" destroy -input=false -auto-approve -var-file="env/${TFVARS}" ;;
+          *) echo "::error::unknown command '$COMMAND' (expected plan|apply|destroy)"; exit 1 ;;
+        esac
