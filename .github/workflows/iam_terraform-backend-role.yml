@@ -1,19 +1,23 @@
 name: Apply Terraform Backend Role
 
-# Terraform GitOps for the 00-remote_state/1-iam/ root: the org-wide S3 state
-# access role is created/synchronised from remote. Plans on PR, applies on push
-# to main. Credentials come from the identity/00-ci-trust CI role assumed via
-# OIDC — no static AWS keys.
+# Terraform GitOps for the 00-remote_state/1-iam/ root: the org-wide state-access
+# role is created/synchronised from remote, through the reusable terraform.yml
+# workflow (plan on PR, apply on push to main). Credentials come from the
+# identity/00-ci-trust CI role assumed via OIDC — no static AWS keys.
 
 on:
   push:
     branches: [main]
     paths:
       - '00-remote_state/1-iam/**'
+      - '.github/actions/terraform/**'
+      - '.github/workflows/terraform.yml'
       - '.github/workflows/iam_terraform-backend-role.yml'
   pull_request:
     paths:
       - '00-remote_state/1-iam/**'
+      - '.github/actions/terraform/**'
+      - '.github/workflows/terraform.yml'
       - '.github/workflows/iam_terraform-backend-role.yml'
 
 concurrency:
@@ -22,33 +26,14 @@ concurrency:
 
 permissions:
   contents: read
+  id-token: write # passed down to the reusable workflow for AWS OIDC
 
 jobs:
   terraform:
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write # mint the OIDC token exchanged for temporary AWS creds
-      contents: read
-    steps:
-      # Fail fast and clearly if creds aren't set, instead of letting the
-      # tooling emit a confusing assume-role error.
-      - name: Assert credentials are present
-        env:
-          ROLE_ARN: ${{ vars.AWS_GITHUB_ACTIONS_ROLE_ARN }}
-        run: |
-          if [ -z "$ROLE_ARN" ]; then
-            echo "::error::vars.AWS_GITHUB_ACTIONS_ROLE_ARN is not set. Set it to the github-actions-terraform role ARN (provisioned by identity/00-ci-trust/)."
-            exit 1
-          fi
-
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-          fetch-depth: 1
-
-      - uses: ./.github/actions/terraform
-        with:
-          root: 00-remote_state/1-iam
-          tfvars-file: 00-remote-state-iam.tfvars
-          aws-role-arn: ${{ vars.AWS_GITHUB_ACTIONS_ROLE_ARN }}
-          apply: ${{ github.event_name == 'push' && 'true' || 'false' }}
+    uses: ./.github/workflows/terraform.yml
+    with:
+      root: 00-remote_state/1-iam
+      tfvars-file: 00-remote-state-iam.tfvars
+      aws-role-arn: ${{ vars.AWS_GITHUB_ACTIONS_ROLE_ARN }}
+      # This root touches neither Infisical nor Scaleway — skip the OIDC mint.
+      infisical-oidc-audience: ""

@@ -1,0 +1,64 @@
+name: Terraform — Scaleway cluster
+
+# Drives 02-cluster/scaleway through the reusable terraform.yml workflow:
+#   - pull_request          → plan
+#   - push to main          → apply
+#   - schedule (daily 18h)  → destroy   (cost-control teardown of the homelab)
+#   - workflow_dispatch     → up/down on demand (plan | apply | destroy)
+#
+# State R/W + lock uses the org state role (vars.AWS_TF_STATE_ROLE_ARN —
+# AmazonS3FullAccess, see 00-remote_state/1-iam). Scaleway cluster lifecycle uses
+# the CI API key from the `scaleway` environment (Kubernetes/VPC/PrivateNetwork
+# FullAccess, see 01-iam/scaleway). No static AWS or Infisical secrets.
+
+on:
+  pull_request:
+    paths:
+      - '02-cluster/scaleway/**'
+      - '.github/actions/terraform/**'
+      - '.github/workflows/terraform.yml'
+      - '.github/workflows/scaleway.yml'
+  push:
+    branches: [main]
+    paths:
+      - '02-cluster/scaleway/**'
+      - '.github/actions/terraform/**'
+      - '.github/workflows/terraform.yml'
+      - '.github/workflows/scaleway.yml'
+  schedule:
+    # 16:00 UTC = 18:00 Europe/Paris in summer (CEST). GitHub cron is UTC and does
+    # NOT follow DST, so in winter (CET) this fires at 17:00 Paris.
+    - cron: '0 16 * * *'
+  workflow_dispatch:
+    inputs:
+      command:
+        description: 'Terraform command (apply = up, destroy = down).'
+        type: choice
+        options: [plan, apply, destroy]
+        default: plan
+
+concurrency:
+  # Serialize everything that writes this root's state (apply/destroy never cancel
+  # mid-flight); only cancel superseded PR plans. schedule/push share ref=main.
+  group: scaleway-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+  id-token: write # passed down to the reusable workflow for AWS + Infisical OIDC
+
+jobs:
+  terraform:
+    uses: ./.github/workflows/terraform.yml
+    with:
+      root: 02-cluster/scaleway
+      tfvars-file: 02-cluster-staging.tfvars
+      # workflow_dispatch sets this; on push/schedule/PR it's empty → derived.
+      command: ${{ inputs.command }}
+      aws-role-arn: ${{ vars.AWS_TF_STATE_ROLE_ARN }}
+      # The `scaleway` environment carries SCW_ACCESS_KEY / SCW_SECRET_KEY. It must
+      # keep NO required-reviewer rule, or the daily scheduled destroy would block.
+      environment: scaleway
+      infisical-identity-id: ${{ vars.INFISICAL_MACHINE_IDENTITY_ID }}
+      scw-organization-id: ${{ vars.SCW_DEFAULT_ORGANIZATION_ID }}
+      scw-project-id: ${{ vars.SCW_DEFAULT_PROJECT_ID }}
