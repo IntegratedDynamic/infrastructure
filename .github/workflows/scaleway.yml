@@ -1,6 +1,6 @@
 name: Terraform — Scaleway cluster
 
-# Drives 02-cluster/scaleway through the reusable terraform.yml workflow:
+# Drives 02-cluster/scaleway through the .github/actions/terraform composite action:
 #   - pull_request          → plan
 #   - push to main          → apply
 #   - schedule (daily 18h)  → destroy   (cost-control teardown of the homelab)
@@ -9,21 +9,20 @@ name: Terraform — Scaleway cluster
 # State R/W + lock uses the org state role (vars.AWS_TF_STATE_ROLE_ARN —
 # AmazonS3FullAccess, see 00-remote_state/1-iam). Scaleway cluster lifecycle uses
 # the CI API key from the `scaleway` environment (Kubernetes/VPC/PrivateNetwork
-# FullAccess, see 01-iam/scaleway). No static AWS or Infisical secrets.
+# FullAccess, see 01-iam/scaleway). Provider creds are set as job env (read by the
+# action) — never passed as plain action inputs. No static AWS keys.
 
 on:
   pull_request:
     paths:
       - '02-cluster/scaleway/**'
       - '.github/actions/terraform/**'
-      - '.github/workflows/terraform.yml'
       - '.github/workflows/scaleway.yml'
   push:
     branches: [main]
     paths:
       - '02-cluster/scaleway/**'
       - '.github/actions/terraform/**'
-      - '.github/workflows/terraform.yml'
       - '.github/workflows/scaleway.yml'
   schedule:
     # 16:00 UTC = 18:00 Europe/Paris in summer (CEST). GitHub cron is UTC and does
@@ -45,20 +44,59 @@ concurrency:
 
 permissions:
   contents: read
-  id-token: write # passed down to the reusable workflow for AWS + Infisical OIDC
 
 jobs:
   terraform:
-    uses: ./.github/workflows/terraform.yml
-    with:
-      root: 02-cluster/scaleway
-      tfvars-file: 02-cluster-staging.tfvars
-      # workflow_dispatch sets this; on push/schedule/PR it's empty → derived.
-      command: ${{ inputs.command }}
-      aws-role-arn: ${{ vars.AWS_TF_STATE_ROLE_ARN }}
-      # The `scaleway` environment carries SCW_ACCESS_KEY / SCW_SECRET_KEY. It must
-      # keep NO required-reviewer rule, or the daily scheduled destroy would block.
-      environment: scaleway
-      infisical-identity-id: ${{ vars.INFISICAL_MACHINE_IDENTITY_ID }}
-      scw-organization-id: ${{ vars.SCW_DEFAULT_ORGANIZATION_ID }}
-      scw-project-id: ${{ vars.SCW_DEFAULT_PROJECT_ID }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # The `scaleway` environment carries SCW_ACCESS_KEY / SCW_SECRET_KEY (and
+    # satisfies zizmor's secrets-in-environment audit). It currently has no
+    # protection rule, so the daily scheduled destroy runs unattended — keep it
+    # that way (a required-reviewer rule would block the cron).
+    environment: scaleway
+    permissions:
+      id-token: write # mint OIDC tokens for AWS + Infisical
+      contents: read
+    # Provider creds exposed to the composite action via the job env (not inputs).
+    env:
+      SCW_ACCESS_KEY: ${{ secrets.SCW_ACCESS_KEY }}
+      SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
+      SCW_DEFAULT_ORGANIZATION_ID: ${{ vars.SCW_DEFAULT_ORGANIZATION_ID }}
+      SCW_DEFAULT_PROJECT_ID: ${{ vars.SCW_DEFAULT_PROJECT_ID }}
+      INFISICAL_MACHINE_IDENTITY_ID: ${{ vars.INFISICAL_MACHINE_IDENTITY_ID }}
+    steps:
+      - name: Assert state role ARN is present
+        env:
+          ROLE_ARN: ${{ vars.AWS_TF_STATE_ROLE_ARN }}
+        run: |
+          if [ -z "$ROLE_ARN" ]; then
+            echo "::error::vars.AWS_TF_STATE_ROLE_ARN is not set (provisioned by 00-remote_state/1-iam)."
+            exit 1
+          fi
+
+      - name: Resolve terraform command
+        id: cmd
+        env:
+          EVENT: ${{ github.event_name }}
+          DISPATCH_CMD: ${{ github.event.inputs.command }}
+        run: |
+          case "$EVENT" in
+            schedule)          cmd=destroy ;;
+            push)              cmd=apply ;;
+            workflow_dispatch) cmd="${DISPATCH_CMD:-plan}" ;;
+            *)                 cmd=plan ;;
+          esac
+          echo "command=$cmd" >> "$GITHUB_OUTPUT"
+          echo "Resolved terraform command: $cmd (event: $EVENT)"
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - uses: ./.github/actions/terraform
+        with:
+          root: 02-cluster/scaleway
+          tfvars-file: 02-cluster-staging.tfvars
+          command: ${{ steps.cmd.outputs.command }}
+          aws-role-arn: ${{ vars.AWS_TF_STATE_ROLE_ARN }}
