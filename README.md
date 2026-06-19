@@ -2,7 +2,7 @@
 
 This infrastructure contains the actual ScalePack infrastructure.
 
-All remote based environment states are stored in the S3 bucket provisioned by `./state/00-backend`. Check `version.tf` files from any root module in this repository for an example, stored under eu-west-3 region.
+All remote based environment states are stored in the S3 bucket provisioned by `./00-remote_state`. Check `version.tf` files from any root module in this repository for an example, stored under eu-west-3 region.
 
 ## Forking
 
