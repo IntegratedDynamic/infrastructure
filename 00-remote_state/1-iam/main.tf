@@ -1,6 +1,8 @@
-# An org-wide, read-only S3-lister IAM role — the first role created BY the CI
-# rather than by a human. It is created/updated when a push to main touches this
-# root (see .github/workflows/s3-lister-role.yml): GitHub Actions assumes the
+# An org-wide Terraform-state access IAM role (read/write + state lock, via
+# AmazonS3FullAccess) — the first role created BY the CI rather than by a human.
+# Every state-touching workflow assumes it for plan AND apply/destroy alike.
+# It is created/updated when a push to main touches this root (see
+# .github/workflows/iam_terraform-backend-role.yml): GitHub Actions assumes the
 # identity/00-ci-trust CI role and runs `terraform apply`.
 #
 # Two things are mandatory for the CI role to be ALLOWED to create this (see
@@ -20,7 +22,7 @@
 #
 # `use_name_prefix = false` keeps the role name EXACTLY `var.role_name` (no random
 # suffix) so its ARN is stable and a workflow can name it in configure-aws-credentials.
-module "s3_lister" {
+module "tf_state_access" {
   source  = "terraform-aws-modules/iam/aws//modules/iam-role"
   version = "6.6.1"
 
@@ -51,7 +53,7 @@ module "s3_lister" {
       }]
     }
   }
-  
+
   policies = {
     S3FullAccess = "arn:aws:iam::aws:policy/AmazonS3FullAccess"
   }

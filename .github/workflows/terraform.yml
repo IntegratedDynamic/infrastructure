@@ -1,0 +1,138 @@
+name: Terraform (reusable)
+
+# Reusable wrapper around the .github/actions/terraform composite action. This is
+# the layer that handles SECRETS properly: callers pass Scaleway keys via the
+# `secrets:` keyword (or the job's `environment` provides them) instead of as
+# plain action inputs. Invoke it at job level:
+#
+#   jobs:
+#     terraform:
+#       uses: ./.github/workflows/terraform.yml
+#       with: { root: ..., tfvars-file: ..., aws-role-arn: ..., environment: scaleway }
+#       secrets: inherit   # only needed for repo/org-level secrets
+#
+# Command resolution: the `command` input overrides; otherwise it is derived from
+# the triggering event — push → apply, schedule → destroy, everything else → plan.
+
+on:
+  workflow_call:
+    inputs:
+      root:
+        description: Path to the Terraform root.
+        required: true
+        type: string
+      tfvars-file:
+        description: Filename of the .tfvars under env/ (workspace = name without .tfvars).
+        required: true
+        type: string
+      aws-role-arn:
+        description: ARN of the IAM role to assume via OIDC (Terraform-state R/W).
+        required: true
+        type: string
+      command:
+        description: 'Override: plan | apply | destroy. Empty = derive from the event.'
+        required: false
+        type: string
+        default: ""
+      aws-region:
+        required: false
+        type: string
+        default: eu-west-3
+      lock:
+        description: When false, pass -lock=false.
+        required: false
+        type: boolean
+        default: true
+      environment:
+        description: GitHub environment to run in (scopes env secrets, e.g. the Scaleway keys). Empty = none.
+        required: false
+        type: string
+        default: ""
+      infisical-oidc-audience:
+        description: OIDC audience for the Infisical machine identity. Empty = skip the mint.
+        required: false
+        type: string
+        default: https://github.com/IntegratedDynamic
+      infisical-identity-id:
+        required: false
+        type: string
+        default: ""
+      scw-organization-id:
+        required: false
+        type: string
+        default: ""
+      scw-project-id:
+        required: false
+        type: string
+        default: ""
+    secrets:
+      SCW_ACCESS_KEY:
+        required: false
+      SCW_SECRET_KEY:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Carrying the environment here lets env-scoped secrets resolve (they cannot
+    # be passed from the caller via `secrets:`/`inherit`). It also satisfies
+    # zizmor's secrets-in-environment audit.
+    environment: ${{ inputs.environment }}
+    permissions:
+      id-token: write # mint OIDC tokens for AWS + Infisical
+      contents: read
+    # Provider credentials handed to the composite action via the job env. Secrets
+    # come from the `secrets:` block above (or the environment); the rest are
+    # non-sensitive IDs passed as inputs.
+    env:
+      SCW_ACCESS_KEY: ${{ secrets.SCW_ACCESS_KEY }}
+      SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
+      SCW_DEFAULT_ORGANIZATION_ID: ${{ inputs.scw-organization-id }}
+      SCW_DEFAULT_PROJECT_ID: ${{ inputs.scw-project-id }}
+      INFISICAL_MACHINE_IDENTITY_ID: ${{ inputs.infisical-identity-id }}
+    steps:
+      - name: Assert AWS role ARN is present
+        env:
+          ROLE_ARN: ${{ inputs.aws-role-arn }}
+        run: |
+          if [ -z "$ROLE_ARN" ]; then
+            echo "::error::aws-role-arn is empty — set the caller's vars.AWS_*_ROLE_ARN."
+            exit 1
+          fi
+
+      - name: Resolve terraform command
+        id: cmd
+        env:
+          EVENT: ${{ github.event_name }}
+          OVERRIDE: ${{ inputs.command }}
+        run: |
+          if [ -n "$OVERRIDE" ]; then
+            cmd="$OVERRIDE"
+          else
+            case "$EVENT" in
+              push)     cmd=apply ;;
+              schedule) cmd=destroy ;;
+              *)        cmd=plan ;;
+            esac
+          fi
+          echo "command=$cmd" >> "$GITHUB_OUTPUT"
+          echo "Resolved terraform command: $cmd (event: $EVENT, override: '${OVERRIDE:-}')"
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - uses: ./.github/actions/terraform
+        with:
+          root: ${{ inputs.root }}
+          tfvars-file: ${{ inputs.tfvars-file }}
+          command: ${{ steps.cmd.outputs.command }}
+          lock: ${{ inputs.lock }}
+          aws-role-arn: ${{ inputs.aws-role-arn }}
+          aws-region: ${{ inputs.aws-region }}
+          infisical-oidc-audience: ${{ inputs.infisical-oidc-audience }}

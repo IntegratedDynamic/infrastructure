@@ -3,10 +3,11 @@ resource "scaleway_iam_application" "this" {
   description = "GitHub Actions CI for the IntegratedDynamic/infrastructure repo (managed by terraform: github-ci/)."
 }
 
-# Dummy permission for the IAM Scaleway User. TBD
+# Lets CI manage the Kapsule cluster end-to-end (create/destroy): the K8s cluster
+# itself plus its VPC + private network + IPAM lookups. Project-scoped.
 resource "scaleway_iam_policy" "this" {
-  name           = "github-ci-object-storage-ro"
-  description    = "Read-only Object Storage for the GitHub Actions CI application, project-scoped."
+  name           = "github-ci-cluster-management"
+  description    = "Kubernetes/VPC/PrivateNetwork management for the GitHub Actions CI application, project-scoped."
   application_id = scaleway_iam_application.this.id
 
   rule {
