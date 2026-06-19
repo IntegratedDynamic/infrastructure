@@ -59,3 +59,10 @@ resource "null_resource" "update_kubeconfig" {
     EOT
   }
 }
+
+
+data "infisical_secrets" "infisical" {
+  env_slug     = "staging"
+  workspace_id = "7ecb6ed4-058a-46cd-ac9f-7e792469cf0f" // project ID
+  folder_path  = "/kubernetes"
+}

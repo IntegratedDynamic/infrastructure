@@ -54,3 +54,55 @@ resource "infisical_project_identity" "github_actions" {
     },
   ]
 }
+
+resource "infisical_identity" "kubernetes" {
+  name   = "kubernetes"
+  org_id = var.org_id
+
+  # Org-level role is no-access on purpose: this identity draws its actual
+  # permissions from the project membership below, never org-wide.
+  role = "no-access"
+}
+
+resource "infisical_project_identity" "kubernetes" {
+  project_id  = "7ecb6ed4-058a-46cd-ac9f-7e792469cf0f"
+  identity_id = infisical_identity.kubernetes.id
+  roles = [
+    {
+      role_slug = "member"
+    }
+  ]
+}
+
+resource "infisical_identity_universal_auth" "kubernetes" {
+  identity_id = infisical_identity.kubernetes.id
+}
+
+resource "infisical_identity_universal_auth_client_secret" "kubernetes" {
+  identity_id = infisical_identity.kubernetes.id
+}
+
+resource "infisical_secret_folder" "kubernetes" {
+  project_id       = "7ecb6ed4-058a-46cd-ac9f-7e792469cf0f"
+  environment_slug = "staging"
+  folder_path      = "/"
+  name             = "kubernetes"
+  description      = "Kubernetes credentials granting access to Infisical."
+}
+
+
+resource "infisical_secret" "kubernetes_client_id" {
+  name         = "INFISICAL_UNIVERSAL_AUTH_CLIENT_ID"
+  value        = infisical_identity_universal_auth_client_secret.kubernetes.client_id
+  env_slug     = "staging"
+  workspace_id = "7ecb6ed4-058a-46cd-ac9f-7e792469cf0f" # Project ID
+  folder_path  = "/kubernetes"
+}
+
+resource "infisical_secret" "kubernetes_client_secret" {
+  name         = "INFISICAL_UNIVERSAL_AUTH_CLIENT_SECRET"
+  value        = infisical_identity_universal_auth_client_secret.kubernetes.client_secret
+  env_slug     = "staging"
+  workspace_id = "7ecb6ed4-058a-46cd-ac9f-7e792469cf0f" # Project ID
+  folder_path  = "/kubernetes"
+}
