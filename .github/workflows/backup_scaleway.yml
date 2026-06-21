@@ -64,8 +64,6 @@ jobs:
       SCW_DEFAULT_ORGANIZATION_ID: ${{ vars.SCW_DEFAULT_ORGANIZATION_ID }}
       SCW_DEFAULT_PROJECT_ID: ${{ vars.SCW_DEFAULT_PROJECT_ID }}
       INFISICAL_MACHINE_IDENTITY_ID: ${{ vars.INFISICAL_MACHINE_IDENTITY_ID }}
-      BUCKET_NAME: ${{ vars.BACKUP_BUCKET_NAME }}
-      BUCKET_REGION: ${{ vars.BACKUP_BUCKET_REGION }}
     steps:
       - name: Assert state role ARN is present
         env:
@@ -106,9 +104,19 @@ jobs:
           command: ${{ steps.cmd.outputs.command }}
           aws-role-arn: ${{ vars.AWS_TF_STATE_ROLE_ARN }}
 
+      # The backup bucket is permanent infrastructure — state always exists regardless
+      # of the terraform command. Read outputs unconditionally so downstream steps
+      # always have the live values from state rather than hardcoded strings.
+      - name: Read Terraform outputs
+        id: tf-outputs
+        run: |
+          outputs=$(terraform -chdir=03-backup/scaleway output -json)
+          echo "bucket_name=$(echo "$outputs" | jq -r '.bucket_name.value')" >> "$GITHUB_OUTPUT"
+          echo "bucket_region=$(echo "$outputs" | jq -r '.bucket_region.value')" >> "$GITHUB_OUTPUT"
+
       - name: Verify backup bucket exists
         if: steps.cmd.outputs.command == 'apply'
         run: |
           curl -fsSL https://raw.githubusercontent.com/scaleway/scaleway-cli/master/scripts/get.sh | sh
           export PATH="$HOME/.local/bin:$PATH"
-          scw object bucket get "$BUCKET_NAME" --region "$BUCKET_REGION"
+          scw object bucket get "${{ steps.tf-outputs.outputs.bucket_name }}" --region "${{ steps.tf-outputs.outputs.bucket_region }}"
