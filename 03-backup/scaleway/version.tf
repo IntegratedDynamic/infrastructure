@@ -29,7 +29,7 @@ provider "scaleway" {}
 provider "infisical" {
   auth = {
     # Uncomment `universal` and comment `oidc` when running terraform locally.
-    universal = {}
-    # oidc = {}
+    # universal = {}
+    oidc = {}
   }
 }
