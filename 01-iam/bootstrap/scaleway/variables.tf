@@ -24,6 +24,12 @@ variable "project_id" {
   default     = "6283c05b-a4c7-4f83-a75f-83adad236d54"
 }
 
+variable "organization_id" {
+  description = "Scaleway organization ID. Used for org-scoped IAM permission sets (IAMApplicationManager, IAMPolicyManager)."
+  type        = string
+  default     = "6283c05b-a4c7-4f83-a75f-83adad236d54"
+}
+
 # Scaleway's org policy requires every API key to carry an expiry. This drives
 # the key's expires_at; once the window elapses, the next apply rotates the key.
 variable "api_key_rotation_days" {

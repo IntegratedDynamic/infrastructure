@@ -16,6 +16,38 @@ resource "scaleway_iam_policy" "this" {
   }
 }
 
+# Added for 03-backup/scaleway: the backup CI workflow runs under the same
+# github-ci identity and needs Object Storage management + IAM application/policy/
+# API key management to provision the bucket and scoped workload credentials.
+# Deletion is blocked at the bucket-policy level (see 03-backup/scaleway/policy.tf).
+resource "scaleway_iam_policy" "backup_ci" {
+  name           = "github-ci-backup-management"
+  description    = "Object Storage bucket + IAM workload identity management for the backup domain CI workflow (03-backup/scaleway/)."
+  application_id = scaleway_iam_application.this.id
+
+  rule {
+    project_ids = [var.project_id]
+    permission_set_names = [
+      "ObjectStorageBucketsRead",
+      "ObjectStorageBucketsWrite",
+      "ObjectStorageObjectsRead",
+      "ObjectStorageObjectsWrite",
+    ]
+  }
+
+  # IAM permission sets are organization-scoped — they cannot be combined
+  # with project_ids in the same rule.
+  rule {
+    organization_id = var.organization_id
+    permission_set_names = [
+      # Required to create/manage the scoped workload IAM application, policy,
+      # and API key in 03-backup/scaleway/iam.tf.
+      "IAMApplicationManager",
+      "IAMPolicyManager",
+    ]
+  }
+}
+
 # The org enforces an expiry on every API key, and `expires_at` is ForceNew, so
 # the key inherently rotates when the expiry moves. time_rotating makes that
 # concrete and self-renewing: the timestamp holds steady until the window
