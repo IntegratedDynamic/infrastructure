@@ -14,6 +14,9 @@ resource "scaleway_object_bucket" "backup" {
       days = var.retention_days
     }
 
+    # FinOps safeguard: avoids paying for stale superseded versions.
+    # The true backup retention policy (frequency, tiers, RTO/RPO) will be
+    # defined at the backup-solution layer (e.g. Velero schedule), not here.
     noncurrent_version_expiration {
       noncurrent_days = var.noncurrent_version_expiry_days
     }

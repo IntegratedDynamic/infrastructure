@@ -1,15 +1,24 @@
 name: Terraform — Scaleway backup bucket
 
-# Drives 03-backup/scaleway through the .github/actions/terraform composite action:
-#   - pull_request  → plan
-#   - push to main  → apply
-#   - workflow_dispatch → plan | apply  (no destroy — FR-013)
+# Drives 03-backup/scaleway through the .github/actions/terraform composite action.
 #
-# No scheduled trigger. The backup bucket is never destroyed by CI.
+# Domain restriction — NO DESTROY in CI (FR-013):
+#   The backup domain is intentionally permanent infrastructure. Destroying the
+#   bucket from CI would silently erase production backups. Destruction must be
+#   a deliberate admin action with elevated credentials outside of this pipeline.
+#   Enforcement is layered:
+#     1. No `destroy` option in workflow_dispatch (this file).
+#     2. No `schedule → destroy` mapping in the command-resolution step.
+#     3. `prevent_destroy = true` in 03-backup/scaleway/main.tf blocks
+#        `terraform destroy` even if someone runs it manually against this root.
+#
+# Trigger → command mapping:
+#   pull_request  → plan   (safety check, never mutates state)
+#   push to main  → apply  (the only automated mutation path)
+#   workflow_dispatch → plan | apply  (operator override, explicit choice)
+#
 # State R/W uses the org state role (vars.AWS_TF_STATE_ROLE_ARN).
-# Scaleway creds come from the `scaleway` environment (same API key as the
-# cluster workflow — extended with Object Storage + IAM permissions in
-# 01-iam/bootstrap/scaleway).
+# Scaleway creds come from the `scaleway` environment.
 
 on:
   pull_request:
@@ -26,14 +35,17 @@ on:
   workflow_dispatch:
     inputs:
       command:
-        description: 'Terraform command (apply = provision, no destroy available).'
+        description: 'Terraform command. destroy is not available — see domain restriction above.'
         type: choice
         options: [plan, apply]
         default: plan
 
+# Concurrency is keyed on the Terraform workspace, not the branch.
+# cancel-in-progress is false: Terraform state corruption from mid-run
+# interrupts is far worse than waiting in queue.
 concurrency:
-  group: backup-scaleway-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: backup-scaleway-03-backup-dev-bucket
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -52,8 +64,8 @@ jobs:
       SCW_DEFAULT_ORGANIZATION_ID: ${{ vars.SCW_DEFAULT_ORGANIZATION_ID }}
       SCW_DEFAULT_PROJECT_ID: ${{ vars.SCW_DEFAULT_PROJECT_ID }}
       INFISICAL_MACHINE_IDENTITY_ID: ${{ vars.INFISICAL_MACHINE_IDENTITY_ID }}
-      BUCKET_NAME: backup-dev-id
-      BUCKET_REGION: fr-par
+      BUCKET_NAME: ${{ vars.BACKUP_BUCKET_NAME }}
+      BUCKET_REGION: ${{ vars.BACKUP_BUCKET_REGION }}
     steps:
       - name: Assert state role ARN is present
         env:
@@ -64,6 +76,10 @@ jobs:
             exit 1
           fi
 
+      # Maps the GitHub event to a Terraform command.
+      # push → apply is the only automated mutation path (main branch only, per `on.push.branches`).
+      # workflow_dispatch lets an operator force plan or apply without a code change.
+      # Everything else (pull_request, etc.) stays read-only with plan.
       - name: Resolve terraform command
         id: cmd
         env:

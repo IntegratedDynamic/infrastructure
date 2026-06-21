@@ -8,7 +8,7 @@ resource "infisical_secret_folder" "backup" {
 
 resource "infisical_secret" "access_key" {
   name         = "BACKUP_ACCESS_KEY"
-  value        = scaleway_iam_api_key.workload.access_key
+  value        = scaleway_iam_api_key.kubernetes.access_key
   env_slug     = var.infisical_env_slug
   workspace_id = var.infisical_workspace_id
   folder_path  = infisical_secret_folder.backup.path
@@ -16,7 +16,7 @@ resource "infisical_secret" "access_key" {
 
 resource "infisical_secret" "secret_key" {
   name         = "BACKUP_SECRET_KEY"
-  value        = scaleway_iam_api_key.workload.secret_key
+  value        = scaleway_iam_api_key.kubernetes.secret_key
   env_slug     = var.infisical_env_slug
   workspace_id = var.infisical_workspace_id
   folder_path  = infisical_secret_folder.backup.path
