@@ -1,3 +1,6 @@
+# Spec Kit planning artifacts — local design docs, not part of the reviewed diff
+specs/
+
 # Local .terraform directories
 .terraform/
 

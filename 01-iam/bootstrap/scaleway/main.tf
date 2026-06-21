@@ -19,7 +19,8 @@ resource "scaleway_iam_policy" "this" {
 # Added for 03-backup/scaleway: the backup CI workflow runs under the same
 # github-ci identity and needs Object Storage management + IAM application/policy/
 # API key management to provision the bucket and scoped workload credentials.
-# Deletion is blocked at the bucket-policy level (see 03-backup/scaleway/policy.tf).
+# Bucket deletion is blocked via prevent_destroy + absence of a destroy trigger
+# in the CI workflow (Scaleway bucket policies do not support s3:DeleteBucket).
 resource "scaleway_iam_policy" "backup_ci" {
   name           = "github-ci-backup-management"
   description    = "Object Storage bucket + IAM workload identity management for the backup domain CI workflow (03-backup/scaleway/)."

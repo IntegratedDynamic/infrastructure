@@ -14,6 +14,6 @@ output "bucket_endpoint" {
 }
 
 output "workload_access_key" {
-  description = "Public access key for the scoped backup workload identity. The secret key is in Infisical only."
-  value       = scaleway_iam_api_key.workload.access_key
+  description = "Public access key for the scoped Kubernetes backup workload identity. The secret key is in Infisical only."
+  value       = scaleway_iam_api_key.kubernetes.access_key
 }
