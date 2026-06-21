@@ -1,0 +1,98 @@
+name: Terraform — Scaleway backup bucket
+
+# Drives 03-backup/scaleway through the .github/actions/terraform composite action:
+#   - pull_request  → plan
+#   - push to main  → apply
+#   - workflow_dispatch → plan | apply  (no destroy — FR-013)
+#
+# No scheduled trigger. The backup bucket is never destroyed by CI.
+# State R/W uses the org state role (vars.AWS_TF_STATE_ROLE_ARN).
+# Scaleway creds come from the `scaleway` environment (same API key as the
+# cluster workflow — extended with Object Storage + IAM permissions in
+# 01-iam/bootstrap/scaleway).
+
+on:
+  pull_request:
+    paths:
+      - '03-backup/scaleway/**'
+      - '.github/actions/terraform/**'
+      - '.github/workflows/backup_scaleway.yml'
+  push:
+    branches: [main]
+    paths:
+      - '03-backup/scaleway/**'
+      - '.github/actions/terraform/**'
+      - '.github/workflows/backup_scaleway.yml'
+  workflow_dispatch:
+    inputs:
+      command:
+        description: 'Terraform command (apply = provision, no destroy available).'
+        type: choice
+        options: [plan, apply]
+        default: plan
+
+concurrency:
+  group: backup-scaleway-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: scaleway
+    permissions:
+      id-token: write # mint OIDC tokens for AWS + Infisical
+      contents: read
+    env:
+      SCW_ACCESS_KEY: ${{ secrets.SCW_ACCESS_KEY }}
+      SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
+      SCW_DEFAULT_ORGANIZATION_ID: ${{ vars.SCW_DEFAULT_ORGANIZATION_ID }}
+      SCW_DEFAULT_PROJECT_ID: ${{ vars.SCW_DEFAULT_PROJECT_ID }}
+      INFISICAL_MACHINE_IDENTITY_ID: ${{ vars.INFISICAL_MACHINE_IDENTITY_ID }}
+      BUCKET_NAME: backup-dev-id
+      BUCKET_REGION: fr-par
+    steps:
+      - name: Assert state role ARN is present
+        env:
+          ROLE_ARN: ${{ vars.AWS_TF_STATE_ROLE_ARN }}
+        run: |
+          if [ -z "$ROLE_ARN" ]; then
+            echo "::error::vars.AWS_TF_STATE_ROLE_ARN is not set (provisioned by 01-iam/ci-managed/aws-state-access)."
+            exit 1
+          fi
+
+      - name: Resolve terraform command
+        id: cmd
+        env:
+          EVENT: ${{ github.event_name }}
+          DISPATCH_CMD: ${{ github.event.inputs.command }}
+        run: |
+          case "$EVENT" in
+            push)              cmd=apply ;;
+            workflow_dispatch) cmd="${DISPATCH_CMD:-plan}" ;;
+            *)                 cmd=plan ;;
+          esac
+          echo "command=$cmd" >> "$GITHUB_OUTPUT"
+          echo "Resolved terraform command: $cmd (event: $EVENT)"
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - uses: ./.github/actions/terraform
+        with:
+          root: 03-backup/scaleway
+          tfvars-file: 03-backup-dev-bucket.tfvars
+          command: ${{ steps.cmd.outputs.command }}
+          aws-role-arn: ${{ vars.AWS_TF_STATE_ROLE_ARN }}
+
+      - name: Verify backup bucket exists
+        if: steps.cmd.outputs.command == 'apply'
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/scaleway/scaleway-cli/master/scripts/get.sh | sh
+          export PATH="$HOME/.local/bin:$PATH"
+          scw object bucket get "$BUCKET_NAME" --region "$BUCKET_REGION"
