@@ -116,7 +116,10 @@ jobs:
 
       - name: Verify backup bucket exists
         if: steps.cmd.outputs.command == 'apply'
+        env:
+          BUCKET_NAME: ${{ steps.tf-outputs.outputs.bucket_name }}
+          BUCKET_REGION: ${{ steps.tf-outputs.outputs.bucket_region }}
         run: |
           curl -fsSL https://raw.githubusercontent.com/scaleway/scaleway-cli/master/scripts/get.sh | sh
           export PATH="$HOME/.local/bin:$PATH"
-          scw object bucket get "${{ steps.tf-outputs.outputs.bucket_name }}" --region "${{ steps.tf-outputs.outputs.bucket_region }}"
+          scw object bucket get "$BUCKET_NAME" --region "$BUCKET_REGION"
