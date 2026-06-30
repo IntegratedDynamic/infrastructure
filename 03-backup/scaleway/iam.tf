@@ -1,6 +1,6 @@
 resource "scaleway_iam_application" "kubernetes" {
   name        = "backup-k8s-${terraform.workspace}"
-  description = "Kubernetes workload identity for ${terraform.workspace} — grants pods object read/write on the backup bucket via Infisical → ESO → Secret (no administrative rights, managed by terraform: 03-backup/scaleway/)."
+  description = "Kubernetes workload identity for ${terraform.workspace} — grants pods object read/write on the backup bucket."
 }
 
 resource "scaleway_iam_policy" "kubernetes" {
@@ -10,7 +10,7 @@ resource "scaleway_iam_policy" "kubernetes" {
 
   rule {
     project_ids          = [var.project_id]
-    permission_set_names = ["ObjectStorageObjectsRead", "ObjectStorageObjectsWrite"]
+    permission_set_names = ["ObjectStorageObjectsRead", "ObjectStorageObjectsWrite", "ObjectStorageBucketsRead"]
   }
 }
 
