@@ -13,6 +13,10 @@ terraform {
       source  = "scaleway/scaleway"
       version = "~> 2.0"
     }
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 6.0"
+    }
     infisical = {
       source  = "infisical/infisical"
       version = "~> 0.16"
@@ -26,10 +30,23 @@ terraform {
 
 provider "scaleway" {}
 
-provider "infisical" {
-  auth = {
-    # Uncomment `universal` and comment `oidc` when running terraform locally.
-    # universal = {}
-    oidc = {}
-  }
+# AWS provider — used ONLY by kms.tf (OpenBao auto-unseal key + scoped IAM user).
+# Credentials are resolved by the AWS SDK chain, NOT hardcoded:
+#   - local: `aws sso login` -> the provider defaults to your SSO admin session
+#
+# IMPORTANT — apply path: these AWS resources (kms:CreateKey, iam:CreateUser,
+# iam:CreateAccessKey) CANNOT be applied by the backup CI workflow, which assumes
+# the S3-only `tf-state-access` role (and the CI permissions boundary explicitly
+# denies IAM users / access keys). kms.tf is therefore an ADMIN-APPLIED, run-it-
+# locally concern. A push that changes kms.tf will fail the backup CI apply.
+provider "aws" {
+  region = var.aws_region
 }
+
+# provider "infisical" {
+#   auth = {
+#     # Uncomment `universal` and comment `oidc` when running terraform locally.
+#     # universal = {}
+#     oidc = {}
+#   }
+# }
