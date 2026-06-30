@@ -39,7 +39,7 @@ if [ "$ws" = "default" ]; then
   echo "error: terraform workspace is 'default' — select a real workspace first (terraform workspace select <env>)" >&2
   exit 1
 fi
-terraform apply -auto-approve -var-file="env/${ws}.tfvars"
+terraform apply -auto-approve -var-file="env/${ws}.tfvars" $(test -f default.auto.tfvars && echo "-var-file=default.auto.tfvars")
 """
 
 [tasks.dev]
