@@ -10,7 +10,7 @@ resource "scaleway_iam_policy" "kubernetes" {
 
   rule {
     project_ids          = [var.project_id]
-    permission_set_names = ["ObjectStorageObjectsRead", "ObjectStorageObjectsWrite", "ObjectStorageBucketsRead"]
+    permission_set_names = ["ObjectStorageObjectsRead", "ObjectStorageObjectsWrite", "ObjectStorageBucketsRead", "ObjectStorageObjectsDelete"]
   }
 }
 
