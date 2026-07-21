@@ -59,3 +59,42 @@ resource "null_resource" "update_kubeconfig" {
     EOT
   }
 }
+
+
+resource "kubernetes_namespace" "openbao" {
+  metadata {
+    name = "openbao"
+  }
+  depends_on = [scaleway_k8s_pool.default]
+}
+
+resource "kubernetes_secret" "scaleway_s3_credentials" {
+  metadata {
+    name      = "scaleway-s3-credentials"
+    namespace = kubernetes_namespace.openbao.metadata[0].name
+  }
+
+  data = {
+    bucket     = "backup-dev-id"
+    AWS_ACCESS_KEY_ID = "SCW8FGA70P4HY3A120KV"
+    AWS_SECRET_ACCESS_KEY = var.scaleway_s3_secret_key
+  }
+}
+
+# AWS credentials OpenBao reads at startup for KMS auto-unseal (seal "awskms").
+# Sourced here — outside OpenBao — by necessity: OpenBao can't supply the very
+# creds it needs to unseal itself (chicken-and-egg). Values come from the
+# 03-backup/scaleway kms.tf outputs, fed via the gitignored *.auto.tfvars.
+# Key names (access_key/secret_key) mirror scaleway-s3-credentials so the
+# OpenBao chart's extraSecretEnvironmentVars mapping stays uniform.
+resource "kubernetes_secret" "openbao_unseal_aws" {
+  metadata {
+    name      = "openbao-unseal-aws"
+    namespace = kubernetes_namespace.openbao.metadata[0].name
+  }
+
+  data = {
+    AWS_ACCESS_KEY_ID = var.openbao_unseal_aws_access_key_id
+    AWS_SECRET_ACCESS_KEY = var.openbao_unseal_aws_secret_access_key
+  }
+}
