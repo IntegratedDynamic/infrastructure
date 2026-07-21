@@ -1,8 +1,8 @@
-data "infisical_secrets" "this" {
-  env_slug     = "staging"
-  workspace_id = "7ecb6ed4-058a-46cd-ac9f-7e792469cf0f" // project ID
-  folder_path  = "/"
-}
+# data "infisical_secrets" "this" {
+#   env_slug     = "staging"
+#   workspace_id = "7ecb6ed4-058a-46cd-ac9f-7e792469cf0f" // project ID
+#   folder_path  = "/"
+# }
 
 resource "helm_release" "argocd" {
   name             = "argocd"
@@ -21,9 +21,9 @@ resource "helm_release" "argocd" {
 
   set_sensitive = [{
     name = "configs.secret.argocdServerAdminPassword"
-    # ArgoCD expects a bcrypt() hash here. bcrypt() would regenerate on every
-    # run, so we store the hash directly in Infisical to avoid spurious diffs.
-    value = data.infisical_secrets.this.secrets["ArgoCD_admin_encrypted"].value
+    # ArgoCD require a `bcrypt()` hashed password here. But `bcrypt` generate a new hash at each execution
+    # So instead, we store the hash directly, so terraform is not confused anymore by fake changes
+    value = var.argocd_admin_password_hash
   }]
 
   values = [<<EOF
