@@ -19,13 +19,6 @@ resource "helm_release" "argocd" {
 
   depends_on = [scaleway_k8s_pool.default]
 
-  set_sensitive = [{
-    name = "configs.secret.argocdServerAdminPassword"
-    # ArgoCD require a `bcrypt()` hashed password here. But `bcrypt` generate a new hash at each execution
-    # So instead, we store the hash directly, so terraform is not confused anymore by fake changes
-    value = var.argocd_admin_password_hash
-  }]
-
   values = [<<EOF
 configs:
   params:
@@ -33,6 +26,14 @@ configs:
 
   cm:
     url: https://argocd.scalepack.fr
+
+    # Local admin login is redundant now that OIDC via Dex is working —
+    # one login path, no separate password to rotate/leak. To bring back
+    # a break-glass fallback: set this back to "true" and restore the
+    # set_sensitive block (removed in this commit — see git history) that
+    # sets configs.secret.argocdServerAdminPassword from
+    # var.argocd_admin_password_hash.
+    admin.enabled: "false"
 
     # Native OIDC against our own shared Dex (platform/scaleway/dex.yml in
     # the gitops repo, staticClients.argocd) instead of the chart's built-in
