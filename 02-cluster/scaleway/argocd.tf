@@ -48,6 +48,12 @@ configs:
       # carries the app.kubernetes.io/part-of: argocd label ArgoCD requires
       # for custom secret references.
       clientSecret: $argocd-oidc-client-secret:oidc.clientSecret
+      # `argocd login --sso` talks to Dex directly (PKCE, no client
+      # secret) rather than through argocd-server's own /auth/callback —
+      # it can't use the confidential `argocd` client above, so it gets
+      # its own public client (gitops repo: platform/scaleway/dex.yml,
+      # staticClients.argocd-cli).
+      cliClientID: argocd-cli
       requestedScopes:
         - openid
         - profile
