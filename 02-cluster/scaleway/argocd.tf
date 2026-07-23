@@ -55,7 +55,7 @@ configs:
 
   rbac:
     policy.csv: |
-      g, IntegratedDynamic:admins, role:admin
+      g, IntegratedDynamic:Admin, role:admin
     policy.default: role:readonly
 
 # The chart's own embedded Dex is redundant now that ArgoCD talks OIDC
