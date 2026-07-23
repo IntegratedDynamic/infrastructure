@@ -31,6 +31,38 @@ configs:
   params:
     server.insecure: true
 
+  cm:
+    url: https://argocd.scalepack.fr
+
+    # Native OIDC against our own shared Dex (platform/scaleway/dex.yml in
+    # the gitops repo, staticClients.argocd) instead of the chart's built-in
+    # Dex (disabled below) — one Dex instance for the whole platform, one
+    # place the GitHub org/team restriction is defined.
+    oidc.config: |
+      name: Dex
+      issuer: https://auth.scalepack.fr
+      clientID: argocd
+      # Resolved from the argocd-oidc-client-secret Secret (gitops repo:
+      # apps/argocd-config), not the default argocd-secret — that secret
+      # carries the app.kubernetes.io/part-of: argocd label ArgoCD requires
+      # for custom secret references.
+      clientSecret: $argocd-oidc-client-secret:oidc.clientSecret
+      requestedScopes:
+        - openid
+        - profile
+        - email
+        - groups
+
+  rbac:
+    policy.csv: |
+      g, IntegratedDynamic:admins, role:admin
+    policy.default: role:readonly
+
+# The chart's own embedded Dex is redundant now that ArgoCD talks OIDC
+# directly to our shared Dex — turned off rather than run two.
+dex:
+  enabled: false
+
 controller:
   replicas: 1
 
