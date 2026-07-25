@@ -23,9 +23,9 @@ resource "scaleway_k8s_pool" "default" {
   name        = "default"
   node_type   = "DEV1-M"
   size        = var.node_count
-  min_size    = 0
+  min_size    = 1
   max_size    = 3
-  autoscaling = false
+  autoscaling = true
   autohealing = true
 
   lifecycle {
