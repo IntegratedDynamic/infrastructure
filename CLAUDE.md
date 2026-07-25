@@ -41,6 +41,9 @@ terraform -chdir=01-iam/bootstrap/infisical         providers lock -platform=dar
 terraform -chdir=01-iam/ci-managed/aws-state-access providers lock -platform=darwin_arm64 -platform=linux_amd64
 terraform -chdir=02-cluster/local                   providers lock -platform=darwin_arm64 -platform=linux_amd64
 terraform -chdir=02-cluster/scaleway                providers lock -platform=darwin_arm64 -platform=linux_amd64
+terraform -chdir=03-backup/scaleway                 providers lock -platform=darwin_arm64 -platform=linux_amd64
+terraform -chdir=04-dns/scaleway                    providers lock -platform=darwin_arm64 -platform=linux_amd64
+terraform -chdir=05-secrets/bootstrap/openbao        providers lock -platform=darwin_arm64 -platform=linux_amd64
 ```
 
 Commit the updated lock files alongside the version change.
