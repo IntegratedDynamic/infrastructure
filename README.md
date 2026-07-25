@@ -26,6 +26,21 @@ Cette commande installe toutes les dépendances du projet définies dans `mise.t
 
 Cela configure les git hooks locaux pour automatiser les vérifications avant les commits/pushes.
 
+### Daily login (quick reference)
+
+Once onboarded, these are the two logins to redo regularly (not one-time setup) —
+both expire, so run them again whenever a command starts failing with an auth error:
+
+```bash
+# Terraform state (S3 backend) — needed before any terraform command. TTL ~ a few hours.
+aws sso login --profile infrastructure
+
+# OpenBao CLI (bao) — needed to read/write secrets directly with `bao kv ...`.
+# Requires BAO_ADDR pointed at the exposed UI (export BAO_ADDR="https://openbao.scalepack.fr/").
+# Token TTL is short (role-dependent, ~1h for the admin role) — relogin when it expires.
+bao login -method=oidc
+```
+
 ### Login with your credentials
 
 > Skip 2 and more if you only need local environment. 1 is kept because right now, Infisical SSO features are PayGated, but allow long lived credentials within your environment. All hail long lived credentials! (Don't forget to look into your own local secret encryption solution to avoid storing them in clear. In my case, macOS built-in's `security` binary is enough. See https://dev.to/alsaheem/how-to-store-secrets-in-the-mac-keychain-and-use-them-like-environment-variables-1aj7).
@@ -41,7 +56,7 @@ Cela configure les git hooks locaux pour automatiser les vérifications avant le
 
     Why AWS S3? It's extremely cheap, great DevX for mono storage management (fine grained IAM policies) and AWS includes free SSO setup for devops without friction. And Scaleway doesn't provide OIDC yet, which I do favor when it comes to CI runners, especially for such high-risk files.
 
-    Run `aws sso login`. This needs to be done daily and at bootstrap before running any terraform command locally, or state fetch will fail. 
+    Run `aws sso login --profile infrastructure`. This needs to be done daily and at bootstrap before running any terraform command locally, or state fetch will fail. 
 
     #### AWS SSO first setup: 
 
