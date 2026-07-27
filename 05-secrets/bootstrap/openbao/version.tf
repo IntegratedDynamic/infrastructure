@@ -16,6 +16,10 @@ terraform {
   }
 }
 
-# Address + token come from VAULT_ADDR / VAULT_TOKEN env vars (like the other
-# roots read creds from their respective CLI config/env) — see README.
-provider "vault" {}
+# Address hardcoded (not read from VAULT_ADDR): OpenBao's own CLI uses
+# BAO_ADDR/BAO_TOKEN, not Vault's VAULT_ADDR/VAULT_TOKEN — a `bao login`
+# session doesn't populate the env var this hashicorp/vault provider expects.
+# Only the token stays in the environment — see README.
+provider "vault" {
+  address = "https://openbao.scalepack.fr/"
+}
