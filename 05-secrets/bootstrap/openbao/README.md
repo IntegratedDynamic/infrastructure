@@ -48,13 +48,13 @@ authenticating without a human in the loop.
 
 ## Credentials
 
-- **`vault` provider**: reads `VAULT_ADDR` / `VAULT_TOKEN` from the
-  environment (nothing hardcoded here, same posture as the other roots'
-  `provider "scaleway" {}` / `provider "infisical" {}` blocks). Use your OIDC
-  admin session:
+- **`vault` provider**: `address` is hardcoded in `version.tf` — OpenBao's own
+  CLI reads `BAO_ADDR`/`BAO_TOKEN`, not Vault's `VAULT_ADDR`/`VAULT_TOKEN`, so
+  a `bao login` session never populates the env var this (Vault-lineage)
+  provider looks for; hardcoding the address sidesteps that mismatch. Only
+  the token comes from the environment. Use your OIDC admin session:
 
   ```bash
-  export VAULT_ADDR="https://openbao.scalepack.fr/"
   export VAULT_TOKEN="$(cat ~/.vault-token)"   # after `bao login -method=oidc`, role admin, TTL ~1h
   ```
 
