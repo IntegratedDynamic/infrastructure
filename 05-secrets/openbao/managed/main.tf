@@ -207,6 +207,15 @@ data "terraform_remote_state" "dns_scaleway" {
   }
 }
 
+data "terraform_remote_state" "backup_scaleway" {
+  backend = "s3"
+  config = {
+    bucket = "id-terraform-state20260612164136440800000001"
+    region = "eu-west-3"
+    key    = "backup/scaleway/03-backup-dev-bucket/terraform.tfstate"
+  }
+}
+
 # --- Arbitrary Dex<->client shared secrets: nothing external constrains
 # these values, so Terraform generates and owns them outright — ArgoCD,
 # Grafana, and Dex itself all read the *same* kv/apps/dex/credentials object
@@ -346,4 +355,24 @@ resource "vault_kv_secret_v2" "secrets_sync_github_infrastructure_scaleway" {
     }
   ))
   data_json_wo_version = 1
+}
+
+# apps/velero/scaleway-s3-credentials — Velero's Object Storage credentials
+# (gitops repo apps/velero-init, platform/scaleway/velero.yml). A SEPARATE IAM
+# key AND bucket from scaleway-s3-credentials (OpenBao's own snapshot agent):
+# originally this reused OpenBao's key/bucket, but confirmed live (2026-07-28)
+# that OpenBao's snapshot script does a flat `s3cmd ls` on the bucket root for
+# its own retention cleanup and chokes on any object/prefix it doesn't own —
+# Velero writing into that same bucket broke every subsequent OpenBao
+# snapshot job. See 03-backup/scaleway/main.tf's scaleway_object_bucket.velero
+# and iam.tf's scaleway_iam_application.velero.
+resource "vault_kv_secret_v2" "velero_scaleway_s3_credentials" {
+  mount = vault_mount.kv.path
+  name  = "apps/velero/scaleway-s3-credentials"
+
+  data_json_wo = jsonencode({
+    SCW_ACCESS_KEY = data.terraform_remote_state.backup_scaleway.outputs.velero_workload_access_key
+    SCW_SECRET_KEY = data.terraform_remote_state.backup_scaleway.outputs.velero_workload_secret_key
+  })
+  data_json_wo_version = 2
 }
