@@ -1,10 +1,13 @@
-# 05-secrets/bootstrap/openbao — Terraform identity for OpenBao
+# 05-secrets/openbao/bootstrap — Terraform identity for OpenBao
 
-A standalone Terraform root that provisions the **AppRole identity a future
-Terraform module will use to manage OpenBao's internal configuration**
-declaratively (auth methods, mounts, ACL policies), instead of the `bao` CLI
-one-off commands this cluster's config has relied on so far (see the gitops
-repo's `openbao-claude.md` for that history).
+A standalone Terraform root that provisions the **AppRole identity
+`05-secrets/openbao/managed` (and any later root) uses to manage OpenBao's
+internal configuration** declaratively (auth methods, mounts, ACL policies),
+instead of the `bao` CLI one-off commands this cluster's config relied on
+originally (see the gitops repo's `openbao-claude.md` for that history).
+
+See [`../README.md`](../README.md) for the self-init pattern this root
+implements — read it before changing anything here.
 
 ## Why its own domain, not `01-iam/`
 
@@ -59,27 +62,27 @@ authenticating without a human in the loop.
   ```
 
   Re-run `bao login -method=oidc` (interactive, browser-based — Claude cannot
-  drive it) whenever the token expires. The root token also works if handed
-  over with context, but per the plan to stop relying on it, prefer OIDC.
+  drive it) whenever the token expires. `var.root_token` (see `../README.md`)
+  works too, but prefer OIDC once it's wired up.
 - **S3 state backend**: same AWS-style env vars as every other root (via
   `mise.toml`'s `[env]` block).
 
 ## Apply
 
 ```bash
-terraform -chdir=05-secrets/bootstrap/openbao init
-terraform -chdir=05-secrets/bootstrap/openbao workspace select -or-create 05-secrets-openbao
-terraform -chdir=05-secrets/bootstrap/openbao plan  -var-file=env/05-secrets-openbao.tfvars    # review first
-terraform -chdir=05-secrets/bootstrap/openbao apply -var-file=env/05-secrets-openbao.tfvars    # mounts approle/, creates policy+role+secret_id
+terraform -chdir=05-secrets/openbao/bootstrap init
+terraform -chdir=05-secrets/openbao/bootstrap workspace select -or-create 05-secrets-openbao
+terraform -chdir=05-secrets/openbao/bootstrap plan  -var-file=env/05-secrets-openbao.tfvars    # review first
+terraform -chdir=05-secrets/openbao/bootstrap apply -var-file=env/05-secrets-openbao.tfvars    # mounts approle/, creates policy+role+secret_id
 ```
 
 > Never `terraform apply`/`destroy` here without explicit approval.
 
-## Consuming the AppRole from a future module
+## Consuming the AppRole (05-secrets/openbao/managed onward)
 
 ```bash
-terraform -chdir=05-secrets/bootstrap/openbao output -raw role_id
-terraform -chdir=05-secrets/bootstrap/openbao output -raw secret_id   # sensitive — don't paste into shell history
+terraform -chdir=05-secrets/openbao/bootstrap output -raw role_id
+terraform -chdir=05-secrets/openbao/bootstrap output -raw secret_id   # sensitive — don't paste into shell history
 ```
 
 The consuming root's `local.auto.tfvars` (per-developer, gitignored — same
@@ -96,7 +99,7 @@ token.
   stops being usable after that window. Force early rotation with:
 
   ```bash
-  terraform -chdir=05-secrets/bootstrap/openbao apply -replace=vault_approle_auth_backend_role_secret_id.terraform -var-file=env/05-secrets-openbao.tfvars
+  terraform -chdir=05-secrets/openbao/bootstrap apply -replace=vault_approle_auth_backend_role_secret_id.terraform -var-file=env/05-secrets-openbao.tfvars
   ```
 
   Re-run the "Consuming the AppRole" step afterward — the old `secret_id`

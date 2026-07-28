@@ -20,13 +20,14 @@ terraform {
   }
 }
 
-# Authenticates as the `terraform` AppRole from 05-secrets/bootstrap/openbao —
+# Authenticates as the `terraform` AppRole from 05-secrets/openbao/bootstrap —
 # this root is the machine identity that role exists for. Address hardcoded,
 # not read from VAULT_ADDR: OpenBao's own CLI populates BAO_ADDR/BAO_TOKEN,
 # not Vault's VAULT_ADDR/VAULT_TOKEN, so relying on the env var is a trap (see
 # the bootstrap root's version.tf/README for the incident this came from).
 provider "vault" {
   address = "https://openbao.scalepack.fr/"
+  # address = "http://127.0.0.1:8200/"
 
   auth_login {
     path = "auth/approle/login"
