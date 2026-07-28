@@ -327,30 +327,23 @@ resource "vault_kv_secret_v2" "secrets_sync_github_repo" {
   data_json_wo_version = 1
 }
 
-# One object per repo+environment pair. SCW_ACCESS_KEY/SCW_SECRET_KEY for
-# infrastructure/scaleway specifically come from infra's own IAM root
-# (04-dns/scaleway) rather than a hand-copied variable value — merged in
-# here, not stored in var.secrets_sync_github at all.
-resource "vault_kv_secret_v2" "secrets_sync_github_repo_env" {
-  for_each = nonsensitive(merge([
-    for repo, cfg in var.secrets_sync_github.repos : {
-      for env, secrets in cfg.environments : "${repo}-${env}" => {
-        repo = repo
-        env  = env
-      }
-    }
-  ]...))
-
+# The only repo+environment target today. Written as a plain resource, not a
+# for_each over var.secrets_sync_github.repos.*.environments — there's one
+# member, and it needs a special-cased merge (SCW_ACCESS_KEY/SCW_SECRET_KEY
+# from infra's own 04-dns/scaleway state, not a hand-copied variable value).
+# A generic for_each here would just be a single case with a fake abstraction
+# wrapped around it. Revisit if/when a second repo+environment target with no
+# remote-state merge shows up.
+resource "vault_kv_secret_v2" "secrets_sync_github_infrastructure_scaleway" {
   mount = vault_mount.kv.path
-  name  = "apps/secrets-sync/github/${each.key}"
+  name  = "apps/secrets-sync/github/infrastructure-scaleway"
 
-  data_json_wo = jsonencode(
-    each.value.repo == "infrastructure" && each.value.env == "scaleway"
-    ? merge(var.secrets_sync_github.repos[each.value.repo].environments[each.value.env], {
+  data_json_wo = jsonencode(merge(
+    var.secrets_sync_github.repos["infrastructure"].environments["scaleway"],
+    {
       SCW_ACCESS_KEY = data.terraform_remote_state.dns_scaleway.outputs.workload_access_key
       SCW_SECRET_KEY = data.terraform_remote_state.dns_scaleway.outputs.workload_secret_key
-    })
-    : var.secrets_sync_github.repos[each.value.repo].environments[each.value.env]
-  )
+    }
+  ))
   data_json_wo_version = 1
 }
