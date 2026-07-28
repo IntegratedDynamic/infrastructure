@@ -1,4 +1,4 @@
-# 05-secrets/managed/openbao — OpenBao's internal configuration as code
+# 05-secrets/openbao/managed — OpenBao's internal configuration as code
 
 Reconciles Terraform with OpenBao's **actual, already-running** state — not
 just structure (mounts, auth methods, policies) but the secret content
@@ -12,7 +12,7 @@ created, so that after the first `terraform apply` OpenBao ended up in
 exactly the state it was already in — as if it had been built by Terraform
 from the start. See "Reconciling on a fresh checkout" below.
 
-## Why its own root, separate from `05-secrets/bootstrap/openbao`
+## Why its own root, separate from `05-secrets/openbao/bootstrap`
 
 `bootstrap/openbao` created the `terraform` AppRole itself — that needed a
 human admin credential (OIDC), the same trust-anchor pattern as
@@ -64,10 +64,17 @@ that triggers a rewrite; bump it to rotate:
 - `secrets_sync_github_global` / `secrets_sync_github_repo[...]` /
   `secrets_sync_github_repo_env[...]` (`apps/secrets-sync/github/*`) — see
   `var.secrets_sync_github` below.
+- `velero_scaleway_s3_credentials` (`apps/velero/scaleway-s3-credentials`) —
+  `SCW_ACCESS_KEY`/`SCW_SECRET_KEY` come from
+  `data.terraform_remote_state.backup_scaleway` (infra's own `03-backup/scaleway`
+  root), but a SEPARATE IAM key and bucket from OpenBao's own snapshot agent —
+  sharing OpenBao's bucket broke its own `s3cmd`-based retention cleanup
+  (confirmed live 2026-07-28), so Velero gets `scaleway_object_bucket.velero`
+  + `scaleway_iam_application.velero` of its own.
 
 Deliberately **not** managed: `default` and `root` (OpenBao built-ins), and
 the `approle`/`terraform` auth backend/policy/role (owned by
-`05-secrets/bootstrap/openbao` — importing them here too would split-brain
+`05-secrets/openbao/bootstrap` — importing them here too would split-brain
 two Terraform states over the same objects).
 
 ## `var.secrets_sync_github`'s shape
@@ -100,7 +107,7 @@ convention, not automation.
 ## Credentials
 
 - **AppRole** (`var.approle_role_id` / `var.approle_secret_id`): from
-  `05-secrets/bootstrap/openbao`'s outputs —
+  `05-secrets/openbao/bootstrap`'s outputs —
 
   ```bash
   terraform -chdir=../../bootstrap/openbao output -raw role_id
@@ -128,9 +135,9 @@ policies, then each `vault_kv_secret_v2` via `<mount>/data/<name>` as the
 import ID, e.g. `kv/data/apps/dex/credentials`).
 
 ```bash
-terraform -chdir=05-secrets/managed/openbao init
-terraform -chdir=05-secrets/managed/openbao workspace select -or-create 05-secrets-openbao-secrets
-terraform -chdir=05-secrets/managed/openbao plan
+terraform -chdir=05-secrets/openbao/managed init
+terraform -chdir=05-secrets/openbao/managed workspace select -or-create 05-secrets-openbao-secrets
+terraform -chdir=05-secrets/openbao/managed plan
 ```
 
 A clean plan on the structure resources (zero changes) confirms the code
@@ -142,8 +149,8 @@ diffed (by design, see above).
 ## Apply
 
 ```bash
-terraform -chdir=05-secrets/managed/openbao plan
-terraform -chdir=05-secrets/managed/openbao apply
+terraform -chdir=05-secrets/openbao/managed plan
+terraform -chdir=05-secrets/openbao/managed apply
 ```
 
 > Never `terraform apply`/`destroy` here without explicit approval — this

@@ -1,10 +1,10 @@
 variable "approle_role_id" {
-  description = "role_id of the `terraform` AppRole (output of 05-secrets/bootstrap/openbao)."
+  description = "role_id of the `terraform` AppRole (output of 05-secrets/openbao/bootstrap)."
   type        = string
 }
 
 variable "approle_secret_id" {
-  description = "secret_id of the `terraform` AppRole (output of 05-secrets/bootstrap/openbao)."
+  description = "secret_id of the `terraform` AppRole (output of 05-secrets/openbao/bootstrap)."
   type        = string
   sensitive   = true
 }

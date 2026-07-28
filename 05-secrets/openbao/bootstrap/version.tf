@@ -22,4 +22,6 @@ terraform {
 # Only the token stays in the environment — see README.
 provider "vault" {
   address = "https://openbao.scalepack.fr/"
+  # address = "http://127.0.0.1:8200/"
+  # token = var.root_token
 }

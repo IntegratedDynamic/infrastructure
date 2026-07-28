@@ -1,3 +1,9 @@
+variable "root_token" {
+  description = "OpenBao root token — the self-init bootstrap credential (see ../README.md). Only needed for this root's first apply against a given OpenBao; an OIDC admin session works too once wired up."
+  type        = string
+  sensitive   = true
+}
+
 variable "token_ttl_seconds" {
   description = "Default TTL of tokens minted from the terraform AppRole role."
   type        = number
