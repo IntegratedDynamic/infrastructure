@@ -1,6 +1,7 @@
-bucket_name = "backup-dev-id"
-region      = "fr-par"
-project_id  = "6283c05b-a4c7-4f83-a75f-83adad236d54"
+bucket_name        = "backup-dev-id"
+velero_bucket_name = "backup-velero-dev-id"
+region             = "fr-par"
+project_id         = "6283c05b-a4c7-4f83-a75f-83adad236d54"
 
 ci_application_id = "4d50bbbd-e8a2-4b51-80c5-6aa47de669f7"
 

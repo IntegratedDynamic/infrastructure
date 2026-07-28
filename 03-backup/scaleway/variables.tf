@@ -3,6 +3,11 @@ variable "bucket_name" {
   type        = string
 }
 
+variable "velero_bucket_name" {
+  description = "Velero backup bucket name. Deliberately separate from bucket_name (OpenBao's own snapshots) — sharing a bucket broke OpenBao's s3cmd-based retention cleanup (see main.tf). Must include the environment name (e.g. backup-velero-dev-id)."
+  type        = string
+}
+
 variable "region" {
   description = "Scaleway region for the bucket."
   type        = string

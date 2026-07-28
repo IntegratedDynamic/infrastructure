@@ -24,6 +24,24 @@ output "workload_secret_key" {
   value       = scaleway_iam_api_key.kubernetes.secret_key
 }
 
+# ── Velero (separate bucket + identity, see main.tf / iam.tf) ───────────────
+
+output "velero_bucket_name" {
+  description = "Provisioned Velero backup bucket name."
+  value       = scaleway_object_bucket.velero.name
+}
+
+output "velero_workload_access_key" {
+  description = "Public access key for the scoped Velero Kubernetes workload identity."
+  value       = scaleway_iam_api_key.velero.access_key
+}
+
+output "velero_workload_secret_key" {
+  sensitive   = true
+  description = "Secret access key for the scoped Velero Kubernetes workload identity."
+  value       = scaleway_iam_api_key.velero.secret_key
+}
+
 # ── OpenBao auto-unseal (AWS KMS, kms.tf) ────────────────────────────────────
 
 output "openbao_unseal_kms_key_id" {
