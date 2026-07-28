@@ -7,10 +7,14 @@ resource "vault_auth_backend" "approle" {
   path = "approle"
 }
 
-# Deliberately excludes kv/data/* and kv/metadata/* — this identity manages the
-# shape of OpenBao (what's mounted, what auth methods/roles/policies exist), not
-# the secret values living inside. sys/mounts/* and sys/auth/* are Vault
-# "root-protected" endpoints, hence the explicit `sudo` capability.
+# This identity is meant to bootstrap OpenBao from scratch, end to end — not
+# just its shape (mounts, auth methods, policies) but the secret values living
+# inside too, at least the ones OpenBao's own config owns the lifecycle of
+# (Dex client secrets, Grafana's admin password, etc). Deliberately no
+# `delete` on kv/data|metadata/* though: this identity can create/own secret
+# content, but destroying it isn't part of "bootstrap/reconcile". sys/mounts/*
+# and sys/auth/* are Vault "root-protected" endpoints, hence the explicit
+# `sudo` capability there.
 resource "vault_policy" "terraform" {
   name = "terraform"
 
@@ -43,6 +47,16 @@ resource "vault_policy" "terraform" {
 
     path "sys/policies/acl/*" {
       capabilities = ["create", "read", "update", "delete", "list"]
+    }
+
+    # KV v2 secret data this identity owns the lifecycle of. No "delete" —
+    # this identity creates/reconciles secret content, it doesn't destroy it.
+    path "kv/data/apps/*" {
+      capabilities = ["create", "read", "update", "list"]
+    }
+
+    path "kv/metadata/apps/*" {
+      capabilities = ["create", "read", "update", "list"]
     }
   EOT
 }
