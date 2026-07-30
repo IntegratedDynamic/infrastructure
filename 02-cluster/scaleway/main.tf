@@ -22,6 +22,8 @@ resource "scaleway_k8s_pool" "default" {
   cluster_id  = scaleway_k8s_cluster.this.id
   name        = "default"
   node_type   = "DEV1-M"
+  # Put whatever number is required to avoid node pressure signals during startup: https://kubernetes.io/docs/concepts/scheduling-eviction/node-pressure-eviction/
+  # Node pressure during startup can end-up with unexcepted race conditions.
   size        = var.node_count
   min_size    = 1
   max_size    = 3
