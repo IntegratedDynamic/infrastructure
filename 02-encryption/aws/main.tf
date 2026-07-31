@@ -19,15 +19,16 @@
 #     kms_key_id = "<kms_key_id output>"
 #   }
 #
-# APPLY PATH — admin/local only. See version.tf: the backup CI role is S3-only
-# and the CI permissions boundary denies IAM users + access keys. Apply this
-# locally with SSO admin credentials (`aws sso login`).
+# APPLY PATH — local or CI, via the openbao-unseal-ci role (see version.tf).
 # =============================================================================
 
 data "aws_caller_identity" "current" {}
 data "aws_partition" "current" {}
 
 locals {
+  # Kept identical to the value it had inside 03-backup/scaleway (this root's
+  # workspace name is deliberately unchanged — see env/ — so this doesn't
+  # rename/recreate the live KMS alias or IAM user).
   unseal_name = "openbao-unseal-${terraform.workspace}"
 }
 
@@ -47,10 +48,11 @@ resource "aws_iam_user" "openbao_unseal" {
   }
 }
 
-# Scaleway-side keys carry an expiry (see iam.tf); AWS access keys do not expire
-# on their own. Rotation is a manual operator action: taint this key, re-apply,
-# then update the OpenBao Secret. Kept static because OpenBao must read it at
-# every pod start (including unattended restarts), with no human in the loop.
+# Scaleway-side keys carry an expiry (see modules/scaleway-machine-identity);
+# AWS access keys do not expire on their own. Rotation is a manual operator
+# action: taint this key, re-apply, then update the OpenBao Secret. Kept
+# static because OpenBao must read it at every pod start (including
+# unattended restarts), with no human in the loop.
 resource "aws_iam_access_key" "openbao_unseal" {
   user = aws_iam_user.openbao_unseal.name
 }
