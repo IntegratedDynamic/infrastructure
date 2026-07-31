@@ -5,7 +5,7 @@ Actions uses to authenticate to Scaleway**. First real consumer: a smoke-test
 workflow that lists Object Storage buckets; the Terraform CI/CD pipeline itself
 is a separate, later concern.
 
-This is **not** under `02-cluster/` — it provisions no cluster. It's a
+This is **not** under `10-cluster/` — it provisions no cluster. It's a
 `01-iam/bootstrap/` trust anchor (human-applied), kept as its own root so its
 state and blast radius stay small.
 
@@ -30,19 +30,24 @@ Revisit OIDC if/when Scaleway ships it (see the link above).
 
 ## What it creates
 
-- `scaleway_iam_application.github_ci` — the CI identity.
-- `scaleway_iam_policy.github_ci` — `permission_set_names = ["ObjectStorageReadOnly"]`,
-  scoped to `var.project_id` (and **no** broader set).
-- `scaleway_iam_api_key.github_ci` — the API key for that application, with
-  `default_project_id` baked in so `scw object bucket list` resolves the right
-  scope without the workflow passing a project ID. The org enforces an expiry on
-  every key, so `time_rotating.api_key` drives `expires_at` (default 365 days,
-  `var.api_key_rotation_days`) and rotates the key on the next apply after it
-  lapses — see [Rotation / revocation](#rotation--revocation).
-- `infisical_secret.scw_access_key` / `infisical_secret.scw_secret_key` — the key
-  written into Infisical (env `staging`, folder `/ci` by default). The secret half
-  is Terraform-`sensitive`; it's never printed or committed (state-only, per the
-  repo's bootstrap model).
+Via `module "ci_identity"` ([modules/scaleway-machine-identity](../../../modules/scaleway-machine-identity)):
+
+- One `scaleway_iam_application` — the CI identity.
+- Two `scaleway_iam_policy` objects on it: `cluster_management` (`VPCFullAccess`,
+  `KubernetesFullAccess`, `PrivateNetworksFullAccess`, `IPAMReadOnly`, project-scoped —
+  lets CI create/destroy the Kapsule cluster) and `backup_management` (Object
+  Storage bucket/object management, project-scoped, plus `IAMApplicationManager`/
+  `IAMPolicyManager`, org-scoped — lets CI provision the storage domain's buckets
+  and their scoped workload identities in `03-storage/scaleway/`).
+- One `scaleway_iam_api_key` for that application, with `default_project_id` baked
+  in so `scw object bucket list` resolves the right scope without the workflow
+  passing a project ID. The org enforces an expiry on every key, so
+  `time_rotating` drives `expires_at` (default 365 days, `var.api_key_rotation_days`)
+  and rotates the key on the next apply after it lapses — see
+  [Rotation / revocation](#rotation--revocation).
+
+Nothing is pushed to Infisical (retired — see repo root). The secret key stays
+state-only; distribute it by hand (see below).
 
 ## Credentials
 
@@ -50,9 +55,6 @@ Same as the other roots:
 
 - **Scaleway** provider reads creds + default region/project from the **scw CLI
   config** (`~/.config/scw/config.yaml`).
-- **Infisical** provider authenticates via a **universal-auth machine identity**;
-  its `client_id` / `client_secret` come from `*.auto.tfvars` (per-developer,
-  gitignored — see `nico.auto.tfvars`).
 - The **S3 state backend** authenticates with AWS-style env vars derived from the
   scw config; `mise.toml`'s `[env]` block injects them automatically under mise.
 
@@ -66,14 +68,13 @@ terraform -chdir=01-iam/bootstrap/scaleway apply   # billable: creates an IAM ke
 
 > Never `terraform apply`/`destroy` here without explicit approval.
 
-After apply, the access key is an output and both halves are in Infisical.
+After apply, the access key is an output; the secret key is state-only.
 
 ## Wiring the GitHub secrets (manual)
 
-Automating the Infisical → GitHub push is deferred (it'd mean adding a GitHub
-token to this bootstrap). For now, set the two repo secrets by hand. Read the
-values straight out of the Terraform state/output and Infisical — **don't paste
-them into your shell history or echo them**:
+There's no automated push (Infisical, which used to carry this, is retired) — set
+the two repo secrets by hand. Read the values straight out of the Terraform
+state/output — **don't paste them into your shell history or echo them**:
 
 ```bash
 # SCW_ACCESS_KEY is a public identifier, exposed as a Terraform output:
@@ -84,13 +85,9 @@ gh secret set SCW_ACCESS_KEY \
 # SCW_SECRET_KEY is sensitive — pipe it from the API key resource without printing:
 gh secret set SCW_SECRET_KEY \
   --repo IntegratedDynamic/infrastructure \
-  --body "$(terraform -chdir=01-iam/bootstrap/scaleway state show -no-color scaleway_iam_api_key.github_ci \
+  --body "$(terraform -chdir=01-iam/bootstrap/scaleway state show -no-color 'module.ci_identity.scaleway_iam_api_key.this' \
             | awk '/secret_key/ {print $3; exit}' | tr -d '\"')"
 ```
-
-(Or copy the secret from Infisical → `staging` → `/ci` → `SCW_SECRET_KEY` and
-`gh secret set SCW_SECRET_KEY --repo IntegratedDynamic/infrastructure` reading
-from stdin.)
 
 ## Verify end to end
 
@@ -124,11 +121,11 @@ The API key lives entirely in this root's state.
 - **On demand** — force it early with:
 
   ```bash
-  terraform -chdir=01-iam/bootstrap/scaleway apply -replace=scaleway_iam_api_key.github_ci
+  terraform -chdir=01-iam/bootstrap/scaleway apply -replace='module.ci_identity.scaleway_iam_api_key.this'
   ```
 
 Either way the key material changes, so **re-run the `gh secret set` steps above**
-afterwards (the Infisical copies update automatically; the GitHub secrets don't).
+afterwards.
 
 To kill access entirely, destroy the application (revokes the key) — but mind
 that any workflow depending on it will start failing.

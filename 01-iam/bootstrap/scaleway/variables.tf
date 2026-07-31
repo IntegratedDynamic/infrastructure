@@ -1,21 +1,3 @@
-variable "infisical_workspace_id" {
-  description = "Infisical project (workspace) ID the CI secrets are written to."
-  type        = string
-  default     = "7ecb6ed4-058a-46cd-ac9f-7e792469cf0f"
-}
-
-variable "infisical_env_slug" {
-  description = "Infisical environment slug the CI secrets live in."
-  type        = string
-  default     = "staging"
-}
-
-variable "infisical_folder_path" {
-  description = "Infisical folder the CI secrets are written to (kept separate from the cluster bootstrap secrets)."
-  type        = string
-  default     = "/ci"
-}
-
 # The default project shares the organization's UUID on Scaleway. The buckets the
 # CI identity must list live here, so we scope the policy and the API key to it.
 variable "project_id" {
