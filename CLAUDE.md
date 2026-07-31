@@ -34,16 +34,15 @@ The `.terraform.lock.hcl` in each root must cover **both** `darwin_arm64` (local
 `mise run lock` is equivalent to:
 
 ```bash
-terraform -chdir=00-remote_state                    providers lock -platform=darwin_arm64 -platform=linux_amd64
+terraform -chdir=00-foundation/aws                providers lock -platform=darwin_arm64 -platform=linux_amd64
 terraform -chdir=01-iam/bootstrap/aws               providers lock -platform=darwin_arm64 -platform=linux_amd64
 terraform -chdir=01-iam/bootstrap/scaleway          providers lock -platform=darwin_arm64 -platform=linux_amd64
-terraform -chdir=01-iam/bootstrap/infisical         providers lock -platform=darwin_arm64 -platform=linux_amd64
-terraform -chdir=01-iam/ci-managed/aws-state-access providers lock -platform=darwin_arm64 -platform=linux_amd64
-terraform -chdir=02-cluster/local                   providers lock -platform=darwin_arm64 -platform=linux_amd64
-terraform -chdir=02-cluster/scaleway                providers lock -platform=darwin_arm64 -platform=linux_amd64
-terraform -chdir=03-backup/scaleway                 providers lock -platform=darwin_arm64 -platform=linux_amd64
-terraform -chdir=04-dns/scaleway                    providers lock -platform=darwin_arm64 -platform=linux_amd64
+terraform -chdir=01-iam/workload/scaleway           providers lock -platform=darwin_arm64 -platform=linux_amd64
+terraform -chdir=02-encryption/aws                  providers lock -platform=darwin_arm64 -platform=linux_amd64
+terraform -chdir=03-storage/scaleway                providers lock -platform=darwin_arm64 -platform=linux_amd64
 terraform -chdir=05-secrets/openbao/bootstrap        providers lock -platform=darwin_arm64 -platform=linux_amd64
+terraform -chdir=10-cluster/local                   providers lock -platform=darwin_arm64 -platform=linux_amd64
+terraform -chdir=10-cluster/scaleway                providers lock -platform=darwin_arm64 -platform=linux_amd64
 ```
 
 Commit the updated lock files alongside the version change.
@@ -51,54 +50,112 @@ Commit the updated lock files alongside the version change.
 ## Architecture
 
 Terraform roots are organized by **domain** — the top-level folder is a numeric
-**pseudo-ID** for what that domain owns (`00-remote_state`, `01-iam`,
-`02-cluster`). The number encodes apply order / blast-radius across domains
-(`00` first, built on by `01`, then `02`). The shared S3 state bucket
-(`00-remote_state`) holds every root's remote state.
+**pseudo-ID**, generally named after the domain's function rather than what it
+literally owns (`00-foundation`, `01-iam`, `02-encryption`...). The number
+roughly encodes apply order / blast-radius
+across domains, though it's a convention, not something any tooling enforces.
+Gaps in the sequence (`04`, `06`-`09`) are deliberate — room for future domains
+without a renumbering cascade; `10-cluster` in particular was moved up from
+`02-` on purpose to free up low numbers for domains like `02-encryption`.
 
-Within a domain, sub-folders split roots by the **second axis: lifecycle / who
-applies them** — `bootstrap/` = human/admin-applied trust anchors (rare changes,
-need admin creds), `ci-managed/` = roots minted BY the CI (GitOps, capped by the
-permissions boundary). A domain with a single root is flattened (the domain
-folder *is* the root, e.g. `00-remote_state`).
+The second path segment is the **cloud provider** a root targets (`aws`,
+`scaleway`) — a domain with only one provider still nests under it (e.g.
+`00-foundation/aws/`), so a second provider can be added later without a
+restructure. Within `01-iam/`, there's a further split by **lifecycle / who
+applies**: `bootstrap/` = human/admin-applied trust anchors (rare changes, need
+admin creds), `workload/` = admin-applied identities that aren't trust anchors
+(scoped credentials for a specific in-cluster workload, e.g. external-dns).
 
 ```
-modules/                       # reusable Terraform modules (empty for now)
-00-remote_state/               # domain: Terraform state backend — the shared AWS
-                               #   S3 bucket holding every root's remote state (admin-applied)
-01-iam/                        # domain: IAM identities & grants
-  bootstrap/                   #   human-applied trust anchors
-    aws/                       #     GitHub-OIDC → AWS: OIDC provider + role-creator role
-                               #       + permissions boundary + CI grant
-    scaleway/                  #     Scaleway CI identity (IAM app + project policy + static API key)
-    infisical/                 #     Infisical CI identity (keyless GitHub-OIDC → Infisical)
-  ci-managed/                  #   minted BY the CI, capped by the boundary
-    aws-state-access/          #     org-wide tf-state-access role (the first CI-minted role)
-02-cluster/                    # domain: the Kubernetes platform
+modules/
+  scaleway-machine-identity/   # shared: IAM application + map of policies +
+                               #   rotating API key. Used by every Scaleway
+                               #   identity below instead of copy-pasted HCL.
+  scaleway-bucket-with-identity/ # shared: one bucket + one scoped identity
+                               #   (wraps scaleway-machine-identity). Used by
+                               #   03-storage/scaleway's for_each over
+                               #   var.buckets — add a tool bucket there by
+                               #   adding a map entry, not new resources.
+00-foundation/
+  aws/                         # domain: the base AWS layer everything else
+                               #   depends on — the S3 bucket holding every
+                               #   root's remote state, PLUS the GitHub OIDC
+                               #   provider + the one role (terraform-state-
+                               #   access) every workflow in this repo assumes
+                               #   for state R/W. Admin-applied.
+01-iam/                        # domain: IAM identities & grants (non-AWS)
+  bootstrap/
+    aws/                       #   CI role scoped to 02-encryption/aws only
+                               #     (KMS + IAM user/access-key CRUD, plus the
+                               #     same state-bucket policy terraform-state-
+                               #     access uses) — see that section below
+    scaleway/                  #   Scaleway CI identity (github-ci: IAM app +
+                               #     2 policies + static API key)
+  workload/
+    scaleway/                  #   external-dns workload identity (DNS zone
+                               #     record R/W only — no bucket, no DNS zone
+                               #     resource managed here)
+02-encryption/
+  aws/                         # domain: AWS KMS key + dedicated IAM user for
+                               #   OpenBao's auto-unseal. Standalone rather than
+                               #   folded into 05-secrets/openbao (different
+                               #   provider, different pattern — an AWS key/user
+                               #   pair, not an OpenBao/Vault-provider resource)
+03-storage/
+  scaleway/                    # domain: Scaleway tool buckets + their scoped
+                               #   identities (backup, velero today; home for
+                               #   future tool buckets)
+05-secrets/
+  openbao/                     # domain: OpenBao itself (bootstrap/ + managed/,
+                               #   see that directory) — untouched by the
+                               #   2026-07-30 buckets/IAM consolidation
+10-cluster/                    # domain: the Kubernetes platform (moved up from
+                               #   02- to free up low numbers for future domains)
   local/                       #   minikube — local dev and debugging. Local backend (local files)
   scaleway/                    #   Scaleway Kapsule cluster + ArgoCD bootstrap (homelab; WIP)
 ```
 
-**The dependency spine** runs strictly forward: `00-remote_state` (bucket) →
-`01-iam/bootstrap/aws` (the trust anchor that lets CI apply anything) →
-`01-iam/ci-managed/*` (roles the anchor mints) → `02-cluster/*`. `bootstrap/aws`
-is the root of trust — nothing CI-applied can exist before it.
+**The dependency spine** runs forward: `00-foundation/aws` (bucket + CI's AWS
+role) → everything else, since every other root's backend points at that
+bucket. `terraform-state-access` (the role every workflow assumes by default)
+is scoped to exactly S3 read/write on the state bucket — no IAM-management
+capability at all. Only one other role exists, `01-iam/bootstrap/aws`'s
+`openbao-unseal-ci`, and it's narrowly scoped too: KMS + IAM user/access-key
+CRUD under `/openbao/`, nothing broader, plus (via a `terraform_remote_state`
+lookup, not a hardcoded ARN) the same state-bucket policy
+`terraform-state-access` uses, so it can read/write the bucket for its own
+backend. (This two-role setup replaced a larger system, retired 2026-07-30: the
+original `01-iam/bootstrap/aws` + `01-iam/ci-managed/aws-state-access` together
+built a "CI can safely mint further IAM roles" mechanism — a permissions
+boundary + a policy letting the CI role create/attach *any* other role under a
+managed path — whose only actual consumer was minting the one role that did
+state R/W. Once that role's job narrowed to exactly "read/write this bucket,"
+there was no general IAM-management capability left to guard against
+escalating, so the guardrail system went with it. `02-encryption/aws` needing
+its own broader-than-S3 AWS rights later is why `01-iam/bootstrap/aws` came
+back — but scoped to just that one domain's resource types, not "create any
+role.")
 
 **Backend keys are decoupled from paths.** Each root pins its own
-`workspace_key_prefix` in `version.tf` (e.g. `01-iam/ci-managed/aws-state-access`
-still uses prefix `s3-lister-role`), and the workspace name comes from the
-`env/<name>.tfvars` filename — **neither is tied to the directory**. The
-restructure was a pure `git mv` with no state migration. Don't "fix" a prefix or
-rename a tfvars file to match its new path unless you also migrate the state
-(renaming the tfvars file changes the workspace, hence the state key). This is
-why some workspace names look dated (e.g. `aws-state-access` still uses the
-`00-remote-state-iam` workspace).
+`workspace_key_prefix` in `version.tf`, and the workspace name comes from the
+`env/<name>.tfvars` filename — **neither is tied to the directory**. This means
+moving a root to a new directory is a pure `git mv` with **zero state
+migration**, as long as you don't also rename the tfvars file or touch
+`workspace_key_prefix`. Several roots have been moved this way and deliberately
+keep a prefix/workspace name that no longer matches their path (e.g.
+`01-iam/bootstrap/scaleway` still uses prefix `github-ci`; `02-encryption/aws`
+still uses the workspace name `03-backup-dev-bucket`, inherited from before its
+resources were extracted from `03-storage/scaleway` — required there, since
+`local.unseal_name` in that root derives the live KMS alias + IAM user name from
+`terraform.workspace`, so renaming the workspace would rename/recreate them).
+Don't "fix" a prefix or rename a tfvars file to match its new path unless you
+also migrate the state.
 
-### `02-cluster/*`
+### `10-cluster/*`
 
 Terraform here is only a **one-time bootstrapper** — everything after ArgoCD is up lives in the `gitops` repo. The cluster internal state nor status will be reflected in the terraform state. 
 
-### `02-cluster/local/`
+### `10-cluster/local/`
 
 Warning : This environment expect you an accessible local kubernetes cluster access, likely configured within your ~/.kube/config. This is automatically handled via `mise run dev`
 
@@ -107,31 +164,33 @@ Two-step, one-time bootstrap:
 2. Deploy **ArgoCD** via Helm with the admin bcrypt password hash from Infisical (pre-hashed to prevent Terraform drift).
 3. Deploy the **argocd-apps bootstrap** Application, pointing ArgoCD at `https://github.com/IntegratedDynamic/gitops.git`. ArgoCD then self-manages all further cluster state from that separate GitOps repo.
 
-### `02-cluster/scaleway/`
+### `10-cluster/scaleway/`
 
 Same bootstrap pattern as `local/`, but with the Kapsule cluster + node pool (`DEV1-M`, min=0/max=3) instead.
 
-### `00-remote_state/`
+### `00-foundation/aws/`
 
-The shared org S3 bucket holding **every** root's remote state (built on `terraform-aws-modules/s3-bucket`: versioning, SSE, public-access block, TLS-only). Chicken-and-egg: its own state lives in the bucket it creates (one-time local-state bootstrap — see its README). Applied by an admin.
-
-### `01-iam/ci-managed/aws-state-access/`
-
-Org-wide Terraform-state **access** IAM **role created BY the CI** (the first role minted by `01-iam/bootstrap/aws`'s role-creator rather than by a human). Named `tf-state-access`, it grants `AmazonS3FullAccess` — **read/write on the state bucket plus the state lock** — so every state-touching workflow assumes it for `plan` AND `apply`/`destroy` alike (e.g. the `scaleway` workflow), wired via `vars.AWS_TF_STATE_ROLE_ARN`. Assumable org-wide via two trust doors: AWS principals in the org (`aws:PrincipalOrgID`) and GitHub Actions in the org via OIDC (`repo:IntegratedDynamic/*`). Applied by CI (`iam_terraform-backend-role.yml`).
-
-### `01-iam/bootstrap/scaleway/`
-
-Standalone root that stands up the **Scaleway IAM identity GitHub Actions uses to authenticate to Scaleway**: a dedicated IAM application + a project-scoped policy (`Kubernetes`/`VPC`/`PrivateNetworks` FullAccess + `IPAMReadOnly`, enough for CI to create/destroy the Kapsule cluster) + an API key, with the key written into Infisical. GitHub secrets (`SCW_ACCESS_KEY` / `SCW_SECRET_KEY`) are still set manually via `gh secret set`. Keyless GitHub-OIDC → Scaleway is a non-goal — blocked upstream (Scaleway IAM is not an OIDC relying party). See `01-iam/bootstrap/scaleway/README.md`.
-
-### `01-iam/bootstrap/infisical/`
-
-The **keyless GitHub-OIDC → Infisical** counterpart to `bootstrap/scaleway`: a Infisical machine identity + OIDC auth trusting GitHub Actions tokens, so the composite action can mint a short-lived Infisical token (no static Infisical secret) to read the secrets cluster bootstraps need. See `01-iam/bootstrap/infisical/README.md`.
+The shared org S3 bucket holding **every** root's remote state (built on `terraform-aws-modules/s3-bucket`: versioning, SSE, public-access block, TLS-only). Chicken-and-egg: its own state lives in the bucket it creates (one-time local-state bootstrap — see its README). Also creates the GitHub OIDC provider and the one role, `terraform-state-access` (via `terraform-aws-modules/iam`), every GitHub Actions workflow in this repo assumes — trust scoped to `repo:IntegratedDynamic/infrastructure:*`, policy scoped to exactly S3 list/get/put/delete on the state bucket, nothing else. Wired to CI via `vars.AWS_TERRAFORM_ROLE_ARN`. Applied by an admin (this root creates the very identity CI would otherwise need to apply it). See its README.
 
 ### `01-iam/bootstrap/aws/`
 
-The CI **identity & governance foundation**: **keyless GitHub-OIDC → AWS** access, built on the `terraform-aws-modules/iam` modules. An OIDC provider + a role (`github-actions-terraform`) GitHub Actions assumes via short-lived tokens (trust scoped to `repo:IntegratedDynamic/infrastructure:*`). The role grant (`tf-managed-ci`) gives Terraform-state R/W on the state bucket **plus privilege-escalation-safe IAM role management** — i.e. it is the role that **creates other CI roles** (e.g. `01-iam/ci-managed/aws-state-access`). Applied locally by an admin; `role_arn` is wired to CI via `vars.AWS_GITHUB_ACTIONS_ROLE_ARN`. See `01-iam/bootstrap/aws/README.md`.
+CI role (`openbao-unseal-ci`) scoped to exactly what `02-encryption/aws` needs: full CRUD (create/read/update/**destroy**) on a KMS key + alias (necessarily unscoped by resource — KMS key IDs are random, `kms:CreateKey` has no resource-level permission support) and on an IAM user + access key scoped to the `/openbao/` path (matching that root's `aws_iam_user` path). Also attaches the same state-bucket policy `terraform-state-access` uses — read via a `data.terraform_remote_state` lookup at `00-foundation/aws`, not hardcoded — so this role can read/write the bucket for its own backend too. OIDC-trusted, scoped to `repo:IntegratedDynamic/infrastructure:*`. No general IAM-management capability (can't create roles, can't touch anything outside `/openbao/`), unlike the original `01-iam/bootstrap/aws` this replaces the *name* of but not the *design* of.
 
-**Permissions-boundary contract (repo-wide):** any `aws_iam_role` that the CI applies **must** set `permissions_boundary` (= the `permissions_boundary_arn` output, `tf-managed-boundary`) and `path` (= the `managed_path` output, `/tf-managed/<org>/<repo>/`), or the apply is rejected by the CI grant's conditions. Set both via the root's `env/<name>.tfvars` (see the Terraform workspaces convention below). The boundary caps every CI-created role to "admin minus a hardened deny-list" so a role-creating role can't escalate. Rationale is documented inline in `01-iam/bootstrap/aws/iam-ci.tf`.
+### `01-iam/bootstrap/scaleway/`
+
+Standalone root that stands up the **Scaleway IAM identity GitHub Actions uses to authenticate to Scaleway**: a dedicated IAM application + two policies (`Kubernetes`/`VPC`/`PrivateNetworks` FullAccess + `IPAMReadOnly` for cluster management; Object Storage + IAM application/policy management for the storage domain's CI workflow) + an API key, via `modules/scaleway-machine-identity`. GitHub secrets (`SCW_ACCESS_KEY` / `SCW_SECRET_KEY`) are set manually via `gh secret set` (Infisical, which used to carry this, is retired). Keyless GitHub-OIDC → Scaleway is a non-goal — blocked upstream (Scaleway IAM is not an OIDC relying party). See `01-iam/bootstrap/scaleway/README.md`.
+
+### `01-iam/workload/scaleway/`
+
+One `module "identities" { for_each = var.identities }` block (via `modules/scaleway-machine-identity`, single policy per identity — this domain is for simple scoped workload credentials, not CI trust anchors) — `external-dns` today (Scaleway `DomainsDNSFullAccess`, scoped to the project scalepack.fr's zone lives in; no DNS zone/record resource is Terraform-managed here, this root exists purely to provision the identity). Add a future workload identity by adding a map entry to `var.identities`, no new `.tf` resources. `workload_access_key`/`workload_secret_key` outputs stay pinned to `external-dns` specifically (05-secrets/openbao/managed's `terraform_remote_state` reads them) — new identities' keys come from the generic `access_keys`/`secret_keys` map outputs instead. Moved here from `04-dns/scaleway` since it owns no bucket and isn't a CI trust anchor.
+
+### `02-encryption/aws/`
+
+AWS KMS key + a single-purpose IAM user for OpenBao's `seal "awskms"` auto-unseal (OpenBao runs on Scaleway Kapsule, not AWS, so there's no instance profile to lean on — a static AWS access key is required). Standalone domain rather than folded into `05-secrets/openbao/` (different provider/pattern — plain AWS resources, not an OpenBao/Vault-provider resource) or left in `03-storage/scaleway` (not a bucket, not really "storage"). Managed via the `01-iam/bootstrap/aws` role above — see the root's `main.tf` header comment for the full apply-path rationale. Moved here from `06-openbao-unseal/aws` to free up a low domain number.
+
+### `03-storage/scaleway/`
+
+Scaleway tool buckets + their scoped identities: `backup` (OpenBao's own raft snapshots) and `velero` (Kubernetes backups), each with its own bucket AND its own workload identity — kept as separate buckets/identities because Velero writing into a shared bucket broke OpenBao's `s3cmd`-based retention cleanup (confirmed live 2026-07-28). One `module "buckets"` block with `for_each = var.buckets` (via `modules/scaleway-bucket-with-identity`) instantiates every bucket in `main.tf` — add a future tool bucket by adding a map entry to `var.buckets`, no new `.tf` resources. Renamed from `03-backup/scaleway` (which also held the OpenBao unseal KMS resources, now `02-encryption/aws`).
 
 ## Conventions
 

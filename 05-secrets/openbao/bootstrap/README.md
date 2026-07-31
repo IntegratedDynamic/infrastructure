@@ -12,15 +12,20 @@ implements — read it before changing anything here.
 ## Why its own domain, not `01-iam/`
 
 `01-iam/` provisions identities for **external** systems Terraform talks to
-(AWS, Scaleway, Infisical) so CI/humans can authenticate to them — none of
-those depend on the cluster existing. OpenBao only exists *because* `02-cluster/`
-stood it up first, so managing it declarativement has a strictly later lifecycle
-than the cluster domain. Hence `05-secrets/` — its own domain, numbered above
-`02-cluster/` on purpose.
+(AWS, Scaleway) so CI/humans can authenticate to them — none of
+those depend on the cluster existing. OpenBao only exists *because*
+`10-cluster/` stood it up first, so managing it declaratively has a strictly
+later lifecycle than the cluster domain — a real exception to the "number
+roughly encodes apply order" convention (see `CLAUDE.md`), since `10-cluster/`
+was moved to a higher number than `05-secrets/` later in this repo's history
+for unrelated reasons (freeing up low numbers), without this domain's
+dependency on it changing. Hence its own domain regardless: `05-secrets/`
+reconciles OpenBao's structure, `01-iam/` doesn't touch anything
+cluster-dependent.
 
 `bootstrap/` (not `ci-managed/`) because creating this AppRole itself needs a
 human admin credential (OIDC admin token, or the root token) — the same
-human/admin-applied trust-anchor pattern as `01-iam/bootstrap/aws` and
+human/admin-applied trust-anchor pattern as `00-foundation/aws` and
 `01-iam/bootstrap/scaleway`. A later `05-secrets/ci-managed/*` root could
 consume this AppRole if declarative OpenBao management ever moves into CI.
 
@@ -86,7 +91,7 @@ terraform -chdir=05-secrets/openbao/bootstrap output -raw secret_id   # sensitiv
 ```
 
 The consuming root's `local.auto.tfvars` (per-developer, gitignored — same
-convention as `02-cluster/scaleway/local.auto.tfvars`) should hold these two
+convention as `10-cluster/scaleway/local.auto.tfvars`) should hold these two
 values, and its own `provider "vault" {}` should authenticate via
 `vault_approle_auth_backend_login` (or the equivalent `VAULT_ROLE_ID`/
 `VAULT_SECRET_ID` env vars the provider reads natively) rather than a static
