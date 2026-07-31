@@ -1,15 +1,27 @@
-# 00-remote_state — Terraform state bucket
+# 00-foundation/aws — Terraform state bucket + CI's AWS access
 
-A standalone Terraform root that provisions a single **AWS S3 bucket** to hold
-the Terraform remote state for the **whole org**. Every other root
-(`02-cluster/local/`, `02-cluster/scaleway/`, `01-iam/bootstrap/scaleway/`, and
-future ones) points its `backend "s3"` at this bucket.
+The AWS implementation of the `00-foundation` contract — see
+[`../README.md`](../README.md) for what that contract is and why this domain
+is named after its role, not "remote_state" or "aws". Read that first; this
+file is the how, not the why.
 
-It is the shared substrate every other root depends on — the `00-remote_state`
-domain (a single-root domain, so it is flattened: the domain folder *is* the
-root), applied by an admin.
+It provisions:
+
+1. A single **AWS S3 bucket** holding the Terraform remote state for the
+   **whole org**. Every other root points its `backend "s3"` at this bucket.
+2. The **GitHub OIDC provider** + the **one AWS IAM role**
+   (`terraform-state-access`) every GitHub Actions workflow in this repo
+   assumes to read/write that bucket — see [CI's AWS access](#cis-aws-access).
+
+Merged from three former roots (`00-remote_state`, `01-iam/bootstrap/aws`,
+`01-iam/ci-managed/aws-state-access`) that were all fundamentally the same
+foundation concern living in separate places for historical reasons. Applied
+by an admin (this root creates the very identity CI would otherwise need to
+apply it).
 
 ## What it creates
+
+### The state bucket
 
 A single S3 bucket (default name `id-terraform-state`, override with
 `-var bucket_name=...`) via the community
@@ -30,6 +42,29 @@ module, configured for state storage:
 State **locking** uses Terraform's native S3 lockfile (`use_lockfile`, GA since
 Terraform 1.10) — a `.tflock` object written next to the state. No DynamoDB lock
 table is needed.
+
+### CI's AWS access
+
+`ci-role.tf` creates the GitHub OIDC provider and one role,
+`terraform-state-access` — trusted via OIDC scoped to
+`repo:IntegratedDynamic/infrastructure:*` only, with an inline policy granting
+**exactly** `s3:ListBucket`/`GetBucketVersioning`/`GetBucketLocation` on the
+bucket and `s3:GetObject`/`PutObject`/`DeleteObject` on its contents. Nothing
+else — no IAM management capability, no ability to create or modify any other
+role or policy.
+
+This replaces two former roots that together built a much larger "CI can
+safely mint further IAM roles" system: a permissions boundary ("admin minus a
+hardened deny-list") plus a policy letting the CI role create/attach other
+roles under a managed path, specifically so it could mint the one role that
+actually did the state R/W. That entire guardrail had exactly one consumer.
+Once the role's own job is narrowed to "read/write this bucket," there's no
+IAM-management capability left to guard against escalating in the first
+place, so the guardrail system is gone along with it.
+
+Every workflow in `.github/workflows/` assumes this one role (via
+`vars.AWS_TERRAFORM_ROLE_ARN`) for every root's `plan`/`apply`/`destroy` — see
+the composite action in `.github/actions/terraform/`.
 
 ## Credentials
 
@@ -58,13 +93,13 @@ This root creates the very bucket it then stores its state in. Bootstrap order:
 2. Apply once with **local state** — temporarily comment out the `backend "s3"`
    block in `version.tf` so the bucket gets created:
    ```bash
-   terraform -chdir=00-remote_state init
-   terraform -chdir=00-remote_state apply   # creates the bucket (billable)
+   terraform -chdir=00-foundation/aws init
+   terraform -chdir=00-foundation/aws apply   # creates the bucket (billable)
    ```
 3. Re-add the `backend "s3"` block and migrate the local state into the bucket
    it now manages:
    ```bash
-   terraform -chdir=00-remote_state init -migrate-state
+   terraform -chdir=00-foundation/aws init -migrate-state
    ```
 
 After that, this root's own state lives at `state-backend/terraform.tfstate`
