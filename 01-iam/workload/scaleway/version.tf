@@ -2,6 +2,11 @@ terraform {
   backend "s3" {
     bucket               = "id-terraform-state20260612164136440800000001"
     region               = "eu-west-3"
+    # Prefix kept as "dns/scaleway" (≠ this root's path 01-iam/workload/scaleway/,
+    # moved here from 04-dns/scaleway/ since this root owns no DNS resource — it
+    # only provisions the external-dns workload identity) on purpose: the state
+    # key is decoupled from the directory, so the move was a pure git mv with
+    # zero state migration.
     workspace_key_prefix = "dns/scaleway"
     key                  = "terraform.tfstate"
     encrypt              = true
