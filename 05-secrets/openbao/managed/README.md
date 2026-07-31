@@ -55,7 +55,7 @@ that triggers a rewrite; bump it to rotate:
   `admin-user` is the hardcoded literal `"admin"`.
 - `external_dns_scaleway_dns_credentials` (`apps/external-dns/scaleway-dns-credentials`)
   — `SCW_ACCESS_KEY`/`SCW_SECRET_KEY` come straight from
-  `data.terraform_remote_state.dns_scaleway` (infra's own `04-dns/scaleway`
+  `data.terraform_remote_state.dns_scaleway` (infra's own `01-iam/workload/scaleway`
   IAM root), not a hand-copied variable — closes the "seed pending, no
   automated push yet" gap that root's own `outputs.tf` used to flag.
 - `secrets_sync_github_eso_private_key` (`apps/secrets-sync/github/eso-github-app-private-key`)
@@ -66,7 +66,7 @@ that triggers a rewrite; bump it to rotate:
   `var.secrets_sync_github` below.
 - `velero_scaleway_s3_credentials` (`apps/velero/scaleway-s3-credentials`) —
   `SCW_ACCESS_KEY`/`SCW_SECRET_KEY` come from
-  `data.terraform_remote_state.backup_scaleway` (infra's own `03-backup/scaleway`
+  `data.terraform_remote_state.backup_scaleway` (infra's own `03-storage/scaleway`
   root), but a SEPARATE IAM key and bucket from OpenBao's own snapshot agent —
   sharing OpenBao's bucket broke its own `s3cmd`-based retention cleanup
   (confirmed live 2026-07-28), so Velero gets `scaleway_object_bucket.velero`
@@ -120,7 +120,7 @@ convention, not automation.
   round-tripped) — fetch current values from OpenBao directly (an admin
   OIDC session can read `kv/data/apps/dex/credentials` etc.) and add them to
   a gitignored `local.auto.tfvars` (matches `*.auto.tfvars` in the repo
-  `.gitignore`, same convention as `02-cluster/scaleway/local.auto.tfvars`).
+  `.gitignore`, same convention as `10-cluster/scaleway/local.auto.tfvars`).
   Never paste secret values into shell history or commit them.
 
 - Everything else (`random_password.*`) is Terraform-generated — no

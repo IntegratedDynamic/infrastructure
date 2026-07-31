@@ -23,11 +23,13 @@ jobs:
       fail-fast: false
       matrix:
         root:
-          - 00-remote_state
+          - 00-foundation/aws
           - 01-iam/bootstrap/aws
           - 01-iam/bootstrap/scaleway
-          - 01-iam/ci-managed/aws-state-access
-          - 02-cluster/scaleway
+          - 01-iam/workload/scaleway
+          - 02-encryption/aws
+          - 03-storage/scaleway
+          - 10-cluster/scaleway
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:

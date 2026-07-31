@@ -283,7 +283,7 @@ resource "vault_kv_secret_v2" "grafana_admin" {
 }
 
 # SCW_ACCESS_KEY/SCW_SECRET_KEY sourced straight from infra's own IAM root
-# (04-dns/scaleway) instead of a hand-copied variable — closes the "seed
+# (01-iam/workload/scaleway) instead of a hand-copied variable — closes the "seed
 # pending, no automated push yet" gap that root's own outputs.tf flags.
 resource "vault_kv_secret_v2" "external_dns_scaleway_dns_credentials" {
   mount = vault_mount.kv.path
@@ -339,7 +339,7 @@ resource "vault_kv_secret_v2" "secrets_sync_github_repo" {
 # The only repo+environment target today. Written as a plain resource, not a
 # for_each over var.secrets_sync_github.repos.*.environments — there's one
 # member, and it needs a special-cased merge (SCW_ACCESS_KEY/SCW_SECRET_KEY
-# from infra's own 04-dns/scaleway state, not a hand-copied variable value).
+# from infra's own 01-iam/workload/scaleway state, not a hand-copied variable value).
 # A generic for_each here would just be a single case with a fake abstraction
 # wrapped around it. Revisit if/when a second repo+environment target with no
 # remote-state merge shows up.
@@ -364,7 +364,7 @@ resource "vault_kv_secret_v2" "secrets_sync_github_infrastructure_scaleway" {
 # that OpenBao's snapshot script does a flat `s3cmd ls` on the bucket root for
 # its own retention cleanup and chokes on any object/prefix it doesn't own —
 # Velero writing into that same bucket broke every subsequent OpenBao
-# snapshot job. See 03-backup/scaleway/main.tf's scaleway_object_bucket.velero
+# snapshot job. See 03-storage/scaleway/main.tf's scaleway_object_bucket.velero
 # and iam.tf's scaleway_iam_application.velero.
 resource "vault_kv_secret_v2" "velero_scaleway_s3_credentials" {
   mount = vault_mount.kv.path
