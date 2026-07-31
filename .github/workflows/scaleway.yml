@@ -1,27 +1,28 @@
 name: Terraform — Scaleway cluster
 
-# Drives 02-cluster/scaleway through the .github/actions/terraform composite action:
+# Drives 10-cluster/scaleway through the .github/actions/terraform composite action:
 #   - pull_request          → plan
 #   - push to main          → apply
 #   - schedule (daily 18h)  → destroy   (cost-control teardown of the homelab)
 #   - workflow_dispatch     → up/down on demand (plan | apply | destroy)
 #
-# State R/W + lock uses the org state role (vars.AWS_TF_STATE_ROLE_ARN —
-# AmazonS3FullAccess, see 01-iam/ci-managed/aws-state-access). Scaleway cluster
-# lifecycle uses the CI API key from the `scaleway` environment (Kubernetes/VPC/
+# State R/W + lock uses the org's single Terraform AWS role
+# (vars.AWS_TERRAFORM_ROLE_ARN — S3 list/get/put/delete on the state bucket
+# only, see 00-foundation/aws/ci-role.tf). Scaleway cluster lifecycle uses
+# the CI API key from the `scaleway` environment (Kubernetes/VPC/
 # PrivateNetwork FullAccess, see 01-iam/bootstrap/scaleway). Provider creds are set as job env (read by the
 # action) — never passed as plain action inputs. No static AWS keys.
 
 on:
   pull_request:
     paths:
-      - '02-cluster/scaleway/**'
+      - '10-cluster/scaleway/**'
       - '.github/actions/terraform/**'
       - '.github/workflows/scaleway.yml'
   push:
     branches: [main]
     paths:
-      - '02-cluster/scaleway/**'
+      - '10-cluster/scaleway/**'
       - '.github/actions/terraform/**'
       - '.github/workflows/scaleway.yml'
   schedule:
@@ -67,10 +68,10 @@ jobs:
     steps:
       - name: Assert state role ARN is present
         env:
-          ROLE_ARN: ${{ vars.AWS_TF_STATE_ROLE_ARN }}
+          ROLE_ARN: ${{ vars.AWS_TERRAFORM_ROLE_ARN }}
         run: |
           if [ -z "$ROLE_ARN" ]; then
-            echo "::error::vars.AWS_TF_STATE_ROLE_ARN is not set (provisioned by 01-iam/ci-managed/aws-state-access)."
+            echo "::error::vars.AWS_TERRAFORM_ROLE_ARN is not set (provisioned by 00-foundation/aws)."
             exit 1
           fi
 
@@ -96,7 +97,7 @@ jobs:
 
       - uses: ./.github/actions/terraform
         with:
-          root: 02-cluster/scaleway
+          root: 10-cluster/scaleway
           tfvars-file: 02-cluster-staging.tfvars
           command: ${{ steps.cmd.outputs.command }}
-          aws-role-arn: ${{ vars.AWS_TF_STATE_ROLE_ARN }}
+          aws-role-arn: ${{ vars.AWS_TERRAFORM_ROLE_ARN }}

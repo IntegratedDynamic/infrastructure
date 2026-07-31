@@ -18,6 +18,12 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 6.0"
     }
+    # Pulled in transitively by module.iam_oidc_provider (fetches GitHub's
+    # OIDC thumbprint dynamically instead of a hardcoded value).
+    tls = {
+      source  = "hashicorp/tls"
+      version = "~> 4.0"
+    }
   }
 }
 
