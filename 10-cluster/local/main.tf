@@ -31,7 +31,7 @@ resource "kubernetes_secret" "scaleway_s3_credentials" {
 # AWS credentials OpenBao reads at startup for KMS auto-unseal (seal "awskms").
 # Sourced here — outside OpenBao — by necessity: OpenBao can't supply the very
 # creds it needs to unseal itself (chicken-and-egg). Values come from the
-# 03-backup/scaleway kms.tf outputs, fed via the gitignored *.auto.tfvars.
+# 02-encryption/aws kms outputs, fed via the gitignored *.auto.tfvars.
 # Key names (access_key/secret_key) mirror scaleway-s3-credentials so the
 # OpenBao chart's extraSecretEnvironmentVars mapping stays uniform.
 resource "kubernetes_secret" "openbao_unseal_aws" {
