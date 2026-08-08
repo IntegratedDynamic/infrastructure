@@ -63,6 +63,29 @@ resource "null_resource" "update_kubeconfig" {
 }
 
 
+# scaleway-s3-credentials source: 03-storage/scaleway's "backup" bucket + its
+# scoped workload identity. Same remote state key 05-secrets/openbao/managed
+# reads as its own `backup_scaleway` data source.
+data "terraform_remote_state" "backup_scaleway" {
+  backend = "s3"
+  config = {
+    bucket = "id-terraform-state20260612164136440800000001"
+    region = "eu-west-3"
+    key    = "backup/scaleway/03-backup-dev-bucket/terraform.tfstate"
+  }
+}
+
+# AWS credentials OpenBao reads at startup for KMS auto-unseal (seal "awskms")
+# — source: 02-encryption/aws's KMS key + dedicated IAM user.
+data "terraform_remote_state" "openbao_unseal_aws" {
+  backend = "s3"
+  config = {
+    bucket = "id-terraform-state20260612164136440800000001"
+    region = "eu-west-3"
+    key    = "openbao-unseal/aws/03-backup-dev-bucket/terraform.tfstate"
+  }
+}
+
 resource "kubernetes_namespace" "openbao" {
   metadata {
     name = "openbao"
@@ -77,18 +100,17 @@ resource "kubernetes_secret" "scaleway_s3_credentials" {
   }
 
   data = {
-    bucket     = "backup-dev-id"
-    AWS_ACCESS_KEY_ID = "SCW8FGA70P4HY3A120KV"
-    AWS_SECRET_ACCESS_KEY = var.scaleway_s3_secret_key
+    bucket                 = data.terraform_remote_state.backup_scaleway.outputs.bucket_name
+    AWS_ACCESS_KEY_ID      = data.terraform_remote_state.backup_scaleway.outputs.workload_access_key
+    AWS_SECRET_ACCESS_KEY  = data.terraform_remote_state.backup_scaleway.outputs.workload_secret_key
   }
 }
 
 # AWS credentials OpenBao reads at startup for KMS auto-unseal (seal "awskms").
 # Sourced here — outside OpenBao — by necessity: OpenBao can't supply the very
-# creds it needs to unseal itself (chicken-and-egg). Values come from the
-# 02-encryption/aws kms outputs, fed via the gitignored *.auto.tfvars.
-# Key names (access_key/secret_key) mirror scaleway-s3-credentials so the
-# OpenBao chart's extraSecretEnvironmentVars mapping stays uniform.
+# creds it needs to unseal itself (chicken-and-egg). Key names (access_key/
+# secret_key) mirror scaleway-s3-credentials so the OpenBao chart's
+# extraSecretEnvironmentVars mapping stays uniform.
 resource "kubernetes_secret" "openbao_unseal_aws" {
   metadata {
     name      = "openbao-unseal-aws"
@@ -96,7 +118,7 @@ resource "kubernetes_secret" "openbao_unseal_aws" {
   }
 
   data = {
-    AWS_ACCESS_KEY_ID = var.openbao_unseal_aws_access_key_id
-    AWS_SECRET_ACCESS_KEY = var.openbao_unseal_aws_secret_access_key
+    AWS_ACCESS_KEY_ID = data.terraform_remote_state.openbao_unseal_aws.outputs.openbao_unseal_access_key_id
+    AWS_SECRET_ACCESS_KEY = data.terraform_remote_state.openbao_unseal_aws.outputs.openbao_unseal_secret_access_key
   }
 }
