@@ -20,6 +20,22 @@ terraform {
   }
 }
 
+# role_id/secret_id for the `terraform` AppRole — read straight from
+# 05-secrets/openbao/bootstrap's own state instead of a hand-copied variable.
+# Safe to reference from the provider block below: this data source has no
+# dependency on the vault provider itself (it's a plain S3 backend read), so
+# there's no ordering cycle — same category of pattern as
+# 10-cluster/scaleway/version.tf's kubernetes/helm providers reading straight
+# off a resource attribute.
+data "terraform_remote_state" "openbao_bootstrap" {
+  backend = "s3"
+  config = {
+    bucket = "id-terraform-state20260612164136440800000001"
+    region = "eu-west-3"
+    key    = "secrets/bootstrap/openbao/05-secrets-openbao/terraform.tfstate"
+  }
+}
+
 # Authenticates as the `terraform` AppRole from 05-secrets/openbao/bootstrap —
 # this root is the machine identity that role exists for. Address hardcoded,
 # not read from VAULT_ADDR: OpenBao's own CLI populates BAO_ADDR/BAO_TOKEN,
@@ -27,13 +43,16 @@ terraform {
 # the bootstrap root's version.tf/README for the incident this came from).
 provider "vault" {
   address = "https://openbao.scalepack.fr/"
+
+  # Alternative URL when something goes wrong with public connection
+  # Requires Kubernetes permissions to run `kubectl port-forward -n openbao openbao-0 8200:8200`
   # address = "http://127.0.0.1:8200/"
 
   auth_login {
     path = "auth/approle/login"
     parameters = {
-      role_id   = var.approle_role_id
-      secret_id = var.approle_secret_id
+      role_id   = data.terraform_remote_state.openbao_bootstrap.outputs.role_id
+      secret_id = data.terraform_remote_state.openbao_bootstrap.outputs.secret_id
     }
   }
 }
