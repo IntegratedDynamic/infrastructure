@@ -25,23 +25,23 @@ resource "vault_kubernetes_auth_backend_config" "kubernetes" {
 # openbao-snapshot/openbao — the raft snapshot agent bundled in the openbao
 # Helm chart (gitops repo platform/scaleway/openbao.yml, snapshotAgent).
 resource "vault_kubernetes_auth_backend_role" "snapshot" {
-  backend                           = vault_auth_backend.kubernetes.path
-  role_name                         = "snapshot"
-  bound_service_account_names       = ["openbao-snapshot"]
-  bound_service_account_namespaces  = ["openbao"]
-  token_policies                    = [vault_policy.snapshot.name]
-  token_ttl                         = 3600
+  backend                          = vault_auth_backend.kubernetes.path
+  role_name                        = "snapshot"
+  bound_service_account_names      = ["openbao-snapshot"]
+  bound_service_account_namespaces = ["openbao"]
+  token_policies                   = [vault_policy.snapshot.name]
+  token_ttl                        = 3600
 }
 
 # external-secrets/external-secrets — ESO's ClusterSecretStore
 # (gitops repo apps/openbao-init/templates/clustersecretstore.yaml).
 resource "vault_kubernetes_auth_backend_role" "external_secrets" {
-  backend                           = vault_auth_backend.kubernetes.path
-  role_name                         = "external-secrets"
-  bound_service_account_names       = ["external-secrets"]
-  bound_service_account_namespaces  = ["external-secrets"]
-  token_policies                    = [vault_policy.eso_read.name]
-  token_ttl                         = 3600
+  backend                          = vault_auth_backend.kubernetes.path
+  role_name                        = "external-secrets"
+  bound_service_account_names      = ["external-secrets"]
+  bound_service_account_namespaces = ["external-secrets"]
+  token_policies                   = [vault_policy.eso_read.name]
+  token_ttl                        = 3600
 }
 
 # --- OIDC auth: human login via Dex (gitops repo platform/scaleway/dex.yml,
@@ -216,6 +216,22 @@ data "terraform_remote_state" "backup_scaleway" {
   }
 }
 
+# 04-vpn/wireguard's own state — read directly instead of a hand-copied
+# local.auto.tfvars value, same as every other cross-root credential on
+# this page (dns_scaleway/backup_scaleway above, openbao_bootstrap in
+# version.tf). Key is workspace_key_prefix/workspace/key from that root's
+# version.tf — both left unchanged by the 04-network -> 04-vpn rename
+# (CLAUDE.md's "backend keys are decoupled from paths"), so this doesn't
+# move if that domain gets renamed again.
+data "terraform_remote_state" "wireguard" {
+  backend = "s3"
+  config = {
+    bucket = "id-terraform-state20260612164136440800000001"
+    region = "eu-west-3"
+    key    = "network/wireguard/04-network-wireguard/terraform.tfstate"
+  }
+}
+
 # --- Arbitrary Dex<->client shared secrets: nothing external constrains
 # these values, so Terraform generates and owns them outright — ArgoCD,
 # Grafana, and Dex itself all read the *same* kv/apps/dex/credentials object
@@ -339,7 +355,8 @@ resource "vault_kv_secret_v2" "secrets_sync_github_repo" {
 # The only repo+environment target today. Written as a plain resource, not a
 # for_each over var.secrets_sync_github.repos.*.environments — there's one
 # member, and it needs a special-cased merge (SCW_ACCESS_KEY/SCW_SECRET_KEY
-# from infra's own 01-iam/workload/scaleway state, not a hand-copied variable value).
+# from infra's own 01-iam/workload/scaleway state, WG_CI_PRIVATE_KEY from
+# 04-vpn/wireguard's state — see data.terraform_remote_state.wireguard above).
 # A generic for_each here would just be a single case with a fake abstraction
 # wrapped around it. Revisit if/when a second repo+environment target with no
 # remote-state merge shows up.
@@ -352,9 +369,79 @@ resource "vault_kv_secret_v2" "secrets_sync_github_infrastructure_scaleway" {
     {
       SCW_ACCESS_KEY = data.terraform_remote_state.dns_scaleway.outputs.workload_access_key
       SCW_SECRET_KEY = data.terraform_remote_state.dns_scaleway.outputs.workload_secret_key
+      # CI's own WireGuard peer key — brings up the tunnel to OpenBao
+      # before CI's own `terraform plan/apply` on
+      # 05-secrets/openbao/{bootstrap,managed}. Read straight from
+      # 04-vpn/wireguard's state, no local.auto.tfvars copy-paste — same
+      # as SCW_ACCESS_KEY/SCW_SECRET_KEY above.
+      WG_CI_PRIVATE_KEY = data.terraform_remote_state.wireguard.outputs.peer_private_keys["ci-github-actions"]
     }
   ))
+  # Bumped from 1: adding WG_CI_PRIVATE_KEY to the merge above is a content
+  # change data_json_wo's write-only diffing can't see on its own (see the
+  # write-only explainer near the top of this file) — without this bump,
+  # `apply` would report "no changes" and never actually write the new key.
+  data_json_wo_version = 2
+}
+
+# apps/wireguard/server-key — the tunnel server's own key, read back out by
+# the gitops repo's services/platform/wireguard/init (ExternalSecret, same
+# pattern as every other app's init chart). Its own object, not merged into
+# anything else: nothing but that one ExternalSecret ever reads it. Read
+# straight from 04-vpn/wireguard's state, no local.auto.tfvars copy-paste.
+resource "vault_kv_secret_v2" "wireguard_server_key" {
+  mount = vault_mount.kv.path
+  name  = "apps/wireguard/server-key"
+
+  data_json_wo = jsonencode({
+    "private-key" = data.terraform_remote_state.wireguard.outputs.server_private_key
+  })
   data_json_wo_version = 1
+}
+
+# apps/wireguard/peers — not actually secret (public keys + overlay
+# addresses), but routed through the exact same OpenBao -> ESO pipe as
+# everything else that crosses from this repo into the gitops repo, rather
+# than hardcoded into that repo's values-scaleway.yaml. name -> {publicKey,
+# allowedIPs}, matching the shape the gitops repo's services/platform/
+# wireguard/config chart expects for its peer allowlist.
+resource "vault_kv_secret_v2" "wireguard_peers" {
+  mount = vault_mount.kv.path
+  name  = "apps/wireguard/peers"
+
+  data_json_wo = jsonencode({
+    for name, key in data.terraform_remote_state.wireguard.outputs.peer_public_keys :
+    name => {
+      publicKey  = key
+      allowedIPs = data.terraform_remote_state.wireguard.outputs.peer_addresses[name]
+    }
+  })
+  # Bumped from 1: confirmed live 2026-08-10 that a cluster rebuild restored
+  # OpenBao from an hourly raft snapshot taken *before* this object was
+  # first written — write-only diffing has no way to detect that kind of
+  # out-of-band data loss on its own (it never reads the live value back,
+  # by design), so the version bump is what actually re-triggers the write.
+  data_json_wo_version = 2
+}
+
+# apps/wireguard/confs — full rendered wg-quick config per peer (server
+# key + AllowedIPs + Endpoint already baked in), sensitive. Deliberately
+# NOT synced into the cluster by anything (no ESO ExternalSecret reads
+# this) — the only consumer is a human fetching their own config from
+# OpenBao's UI/API directly, without needing local Terraform state access
+# (recovering onto a new machine, etc.). Same admin-policy trust boundary
+# already covers wireguard_server_key/CI's key above — any OpenBao admin
+# can already read those, this is no wider a surface than what already
+# exists; it just makes retrieval self-service instead of requiring this
+# repo's state.
+resource "vault_kv_secret_v2" "wireguard_confs" {
+  mount = vault_mount.kv.path
+  name  = "apps/wireguard/confs"
+
+  data_json_wo = jsonencode(data.terraform_remote_state.wireguard.outputs.peer_confs)
+  # Bumped from 1 — same raft-snapshot-predates-the-write gap as
+  # wireguard_peers above, confirmed live 2026-08-10.
+  data_json_wo_version = 2
 }
 
 # apps/velero/scaleway-s3-credentials — Velero's Object Storage credentials

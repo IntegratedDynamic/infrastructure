@@ -64,6 +64,20 @@ that triggers a rewrite; bump it to rotate:
 - `secrets_sync_github_global` / `secrets_sync_github_repo[...]` /
   `secrets_sync_github_repo_env[...]` (`apps/secrets-sync/github/*`) — see
   `var.secrets_sync_github` below.
+- `wireguard_server_key` (`apps/wireguard/server-key`) — the WireGuard
+  tunnel server's own key, sourced from `04-vpn/wireguard`'s
+  `server_private_key` output (external to this provider — that root only
+  generates keys locally, it doesn't write to OpenBao itself). Read back out
+  by the gitops repo's `services/platform/wireguard/init` (ExternalSecret,
+  same pattern as every other app's `init` chart) — its own object, since
+  nothing else ever reads it.
+- `secrets_sync_github_infrastructure_scaleway`'s `WG_CI_PRIVATE_KEY` field
+  (below) — CI's own WireGuard peer key, sourced from `04-vpn/wireguard`'s
+  `peer_private_keys["ci-github-actions"]` output, merged in alongside
+  `SCW_ACCESS_KEY`/`SCW_SECRET_KEY` rather than a separate KV object: it
+  needs to ride the *existing* `secrets-sync` pipeline out to a GitHub
+  Actions secret, which reads from that one object, not a new one nothing
+  would push. See `04-vpn/wireguard/README.md` for the full hand-off.
 - `velero_scaleway_s3_credentials` (`apps/velero/scaleway-s3-credentials`) —
   `SCW_ACCESS_KEY`/`SCW_SECRET_KEY` come from
   `data.terraform_remote_state.backup_scaleway` (infra's own `03-storage/scaleway`
@@ -92,7 +106,8 @@ secrets_sync_github = {
       environments = {
         scaleway = { TEST_SCALEWAY = "..." }  # -> kv/apps/secrets-sync/github/infrastructure-scaleway
         # SCW_ACCESS_KEY/SCW_SECRET_KEY are merged in from
-        # data.terraform_remote_state.dns_scaleway, not set here.
+        # data.terraform_remote_state.dns_scaleway, WG_CI_PRIVATE_KEY from
+        # var.wireguard_ci_private_key — none of the three set here.
       }
     }
   }
@@ -122,6 +137,15 @@ convention, not automation.
   a gitignored `local.auto.tfvars` (matches `*.auto.tfvars` in the repo
   `.gitignore`, same convention as `10-cluster/scaleway/local.auto.tfvars`).
   Never paste secret values into shell history or commit them.
+- **`var.wireguard_server_private_key`**, **`var.wireguard_ci_private_key`**:
+  from `04-vpn/wireguard`'s outputs —
+
+  ```bash
+  terraform -chdir=../../../04-vpn/wireguard output -raw server_private_key
+  terraform -chdir=../../../04-vpn/wireguard output -json peer_private_keys | jq -r '."ci-github-actions"'
+  ```
+
+  Same `local.auto.tfvars` as above.
 
 - Everything else (`random_password.*`) is Terraform-generated — no
   variable needed.

@@ -1,11 +1,11 @@
 terraform {
   backend "s3" {
-    bucket                = "id-terraform-state20260612164136440800000001"
-    region                = "eu-west-3"
-    workspace_key_prefix  = "secrets/managed/openbao"
-    key                   = "terraform.tfstate"
-    encrypt               = true
-    use_lockfile          = true
+    bucket               = "id-terraform-state20260612164136440800000001"
+    region               = "eu-west-3"
+    workspace_key_prefix = "secrets/managed/openbao"
+    key                  = "terraform.tfstate"
+    encrypt              = true
+    use_lockfile         = true
   }
 
   required_providers {
@@ -42,9 +42,18 @@ data "terraform_remote_state" "openbao_bootstrap" {
 # not Vault's VAULT_ADDR/VAULT_TOKEN, so relying on the env var is a trap (see
 # the bootstrap root's version.tf/README for the incident this came from).
 provider "vault" {
+  # Same hostname as OpenBao's public route, on purpose — not a fallback,
+  # the actual mechanism: split-DNS (the tunnel's dns sidecar, gitops
+  # repo's services/platform/wireguard/config) resolves this to the
+  # WireGuard tunnel's own address (04-vpn/wireguard) while it's up,
+  # routing privately through Envoy Gateway's real Service (proxy-gateway
+  # sidecar) instead of the public internet. Same address either way —
+  # bring the tunnel up first (`wg-quick up <peer_conf_paths output>`), or
+  # this just hits the real public route (fine; that's still there for
+  # human OIDC/UI login, this provider just doesn't need it anymore).
   address = "https://openbao.scalepack.fr/"
 
-  # Alternative URL when something goes wrong with public connection
+  # Direct port-forward, independent of the tunnel/gateway path entirely.
   # Requires Kubernetes permissions to run `kubectl port-forward -n openbao openbao-0 8200:8200`
   # address = "http://127.0.0.1:8200/"
 
