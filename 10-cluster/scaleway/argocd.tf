@@ -147,11 +147,73 @@ configs:
 dex:
   enabled: false
 
+# Chart ships resources: {} for every component below by default —
+# confirmed live 2026-08-11: with every platform chart requestless (this
+# one included), the scheduler has nothing to balance the pool's 2 nodes on
+# and Cluster Autoscaler never sees a reason to reach for the 3rd, so a
+# fresh scaleway-homelab boot piles ~30 pods onto one node's worth of real
+# RAM and OOMs (see gitops repo's services/platform/cert-manager/applications/scaleway/chart.vendor.yaml
+# for the fix applied to the rest of the platform, same reasoning here).
+# controller and repoServer get the most headroom: controller watches the
+# live state of every resource this whole GitOps repo manages, and
+# repoServer's memory/CPU scales with whatever chart it's rendering at that
+# moment (kube-prometheus-stack is the largest one synced here) — both spike
+# well above their steady-state idle footprint.
 controller:
   replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 1000m
+      memory: 512Mi
 
 repoServer:
   replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 1000m
+      memory: 768Mi
+
+server:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+redis:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+applicationSet:
+  resources:
+    requests:
+      cpu: 25m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 64Mi
+
+notifications:
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      cpu: 50m
+      memory: 64Mi
 EOF
   ]
 }
