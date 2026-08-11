@@ -18,10 +18,46 @@ resource "scaleway_k8s_cluster" "this" {
   tags = ["homelab", "terraform"]
 }
 
+# Replaces Scaleway's auto-managed "Kapsule default security group" on the
+# node pool below — that group ships with ZERO inbound rules and a
+# default-drop policy, meaning nothing reaches a node's public IP directly
+# at all. Confirmed live 2026-08-09 investigating why the WireGuard
+# NodePort (gitops repo's services/platform/wireguard) never received a
+# single packet despite correct Kubernetes-level config (Service,
+# NetworkPolicy) — this sits below Kubernetes entirely, at the instance
+# level, so nothing in-cluster could have fixed it.
+#
+# Same default-drop inbound posture as Scaleway's own default, plus
+# exactly one explicit allow. 80/443 keep working unaffected either way —
+# that traffic arrives via the LB over Scaleway's internal path, never
+# subject to this instance-level firewall.
+#
+# COUPLING: the port below must match the gitops repo's
+# services/platform/wireguard/config/values.yaml `server.nodePort` exactly
+# — same "two systems kept in sync by convention" pattern already used for
+# 05-secrets/openbao/managed's secrets_sync_github vs. that repo's
+# apps/secrets-sync/values.yaml. Changing one without the other silently
+# breaks the tunnel again, the same way this whole investigation started.
+resource "scaleway_instance_security_group" "cluster_nodes" {
+  name        = "${var.cluster_name}-nodes"
+  description = "Explicit inbound allowlist for cluster nodes' public IPs — see main.tf's comment on this resource."
+
+  inbound_default_policy  = "drop"
+  outbound_default_policy = "accept"
+  enable_default_security = true
+
+  inbound_rule {
+    action   = "accept"
+    protocol = "UDP"
+    port     = 30820 # gitops: services/platform/wireguard/config/values.yaml server.nodePort
+  }
+}
+
 resource "scaleway_k8s_pool" "default" {
-  cluster_id  = scaleway_k8s_cluster.this.id
-  name        = "default"
-  node_type   = "DEV1-M"
+  cluster_id        = scaleway_k8s_cluster.this.id
+  name              = "default"
+  node_type         = "DEV1-M"
+  security_group_id = scaleway_instance_security_group.cluster_nodes.id
   # Put whatever number is required to avoid node pressure signals during startup: https://kubernetes.io/docs/concepts/scheduling-eviction/node-pressure-eviction/
   # Node pressure during startup can end-up with unexcepted race conditions.
   size        = var.node_count
@@ -100,9 +136,9 @@ resource "kubernetes_secret" "scaleway_s3_credentials" {
   }
 
   data = {
-    bucket                 = data.terraform_remote_state.backup_scaleway.outputs.bucket_name
-    AWS_ACCESS_KEY_ID      = data.terraform_remote_state.backup_scaleway.outputs.workload_access_key
-    AWS_SECRET_ACCESS_KEY  = data.terraform_remote_state.backup_scaleway.outputs.workload_secret_key
+    bucket                = data.terraform_remote_state.backup_scaleway.outputs.bucket_name
+    AWS_ACCESS_KEY_ID     = data.terraform_remote_state.backup_scaleway.outputs.workload_access_key
+    AWS_SECRET_ACCESS_KEY = data.terraform_remote_state.backup_scaleway.outputs.workload_secret_key
   }
 }
 
@@ -118,7 +154,7 @@ resource "kubernetes_secret" "openbao_unseal_aws" {
   }
 
   data = {
-    AWS_ACCESS_KEY_ID = data.terraform_remote_state.openbao_unseal_aws.outputs.openbao_unseal_access_key_id
+    AWS_ACCESS_KEY_ID     = data.terraform_remote_state.openbao_unseal_aws.outputs.openbao_unseal_access_key_id
     AWS_SECRET_ACCESS_KEY = data.terraform_remote_state.openbao_unseal_aws.outputs.openbao_unseal_secret_access_key
   }
 }

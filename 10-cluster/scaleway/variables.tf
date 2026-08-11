@@ -40,8 +40,8 @@ variable "gitops_revision" {
 }
 
 variable "update_kubeconfig" {
-  type = bool
-  default = false
+  type        = bool
+  default     = false
   description = "Set to true when using locally to automatically update you ~/.kube/config. Require `kubectl` and `scw` installed & configured."
 }
 
