@@ -39,7 +39,10 @@ variable "secrets_sync_github_eso_private_key" {
 #
 # SCW_ACCESS_KEY/SCW_SECRET_KEY under repos.infrastructure.environments.scaleway
 # are NOT supplied here — main.tf merges those in from
-# data.terraform_remote_state.dns_scaleway instead.
+# data.terraform_remote_state.dns_scaleway instead. WireGuard's keys are the
+# same story: read straight from data.terraform_remote_state.wireguard, no
+# variable needed.
+
 variable "secrets_sync_github" {
   description = "GitHub secrets-sync content (kv/apps/secrets-sync/github/*), scoped by org/repo/repo+environment."
   type = object({
