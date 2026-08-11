@@ -40,7 +40,7 @@ terraform {
 provider "scaleway" {}
 
 # provider "infisical" {
-  
+
 #   auth = { 
 #     ## Uncomment `universal` and comment `oidc` when running terraform locally.
 #     ## By default, even with `INFISICAL_UNIVERSAL_AUTH_CLIENT_XXXX` environment variable, due to `auth.oidc` being present, infisical provider expect OIDC configuration, and nothing else.
