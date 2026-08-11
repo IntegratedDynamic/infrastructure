@@ -40,6 +40,7 @@ terraform -chdir=01-iam/bootstrap/scaleway          providers lock -platform=dar
 terraform -chdir=01-iam/workload/scaleway           providers lock -platform=darwin_arm64 -platform=linux_amd64
 terraform -chdir=02-encryption/aws                  providers lock -platform=darwin_arm64 -platform=linux_amd64
 terraform -chdir=03-storage/scaleway                providers lock -platform=darwin_arm64 -platform=linux_amd64
+terraform -chdir=04-vpn/wireguard               providers lock -platform=darwin_arm64 -platform=linux_amd64
 terraform -chdir=05-secrets/openbao/bootstrap        providers lock -platform=darwin_arm64 -platform=linux_amd64
 terraform -chdir=10-cluster/local                   providers lock -platform=darwin_arm64 -platform=linux_amd64
 terraform -chdir=10-cluster/scaleway                providers lock -platform=darwin_arm64 -platform=linux_amd64
@@ -105,6 +106,12 @@ modules/
   scaleway/                    # domain: Scaleway tool buckets + their scoped
                                #   identities (backup, velero today; home for
                                #   future tool buckets)
+04-vpn/
+  wireguard/                   # domain: WireGuard peer keypairs for the
+                               #   OpenBao tunnel (05-secrets/openbao's vault
+                               #   provider, not the human OIDC/UI login) —
+                               #   EXPLICITLY TEMPORARY, see its own README
+                               #   for why it isn't 01-iam/ or 05-secrets/ yet
 05-secrets/
   openbao/                     # domain: OpenBao itself (bootstrap/ + managed/,
                                #   see that directory) — untouched by the
