@@ -154,27 +154,34 @@ dex:
 # fresh scaleway-homelab boot piles ~30 pods onto one node's worth of real
 # RAM and OOMs (see gitops repo's services/platform/cert-manager/applications/scaleway/chart.vendor.yaml
 # for the fix applied to the rest of the platform, same reasoning here).
-# controller and repoServer get the most headroom: controller watches the
-# live state of every resource this whole GitOps repo manages, and
-# repoServer's memory/CPU scales with whatever chart it's rendering at that
-# moment (kube-prometheus-stack is the largest one synced here) — both spike
-# well above their steady-state idle footprint.
+#
+# Sized from `kubectl top pods -n argocd` on the live cluster (2026-08-11,
+# two samples ~15min apart), not from chart-doc guesses — a first pass
+# anchored on generic recommendations instead of this cluster's actual
+# usage left controller's limit (512Mi) barely above its observed 405-471Mi,
+# no real headroom at all. controller is the standout: it watches the live
+# state of every resource this whole GitOps repo manages, so its memory
+# scales with total tracked resource count, not just "idle controller
+# usage" — request is set above the observed band, limit well above it.
+# repoServer's memory/CPU spikes with whatever chart it's rendering at that
+# moment (kube-prometheus-stack is the largest one synced here), hence the
+# same generous limit despite low observed idle usage (8m/131Mi).
 controller:
   replicas: 1
   resources:
     requests:
-      cpu: 100m
-      memory: 128Mi
+      cpu: 50m
+      memory: 512Mi
     limits:
       cpu: 1000m
-      memory: 512Mi
+      memory: 1024Mi
 
 repoServer:
   replicas: 1
   resources:
     requests:
-      cpu: 100m
-      memory: 128Mi
+      cpu: 25m
+      memory: 192Mi
     limits:
       cpu: 1000m
       memory: 768Mi
@@ -182,29 +189,29 @@ repoServer:
 server:
   resources:
     requests:
-      cpu: 50m
+      cpu: 10m
       memory: 64Mi
     limits:
-      cpu: 200m
+      cpu: 100m
       memory: 128Mi
 
 redis:
   resources:
     requests:
-      cpu: 50m
+      cpu: 10m
       memory: 64Mi
     limits:
-      cpu: 200m
+      cpu: 100m
       memory: 128Mi
 
 applicationSet:
   resources:
     requests:
-      cpu: 25m
-      memory: 32Mi
+      cpu: 10m
+      memory: 64Mi
     limits:
       cpu: 100m
-      memory: 64Mi
+      memory: 128Mi
 
 notifications:
   resources:
