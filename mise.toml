@@ -55,6 +55,49 @@ description = "Reset local minikube cluster"
 run = "minikube delete"
 
 
+# ── VPN (WireGuard, 04-vpn/wireguard) ────────────────────────────────────────
+# `wg-quick`'s own "bare name" lookup only resolves configs already living in
+# its own directory (/opt/homebrew/etc/wireguard on macOS) — not the ones
+# written under generated/. These just point it at the right file so the
+# whole workflow is `mise run vpn-generate` once, then `vpn-up`/`vpn-down`
+# — no path wrangling, no `wg-quick: ...conf.conf' does not exist`
+# surprises. Requires wireguard-tools (`brew install wireguard-tools` on
+# macOS) — not mise-managed, no mise plugin for it.
+
+[tasks.vpn-generate]
+usage = 'arg "<peer>" help="Peer name from 04-vpn/wireguard/variables.tf var.peers" default="nicolas"'
+description = "Write your own WireGuard config to disk (never anyone else's)"
+dir = "04-vpn/wireguard"
+run = """
+terraform init
+terraform workspace select -or-create 04-network-wireguard
+terraform apply -var-file=env/04-network-wireguard.tfvars
+mkdir -p generated
+terraform output -json peer_confs | jq -r --arg peer "${usage_peer?}" '.[$peer]' > "generated/${usage_peer?}.conf"
+chmod 600 "generated/${usage_peer?}.conf"
+echo "wrote generated/${usage_peer?}.conf"
+"""
+
+[tasks.vpn-up]
+usage = 'arg "<peer>" help="Peer name from 04-vpn/wireguard/variables.tf var.peers" default="nicolas"'
+description = "Bring up your WireGuard tunnel to OpenBao"
+dir = "04-vpn/wireguard"
+run = """
+conf="generated/${usage_peer?}.conf"
+if [ ! -f "$conf" ]; then
+  echo "error: $conf not found — run 'mise run vpn-generate' first" >&2
+  exit 1
+fi
+sudo wg-quick up "$(pwd)/$conf"
+"""
+
+[tasks.vpn-down]
+usage = 'arg "<peer>" help="Peer name from 04-vpn/wireguard/variables.tf var.peers" default="nicolas"'
+description = "Tear down your WireGuard tunnel"
+dir = "04-vpn/wireguard"
+run = 'sudo wg-quick down "$(pwd)/generated/${usage_peer?}.conf"'
+
+
 # ── Provider locks ───────────────────────────────────────────────────────────
 
 [tasks.lock]
@@ -66,6 +109,7 @@ terraform -chdir=01-iam/bootstrap/scaleway          providers lock -platform=dar
 terraform -chdir=01-iam/workload/scaleway           providers lock -platform=darwin_arm64 -platform=linux_amd64
 terraform -chdir=02-encryption/aws                  providers lock -platform=darwin_arm64 -platform=linux_amd64
 terraform -chdir=03-storage/scaleway                providers lock -platform=darwin_arm64 -platform=linux_amd64
+terraform -chdir=04-vpn/wireguard                   providers lock -platform=darwin_arm64 -platform=linux_amd64
 terraform -chdir=05-secrets/openbao/bootstrap        providers lock -platform=darwin_arm64 -platform=linux_amd64
 terraform -chdir=10-cluster/local                   providers lock -platform=darwin_arm64 -platform=linux_amd64
 terraform -chdir=10-cluster/scaleway                providers lock -platform=darwin_arm64 -platform=linux_amd64
