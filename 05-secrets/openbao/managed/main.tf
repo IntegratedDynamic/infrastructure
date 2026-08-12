@@ -34,7 +34,16 @@ resource "vault_kubernetes_auth_backend_role" "snapshot" {
 }
 
 # external-secrets/external-secrets — ESO's ClusterSecretStore
-# (gitops repo apps/openbao-init/templates/clustersecretstore.yaml).
+# (gitops repo services/platform/secrets-sync/config/templates/clustersecretstore.yaml).
+# Briefly moved to this root as a kubernetes_manifest resource (2026-08-12),
+# reverted same day: co-locating it with this role was tidier in the
+# abstract, but needed a new `kubernetes` provider on a root that otherwise
+# only talks to Vault, plus a cross-root terraform_remote_state read just
+# for kubeconfig — real added complexity for a problem (GitOps wave
+# ordering looking confusing) that a same-repo move already fixes just as
+# well, with none of that. See the gitops repo commit for the actual fix
+# and its own tradeoff note (secrets-sync isn't a perfectly clean home
+# either — see that file's comment).
 resource "vault_kubernetes_auth_backend_role" "external_secrets" {
   backend                          = vault_auth_backend.kubernetes.path
   role_name                        = "external-secrets"
