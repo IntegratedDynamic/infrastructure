@@ -33,8 +33,7 @@ resource "vault_kubernetes_auth_backend_role" "snapshot" {
   token_ttl                        = 3600
 }
 
-# external-secrets/external-secrets — ESO's ClusterSecretStore
-# (gitops repo apps/openbao-init/templates/clustersecretstore.yaml).
+# external-secrets/external-secrets — bound to the ClusterSecretStore below.
 resource "vault_kubernetes_auth_backend_role" "external_secrets" {
   backend                          = vault_auth_backend.kubernetes.path
   role_name                        = "external-secrets"
@@ -42,6 +41,54 @@ resource "vault_kubernetes_auth_backend_role" "external_secrets" {
   bound_service_account_namespaces = ["external-secrets"]
   token_policies                   = [vault_policy.eso_read.name]
   token_ttl                        = 3600
+}
+
+# ESO's single cluster-wide entry point into OpenBao — the Kubernetes-side
+# half of the auth_backend_role above. Used to live in the gitops repo
+# (services/platform/openbao/init/templates/clustersecretstore.yaml),
+# GitOps-synced with its own ArgoCD sync-wave. Moved here 2026-08-12: that
+# wave placement was legitimately confusing to reason about (it *looked*
+# like it needed to run after ESO's own Helm chart, since ESO is the thing
+# that consumes it — actually false, but an easy trap) when in fact its only
+# real prerequisite, this exact vault_kubernetes_auth_backend_role, was
+# already Terraform-owned right here the whole time. Keeping a
+# GitOps-synced Kubernetes object pointed at a Terraform-owned prerequisite
+# it doesn't even reference by ID (the role name was a hardcoded string
+# duplicated in both places) was a code smell independent of the wave
+# ordering question. `role` below now references the resource directly —
+# one source of truth, and this object no longer has any bearing on GitOps
+# sync-wave ordering at all, since it's applied the moment this root is,
+# independent of the cluster's own ArgoCD bootstrap timing.
+#
+# Provider's own name is `vault`, not something OpenBao-specific — OpenBao
+# is a fork of Vault and speaks the same API, ESO has no dedicated provider.
+resource "kubernetes_manifest" "eso_cluster_secret_store" {
+  manifest = {
+    apiVersion = "external-secrets.io/v1"
+    kind       = "ClusterSecretStore"
+    metadata = {
+      name = "openbao"
+    }
+    spec = {
+      provider = {
+        vault = {
+          server  = "http://openbao.openbao.svc:8200"
+          path    = vault_mount.kv.path
+          version = "v2"
+          auth = {
+            kubernetes = {
+              mountPath = vault_auth_backend.kubernetes.path
+              role      = vault_kubernetes_auth_backend_role.external_secrets.role_name
+              serviceAccountRef = {
+                name      = "external-secrets"
+                namespace = "external-secrets"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
 }
 
 # --- OIDC auth: human login via Dex (gitops repo platform/scaleway/dex.yml,

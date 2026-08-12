@@ -17,6 +17,10 @@ terraform {
       source  = "hashicorp/random"
       version = "~> 3.6"
     }
+    kubernetes = {
+      source  = "hashicorp/kubernetes"
+      version = "~> 2.0"
+    }
   }
 }
 
@@ -64,4 +68,30 @@ provider "vault" {
       secret_id = data.terraform_remote_state.openbao_bootstrap.outputs.secret_id
     }
   }
+}
+
+# Cluster connection for this root's own `kubernetes` provider — read
+# straight off 10-cluster/scaleway's state instead of a hand-copied
+# kubeconfig, same pattern as the vault provider's AppRole creds above.
+# Needed for kubernetes_manifest.eso_cluster_secret_store in main.tf: the
+# ClusterSecretStore is the Kubernetes-side half of the
+# vault_kubernetes_auth_backend_role.external_secrets relationship this
+# root already owns the other half of — used to live in the gitops repo's
+# openbao-init chart, moved here 2026-08-12 (see main.tf's comment) so both
+# halves are managed together instead of one being GitOps-synced against a
+# prerequisite (the auth backend role) that was actually Terraform-owned
+# the whole time.
+data "terraform_remote_state" "cluster_scaleway" {
+  backend = "s3"
+  config = {
+    bucket = "id-terraform-state20260612164136440800000001"
+    region = "eu-west-3"
+    key    = "cluster/scaleway/02-cluster-staging/terraform.tfstate"
+  }
+}
+
+provider "kubernetes" {
+  host                   = data.terraform_remote_state.cluster_scaleway.outputs.cluster_host
+  token                  = data.terraform_remote_state.cluster_scaleway.outputs.cluster_token
+  cluster_ca_certificate = base64decode(data.terraform_remote_state.cluster_scaleway.outputs.cluster_ca_certificate)
 }
