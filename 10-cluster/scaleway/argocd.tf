@@ -35,6 +35,37 @@ configs:
     # var.argocd_admin_password_hash.
     admin.enabled: "false"
 
+    # Without this, ArgoCD has no built-in health assessor for its own
+    # `Application` CRD — a nested Application (bootstrap/values.yaml's
+    # scalewayApps, gitops repo) is treated as "Healthy" the instant it's
+    # created with no sync error, never actually reflecting whether its own
+    # Helm release finished deploying. That silently degrades every
+    # sync-wave boundary in bootstrap/templates/scaleway.yaml from "wait for
+    # the previous wave to be ready" to "wait for the previous wave's
+    # Application objects to exist" — confirmed live 2026-08-12: wave 5
+    # (cert-manager) started ~14s after wave 4 (envoy-gateway) was created,
+    # while envoy-gateway's own chart took ~90s to actually deploy, causing
+    # a self-healing but real crash-loop race. This teaches ArgoCD to
+    # recurse into the child Application's own `.status.health` instead of
+    # defaulting to healthy-on-creation — the standard fix for this well-known
+    # "app of apps" gotcha. Health assessment of the argoproj.io/Application
+    # CRD was removed in ArgoCD 1.8; this is the documented restoration
+    # snippet:
+    # https://argo-cd.readthedocs.io/en/stable/operator-manual/health/
+    resource.customizations.health.argoproj.io_Application: |
+      hs = {}
+      hs.status = "Progressing"
+      hs.message = ""
+      if obj.status ~= nil then
+        if obj.status.health ~= nil then
+          hs.status = obj.status.health.status
+          if obj.status.health.message ~= nil then
+            hs.message = obj.status.health.message
+          end
+        end
+      end
+      return hs
+
     # Native OIDC against our own shared Dex (platform/scaleway/dex.yml in
     # the gitops repo, staticClients.argocd) instead of the chart's built-in
     # Dex (disabled below) — one Dex instance for the whole platform, one
@@ -269,6 +300,9 @@ applications:
       namespace: argocd
 
     syncPolicy:
+      # Since this application bootstrap all the gitops repo, it's equal to cluster startup duration, which is greated than default argocd timeout values.
+      retry: 
+        limit: 10 
       automated:
         prune: true
         selfHeal: true
