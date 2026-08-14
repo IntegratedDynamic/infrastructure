@@ -13,21 +13,6 @@ resource "grafana_service_account_token" "mcp_claude_code" {
   seconds_to_live     = var.mcp_service_account_token_ttl_days * 24 * 3600
 }
 
-# apps/monitoring/grafana-mcp-token — deliberately NOT synced into the
-# cluster by anything (no ESO ExternalSecret reads this): the only consumer
-# is a human (me) fetching it directly from OpenBao to configure the MCP
-# server locally (`claude mcp add-json`), same rationale as
-# 05-secrets/openbao/managed's apps/wireguard/confs.
-resource "vault_kv_secret_v2" "grafana_mcp_token" {
-  mount = "kv"
-  name  = "apps/monitoring/grafana-mcp-token"
-
-  data_json_wo = jsonencode({
-    token = grafana_service_account_token.mcp_claude_code.key
-  })
-  data_json_wo_version = 1
-}
-
 # The Prometheus datasource + the ~27 default dashboards below used to come
 # free from kube-prometheus-stack's own parent chart (templates/grafana/
 # configmaps-datasources.yaml + templates/grafana/dashboards-1.14/*.yaml) —
