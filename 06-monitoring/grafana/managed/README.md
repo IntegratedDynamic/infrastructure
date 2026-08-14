@@ -15,7 +15,8 @@ same role `05-secrets/openbao/managed` plays for OpenBao.
   datasources, alerts) without full Admin.
 - `grafana_service_account_token.mcp_claude_code` — the token, generated
   once at apply time. `seconds_to_live` from
-  `var.mcp_service_account_token_ttl_days` (default 90 days).
+  `var.mcp_service_account_token_ttl_days` (default `0` — never expires;
+  set a positive value to opt into rotation).
 - `vault_kv_secret_v2.grafana_mcp_token` — writes the token to
   `kv/apps/monitoring/grafana-mcp-token`. **Not** synced into the cluster by
   anything (no ESO ExternalSecret reads this) — the only consumer is a

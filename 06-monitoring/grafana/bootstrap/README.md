@@ -40,7 +40,8 @@ Terraform-managed by `05-secrets/openbao/managed`
   still narrower than the real human admin account.
 - `grafana_service_account_token.terraform` — the token, generated once at
   apply time. `seconds_to_live` from `var.service_account_token_ttl_days`
-  (default 90 days, mirrors `secret_id_ttl_days` in the OpenBao bootstrap
+  (default `0` — never expires; set a positive value to opt into rotation,
+  unlike the forced `secret_id_ttl_days` window in the OpenBao bootstrap
   root).
 
 ## Credentials

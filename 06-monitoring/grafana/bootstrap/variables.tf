@@ -1,9 +1,9 @@
-# No built-in expiry enforced by Grafana on service account tokens by
-# default (seconds_to_live = 0/null means never expire) — this is a repo
-# convention, not a platform requirement, mirroring secret_id_ttl_days in
-# 05-secrets/openbao/bootstrap.
+# 0 = never expires (Grafana's own sentinel for seconds_to_live) — unlike
+# secret_id_ttl_days in 05-secrets/openbao/bootstrap, no forced rotation
+# window by default for this low-stakes, single-consumer identity. Set a
+# positive value here to opt into rotation.
 variable "service_account_token_ttl_days" {
-  description = "Rotation window (days) for the terraform service account token."
+  description = "Days before the terraform service account token expires. 0 = never expires."
   type        = number
-  default     = 90
+  default     = 0
 }

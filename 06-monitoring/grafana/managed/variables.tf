@@ -1,8 +1,7 @@
-# No built-in expiry enforced by Grafana on service account tokens by
-# default — repo convention, mirrors service_account_token_ttl_days in
-# 06-monitoring/grafana/bootstrap.
+# 0 = never expires (Grafana's own sentinel for seconds_to_live) — mirrors
+# service_account_token_ttl_days in 06-monitoring/grafana/bootstrap.
 variable "mcp_service_account_token_ttl_days" {
-  description = "Rotation window (days) for the mcp-claude-code service account token."
+  description = "Days before the mcp-claude-code service account token expires. 0 = never expires."
   type        = number
-  default     = 90
+  default     = 0
 }
