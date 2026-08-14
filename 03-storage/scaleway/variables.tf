@@ -2,7 +2,7 @@
 # modules/scaleway-bucket-with-identity. Add a new tool bucket by adding a new
 # map entry here — no new .tf resources needed.
 variable "buckets" {
-  description = "Map of bucket key => config."
+  description = "Map of bucket key => config. The five lifecycle fields are optional per-entry overrides of the shared defaults below (e.g. a short-retention bucket that doesn't need backup/velero's 365d + GLACIER treatment) — omit them to inherit the root-level vars."
   type = map(object({
     bucket_name            = string
     identity_app_prefix    = string
@@ -10,6 +10,12 @@ variable "buckets" {
     identity_purpose       = string
     api_key_purpose        = string
     api_key_consumer       = string
+
+    versioning_enabled              = optional(bool)
+    retention_days                  = optional(number)
+    noncurrent_version_expiry_days  = optional(number)
+    cold_storage_enabled            = optional(bool)
+    cold_storage_transition_days    = optional(number)
   }))
 }
 

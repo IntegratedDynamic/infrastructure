@@ -42,6 +42,8 @@ terraform -chdir=02-encryption/aws                  providers lock -platform=dar
 terraform -chdir=03-storage/scaleway                providers lock -platform=darwin_arm64 -platform=linux_amd64
 terraform -chdir=04-vpn/wireguard               providers lock -platform=darwin_arm64 -platform=linux_amd64
 terraform -chdir=05-secrets/openbao/bootstrap        providers lock -platform=darwin_arm64 -platform=linux_amd64
+terraform -chdir=06-monitoring/grafana/bootstrap     providers lock -platform=darwin_arm64 -platform=linux_amd64
+terraform -chdir=06-monitoring/grafana/managed       providers lock -platform=darwin_arm64 -platform=linux_amd64
 terraform -chdir=10-cluster/local                   providers lock -platform=darwin_arm64 -platform=linux_amd64
 terraform -chdir=10-cluster/scaleway                providers lock -platform=darwin_arm64 -platform=linux_amd64
 ```
@@ -55,9 +57,11 @@ Terraform roots are organized by **domain** — the top-level folder is a numeri
 literally owns (`00-foundation`, `01-iam`, `02-encryption`...). The number
 roughly encodes apply order / blast-radius
 across domains, though it's a convention, not something any tooling enforces.
-Gaps in the sequence (`04`, `06`-`09`) are deliberate — room for future domains
+Gaps in the sequence (`04`, `07`-`09`) are deliberate — room for future domains
 without a renumbering cascade; `10-cluster` in particular was moved up from
-`02-` on purpose to free up low numbers for domains like `02-encryption`.
+`02-` on purpose to free up low numbers for domains like `02-encryption`. `06`
+was the first gap filled: `06-monitoring/` (Terraform-managed config for the
+monitoring stack's own tools — the tools themselves are gitops-deployed).
 
 The second path segment is the **cloud provider** a root targets (`aws`,
 `scaleway`) — a domain with only one provider still nests under it (e.g.
@@ -116,6 +120,14 @@ modules/
   openbao/                     # domain: OpenBao itself (bootstrap/ + managed/,
                                #   see that directory) — untouched by the
                                #   2026-07-30 buckets/IAM consolidation
+06-monitoring/
+  grafana/                     # domain: Grafana, managed by Terraform
+                               #   (bootstrap/ + managed/, same split as
+                               #   05-secrets/openbao) — its own domain
+                               #   since 05-secrets/ is scoped to OpenBao's
+                               #   own config specifically, not any tool
+                               #   that happens to need IaC. First of the
+                               #   06-09 gaps to get filled.
 10-cluster/                    # domain: the Kubernetes platform (moved up from
                                #   02- to free up low numbers for future domains)
   local/                       #   minikube — local dev and debugging. Local backend (local files)

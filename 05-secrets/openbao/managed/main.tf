@@ -302,9 +302,17 @@ resource "vault_kv_secret_v2" "grafana_admin" {
     "admin-user"     = "admin"
     "admin-password" = random_password.grafana_admin_password.result
   })
-  # Bumped from 1: content changed from "adopted existing value" to
-  # "Terraform-generated" — a deliberate one-time rotation.
-  data_json_wo_version = 2
+  # Bumped from 2: confirmed live 2026-08-14 that a cluster rebuild restored
+  # OpenBao from a raft snapshot holding a stale admin-password (mismatched
+  # sha256 vs random_password.grafana_admin_password's own Terraform-state
+  # value) — write-only diffing has no way to detect that kind of
+  # out-of-band data loss on its own (it never reads the live value back, by
+  # design), same gap already hit for wireguard_peers/wireguard_confs above.
+  # The version bump is what actually re-triggers the write. Requires a
+  # Grafana pod restart afterward too: it only applies
+  # GF_SECURITY_ADMIN_PASSWORD at admin-user creation (fresh/ephemeral DB),
+  # not on every boot against an already-existing admin user.
+  data_json_wo_version = 3
 }
 
 # SCW_ACCESS_KEY/SCW_SECRET_KEY sourced straight from infra's own IAM root
@@ -471,4 +479,22 @@ resource "vault_kv_secret_v2" "velero_scaleway_s3_credentials" {
     SCW_SECRET_KEY = data.terraform_remote_state.backup_scaleway.outputs.velero_workload_secret_key
   })
   data_json_wo_version = 2
+}
+
+# apps/monitoring/thanos-scaleway-s3-credentials — the Prometheus Thanos
+# sidecar's Object Storage credentials (gitops repo
+# services/platform/monitoring/thanos-secret), reshaped there into Thanos's
+# own objstore.yaml format. Separate bucket + IAM key from backup/velero
+# (03-storage/scaleway/env/*.tfvars' thanos entry, 1-day retention) — same
+# "one bucket, one identity, per consumer, never shared" contract
+# (03-storage/README.md) as every other tool bucket in this root.
+resource "vault_kv_secret_v2" "thanos_scaleway_s3_credentials" {
+  mount = vault_mount.kv.path
+  name  = "apps/monitoring/thanos-scaleway-s3-credentials"
+
+  data_json_wo = jsonencode({
+    SCW_ACCESS_KEY = data.terraform_remote_state.backup_scaleway.outputs.thanos_workload_access_key
+    SCW_SECRET_KEY = data.terraform_remote_state.backup_scaleway.outputs.thanos_workload_secret_key
+  })
+  data_json_wo_version = 1
 }
