@@ -98,6 +98,33 @@ dir = "04-vpn/wireguard"
 run = 'sudo wg-quick down "$(pwd)/generated/${usage_peer?}.conf"'
 
 
+# ── Backups (on-demand, out-of-band from each schedule's own cron) ──────────
+# Useful right after standing up a fresh cluster/schedule (no backup history
+# yet to restore from) or before a deliberate rebuild you want to test
+# restore against. Schedule names match services/platform/velero/chart/
+# values-scaleway.yaml (gitops repo) — see that file + this repo's
+# services/platform/gateway/config/README.md for the full restore-hook
+# writeup. Selecting the velero pod by the `name=velero` label (not
+# `app.kubernetes.io/name=velero`, which the node-agent DaemonSet pods
+# share) — `kubectl exec deploy/velero` has been observed picking a
+# node-agent pod instead, confirmed live 2026-08-14.
+
+[tasks.backup-now]
+description = "Trigger an on-demand backup: both Velero schedules + an OpenBao snapshot"
+run = """
+set -eu
+velero_pod=$(kubectl get pod -n velero -l name=velero -o jsonpath='{.items[0].metadata.name}')
+
+kubectl exec -n velero "$velero_pod" -c velero -- /velero backup create --from-schedule velero-cert-secrets --wait
+kubectl exec -n velero "$velero_pod" -c velero -- /velero backup create --from-schedule velero-grafana-data --wait
+
+job="openbao-snapshot-manual-$(date +%s)"
+kubectl create job --from=cronjob/openbao-snapshot "$job" -n openbao
+kubectl wait --for=condition=complete "job/$job" -n openbao --timeout=60s
+kubectl logs -n openbao "job/$job" --tail=5
+"""
+
+
 # ── Provider locks ───────────────────────────────────────────────────────────
 
 [tasks.lock]
