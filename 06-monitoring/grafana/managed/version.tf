@@ -13,10 +13,6 @@ terraform {
       source  = "grafana/grafana"
       version = "~> 4.0"
     }
-    vault = {
-      source  = "hashicorp/vault"
-      version = "~> 5.0"
-    }
   }
 }
 
@@ -38,34 +34,4 @@ data "terraform_remote_state" "grafana_bootstrap" {
 provider "grafana" {
   url  = "https://grafana.scalepack.fr/"
   auth = data.terraform_remote_state.grafana_bootstrap.outputs.service_account_token
-}
-
-# 05-secrets/openbao/bootstrap's own state — the SAME `terraform` AppRole
-# 05-secrets/openbao/managed itself authenticates as. Its policy already
-# grants kv/data|metadata/apps/* broadly (create/read/update/list), so
-# writing this root's own secret (apps/monitoring/grafana-mcp-token, see
-# main.tf) needs no new OpenBao-side policy — reusing the existing identity
-# is simpler than minting a second one for the same capability.
-data "terraform_remote_state" "openbao_bootstrap" {
-  backend = "s3"
-  config = {
-    bucket = "id-terraform-state20260612164136440800000001"
-    region = "eu-west-3"
-    key    = "secrets/bootstrap/openbao/05-secrets-openbao/terraform.tfstate"
-  }
-}
-
-provider "vault" {
-  # Same address/rationale as 05-secrets/openbao/managed's own vault
-  # provider — see that root's version.tf for the full split-DNS/WireGuard
-  # explanation.
-  address = "https://openbao.scalepack.fr/"
-
-  auth_login {
-    path = "auth/approle/login"
-    parameters = {
-      role_id   = data.terraform_remote_state.openbao_bootstrap.outputs.role_id
-      secret_id = data.terraform_remote_state.openbao_bootstrap.outputs.secret_id
-    }
-  }
 }
