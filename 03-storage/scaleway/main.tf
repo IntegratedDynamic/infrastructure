@@ -16,11 +16,11 @@ module "buckets" {
   region            = var.region
   lifecycle_rule_id = "${each.key}-retention"
 
-  versioning_enabled              = var.versioning_enabled
-  retention_days                  = var.retention_days
-  noncurrent_version_expiry_days  = var.noncurrent_version_expiry_days
-  cold_storage_enabled            = var.cold_storage_enabled
-  cold_storage_transition_days    = var.cold_storage_transition_days
+  versioning_enabled              = coalesce(each.value.versioning_enabled, var.versioning_enabled)
+  retention_days                  = coalesce(each.value.retention_days, var.retention_days)
+  noncurrent_version_expiry_days  = coalesce(each.value.noncurrent_version_expiry_days, var.noncurrent_version_expiry_days)
+  cold_storage_enabled            = coalesce(each.value.cold_storage_enabled, var.cold_storage_enabled)
+  cold_storage_transition_days    = coalesce(each.value.cold_storage_transition_days, var.cold_storage_transition_days)
 
   project_id                        = var.project_id
   identity_application_name         = "${each.value.identity_app_prefix}-${terraform.workspace}"

@@ -41,3 +41,21 @@ output "velero_workload_secret_key" {
   description = "Secret access key for the scoped Velero Kubernetes workload identity."
   value       = module.buckets["velero"].secret_key
 }
+
+# ── Thanos (separate bucket + identity) ──────────────────────────────────────
+
+output "thanos_bucket_name" {
+  description = "Provisioned Thanos object-storage bucket name."
+  value       = module.buckets["thanos"].bucket_name
+}
+
+output "thanos_workload_access_key" {
+  description = "Public access key for the scoped Thanos Kubernetes workload identity."
+  value       = module.buckets["thanos"].access_key
+}
+
+output "thanos_workload_secret_key" {
+  sensitive   = true
+  description = "Secret access key for the scoped Thanos Kubernetes workload identity."
+  value       = module.buckets["thanos"].secret_key
+}
