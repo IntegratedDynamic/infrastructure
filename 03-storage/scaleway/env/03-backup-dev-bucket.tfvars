@@ -58,9 +58,14 @@ buckets = {
     # it would just keep paying to store data Loki itself considers expired.
     # cold_storage_enabled must stay false: the module's precondition needs
     # cold_storage_transition_days < retention_days, and the shared 90-day
-    # default would fail against this 30-day retention.
+    # default would fail against this 1-day retention.
+    #
+    # 1 day, not 30 (2026-08-15): explicit call, not the module default —
+    # matches Loki's own limits_config.retention_period
+    # (services/platform/monitoring/loki-chart in the gitops repo, same
+    # 24h) and Tempo's below, deliberately near-term-only.
     versioning_enabled    = false
-    retention_days        = 30
+    retention_days        = 1
     cold_storage_enabled  = false
   }
   tempo = {
@@ -73,8 +78,11 @@ buckets = {
 
     # Same reasoning as loki above: trace blocks age out per Tempo's own
     # compactor/retention config, not this bucket's lifecycle rules.
+    #
+    # 1 day, not 30 (2026-08-15): matches Tempo's own retention (24h,
+    # services/platform/monitoring/tempo-chart in the gitops repo).
     versioning_enabled    = false
-    retention_days        = 30
+    retention_days        = 1
     cold_storage_enabled  = false
   }
 }
