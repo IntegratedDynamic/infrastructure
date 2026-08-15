@@ -59,3 +59,39 @@ output "thanos_workload_secret_key" {
   description = "Secret access key for the scoped Thanos Kubernetes workload identity."
   value       = module.buckets["thanos"].secret_key
 }
+
+# ── Loki (separate bucket + identity) ─────────────────────────────────────────
+
+output "loki_bucket_name" {
+  description = "Provisioned Loki object-storage bucket name."
+  value       = module.buckets["loki"].bucket_name
+}
+
+output "loki_workload_access_key" {
+  description = "Public access key for the scoped Loki Kubernetes workload identity."
+  value       = module.buckets["loki"].access_key
+}
+
+output "loki_workload_secret_key" {
+  sensitive   = true
+  description = "Secret access key for the scoped Loki Kubernetes workload identity."
+  value       = module.buckets["loki"].secret_key
+}
+
+# ── Tempo (separate bucket + identity) ────────────────────────────────────────
+
+output "tempo_bucket_name" {
+  description = "Provisioned Tempo object-storage bucket name."
+  value       = module.buckets["tempo"].bucket_name
+}
+
+output "tempo_workload_access_key" {
+  description = "Public access key for the scoped Tempo Kubernetes workload identity."
+  value       = module.buckets["tempo"].access_key
+}
+
+output "tempo_workload_secret_key" {
+  sensitive   = true
+  description = "Secret access key for the scoped Tempo Kubernetes workload identity."
+  value       = module.buckets["tempo"].secret_key
+}

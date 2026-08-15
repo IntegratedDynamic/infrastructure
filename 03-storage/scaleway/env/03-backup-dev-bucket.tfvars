@@ -44,4 +44,37 @@ buckets = {
     retention_days        = 30
     cold_storage_enabled  = false
   }
+  loki = {
+    bucket_name             = "monitoring-loki-dev-id"
+    identity_app_prefix     = "monitoring-loki-k8s"
+    identity_policy_prefix  = "monitoring-loki-objects"
+    identity_purpose        = "grants Loki object read/write for log chunk storage"
+    api_key_purpose         = "Loki workload credentials"
+    api_key_consumer        = "Consumed via OpenBao (kv/apps/monitoring/loki-scaleway-s3-credentials) → ESO → Kubernetes Secret"
+
+    # Same rolling-expiry shape as thanos above: log chunks age out on their
+    # own schedule (Loki's own compactor/retention config, not this bucket),
+    # so there's no value in backup/velero's versioning + GLACIER treatment —
+    # it would just keep paying to store data Loki itself considers expired.
+    # cold_storage_enabled must stay false: the module's precondition needs
+    # cold_storage_transition_days < retention_days, and the shared 90-day
+    # default would fail against this 30-day retention.
+    versioning_enabled    = false
+    retention_days        = 30
+    cold_storage_enabled  = false
+  }
+  tempo = {
+    bucket_name             = "monitoring-tempo-dev-id"
+    identity_app_prefix     = "monitoring-tempo-k8s"
+    identity_policy_prefix  = "monitoring-tempo-objects"
+    identity_purpose        = "grants Tempo object read/write for trace block storage"
+    api_key_purpose         = "Tempo workload credentials"
+    api_key_consumer        = "Consumed via OpenBao (kv/apps/monitoring/tempo-scaleway-s3-credentials) → ESO → Kubernetes Secret"
+
+    # Same reasoning as loki above: trace blocks age out per Tempo's own
+    # compactor/retention config, not this bucket's lifecycle rules.
+    versioning_enabled    = false
+    retention_days        = 30
+    cold_storage_enabled  = false
+  }
 }
