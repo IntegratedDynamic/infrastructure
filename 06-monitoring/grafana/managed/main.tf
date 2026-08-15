@@ -40,6 +40,94 @@ resource "grafana_data_source" "prometheus" {
   is_default  = true
 }
 
+# Loki + Tempo — same pattern as prometheus above, added alongside
+# gitops#29 (Loki/Tempo/Alloy/OTel Collector). URLs are a BEST-EFFORT GUESS
+# at the Service names gitops#29's charts will create — assumed release
+# name == chart name (loki/tempo), matching this cluster's existing
+# convention (see the prometheus datasource's own comment on how
+# `kube-prometheus-stack-prometheus` was derived) — and Loki's optional
+# nginx `gateway` disabled (querying the SingleBinary pod's own :3100
+# directly; one less pod on a pool that's already tight, per argocd.tf's
+# resource-sizing comment). NOT yet verified against a live chart the way
+# the prometheus URL was — double-check both URLs once gitops#29 actually
+# lands, same as that comment warns for its own case.
+resource "grafana_data_source" "loki" {
+  type        = "loki"
+  name        = "Loki"
+  url         = "http://loki.monitoring.svc:3100"
+  access_mode = "proxy"
+
+  # grafana_data_source_config.loki (below) manages json_data_encoded
+  # out-of-band from this resource's own plan — without ignoring it here,
+  # every subsequent plan would show spurious drift fighting that resource
+  # (documented gotcha for this exact circular-reference case:
+  # registry.terraform.io/grafana/grafana's data_source_config docs).
+  lifecycle {
+    ignore_changes = [json_data_encoded, http_headers]
+  }
+}
+
+resource "grafana_data_source" "tempo" {
+  type        = "tempo"
+  name        = "Tempo"
+  url         = "http://tempo.monitoring.svc:3200"
+  access_mode = "proxy"
+
+  lifecycle {
+    ignore_changes = [json_data_encoded, http_headers]
+  }
+}
+
+# Loki -> Tempo (click a trace ID in a log line, jump to that trace) and
+# Tempo -> Loki/Prometheus (click a trace, jump to its logs/service
+# metrics) correlation. Split into grafana_data_source_config instead of
+# setting json_data_encoded directly on the two resources above because
+# they reference each other's uid — a genuine circular dependency Terraform
+# can only resolve by decoupling the datasource's existence from its
+# cross-referencing config (same shape as the provider's own documented
+# example for this exact Loki<->Tempo pairing).
+#
+# derivedFields' matcherRegex is Grafana's own generic doc-example pattern
+# for a "trace_id"/"traceID" field in a log line — not verified against any
+# app's actual log format yet, since nothing emits trace IDs into logs
+# until gitops#29's OTel Collector + an instrumented app exist. Harmless if
+# it never matches (derived fields are opt-in navigation, not required for
+# anything else to work); revisit the regex once a real instrumented app's
+# log shape is known.
+resource "grafana_data_source_config" "loki" {
+  uid = grafana_data_source.loki.uid
+
+  json_data_encoded = jsonencode({
+    derivedFields = [
+      {
+        datasourceUid = grafana_data_source.tempo.uid
+        matcherRegex  = "[tT]race_?[iI][dD]\"?[:=]\"?(\\w+)"
+        matcherType   = "regex"
+        name          = "traceID"
+        url           = "$${__value.raw}"
+      }
+    ]
+  })
+}
+
+# Deliberately minimal: no customQuery (let Tempo build the Loki query from
+# its own default tag matching rather than a hand-written LogQL query
+# assuming label names we haven't settled on) and no tracesToMetrics/
+# serviceMap yet — serviceMap in particular needs a spanmetrics connector
+# in the OTel Collector to exist first (not in gitops#29's scope), so
+# wiring it now would point at a Prometheus metric that doesn't exist.
+resource "grafana_data_source_config" "tempo" {
+  uid = grafana_data_source.tempo.uid
+
+  json_data_encoded = jsonencode({
+    tracesToLogsV2 = {
+      datasourceUid   = grafana_data_source.loki.uid
+      filterBySpanID  = false
+      filterByTraceID = false
+    }
+  })
+}
+
 # dashboards/*.json are the exact same dashboards kube-prometheus-stack
 # 86.1.0 would otherwise auto-deploy — extracted (not hand-written) by
 # rendering services/platform/monitoring/chart with
