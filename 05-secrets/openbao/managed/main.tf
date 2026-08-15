@@ -498,3 +498,35 @@ resource "vault_kv_secret_v2" "thanos_scaleway_s3_credentials" {
   })
   data_json_wo_version = 1
 }
+
+# apps/monitoring/loki-scaleway-s3-credentials — Loki's own Object Storage
+# credentials (gitops repo services/platform/monitoring/loki-secret),
+# reshaped there into whatever Loki's S3 client expects. Separate bucket +
+# IAM key from every other tool bucket (03-storage/scaleway/env/*.tfvars'
+# loki entry) — same "one bucket, one identity, per consumer, never shared"
+# contract (03-storage/README.md) as thanos above.
+resource "vault_kv_secret_v2" "loki_scaleway_s3_credentials" {
+  mount = vault_mount.kv.path
+  name  = "apps/monitoring/loki-scaleway-s3-credentials"
+
+  data_json_wo = jsonencode({
+    SCW_ACCESS_KEY = data.terraform_remote_state.backup_scaleway.outputs.loki_workload_access_key
+    SCW_SECRET_KEY = data.terraform_remote_state.backup_scaleway.outputs.loki_workload_secret_key
+  })
+  data_json_wo_version = 1
+}
+
+# apps/monitoring/tempo-scaleway-s3-credentials — Tempo's own Object Storage
+# credentials (gitops repo services/platform/monitoring/tempo-secret). Same
+# contract as loki above: separate bucket + IAM key
+# (03-storage/scaleway/env/*.tfvars' tempo entry), never shared.
+resource "vault_kv_secret_v2" "tempo_scaleway_s3_credentials" {
+  mount = vault_mount.kv.path
+  name  = "apps/monitoring/tempo-scaleway-s3-credentials"
+
+  data_json_wo = jsonencode({
+    SCW_ACCESS_KEY = data.terraform_remote_state.backup_scaleway.outputs.tempo_workload_access_key
+    SCW_SECRET_KEY = data.terraform_remote_state.backup_scaleway.outputs.tempo_workload_secret_key
+  })
+  data_json_wo_version = 1
+}
