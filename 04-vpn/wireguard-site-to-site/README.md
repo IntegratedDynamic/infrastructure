@@ -1,4 +1,12 @@
-# 04-vpn/wireguard — WireGuard peer keys + client configs for the OpenBao tunnel
+# 04-vpn/wireguard-site-to-site — WireGuard peer keys + client configs for the OpenBao tunnel
+
+Renamed from `04-vpn/wireguard` once a second, unrelated WireGuard
+deployment (`04-vpn/wireguard-exit` — a consumer-style exit node, all of a
+peer's traffic routed through the cluster, not just OpenBao) showed up
+alongside it. Pure directory rename — `workspace_key_prefix` and this root's
+`env/04-network-wireguard.tfvars` filename/workspace name are untouched, so
+it needed zero state migration (see root `CLAUDE.md`'s "Backend keys are
+decoupled from paths").
 
 ## Connect
 
@@ -33,11 +41,11 @@ silently breaks if only one side changes.
 
 | Value | From | To | Why manual |
 |---|---|---|---|
-| `server_public_key`, `peer_public_keys` (not secret) | this root's outputs | gitops `services/platform/wireguard/config/values-scaleway.yaml` | no cross-repo automation exists anywhere in this setup |
+| `server_public_key`, `peer_public_keys` (not secret) | this root's outputs | gitops `services/platform/wireguard-site-to-site/config/values-scaleway.yaml` | no cross-repo automation exists anywhere in this setup |
 | `server_private_key` (sensitive) | this root's output | `05-secrets/openbao/managed`'s `wireguard_server_private_key` (`local.auto.tfvars`) → `kv/apps/wireguard/server-key` → gitops `wireguard-init`'s ExternalSecret | same |
 | `peer_private_keys["ci-github-actions"]` (sensitive) | this root's output | `05-secrets/openbao/managed`'s `wireguard_ci_private_key` → merged into the *existing* `kv/apps/secrets-sync/github/infrastructure-scaleway` object (not its own KV path — nothing reads that) → secrets-sync → GitHub Actions secret | same; direction is OpenBao→GitHub via in-cluster ESO, so CI never needs the tunnel to fetch its own tunnel key |
 | every other peer's private key | this root's output | that peer's own machine only (`generated/<name>.conf`) | never touches OpenBao or git, by design |
-| NodePort `30820` | gitops `services/platform/wireguard/config/values.yaml` `server.nodePort` | infra `10-cluster/scaleway/main.tf`'s security group rule, **and** this root's `wg_endpoint` port | two independent files, must match exactly |
+| NodePort `30820` | gitops `services/platform/wireguard-site-to-site/config/values.yaml` `server.nodePort` | infra `10-cluster/scaleway/main.tf`'s security group rule, **and** this root's `wg_endpoint` port | two independent files, must match exactly |
 
 ## Why this exists
 
@@ -48,7 +56,7 @@ stays public only for a separate, legitimate reason: human OIDC/UI login
 (gitops repo's `services/platform/openbao/config`), untouched by this
 domain. No third-party control plane (Tailscale evaluated, ruled out) —
 just `wg`, terminated by a small server workload in the gitops repo
-(`services/platform/wireguard`).
+(`services/platform/wireguard-site-to-site`).
 
 **End-to-end validated live 2026-08-09**: a peer handshakes and reaches
 OpenBao's `/v1/sys/health` through the full chain (tunnel → gitops's
@@ -66,7 +74,7 @@ every Gateway API resource reporting `Accepted`/`Programmed`.
 Exposed instead as a `NodePort` directly on a Kapsule node's public IP — a
 genuinely new entry point, hardened accordingly: `externalTrafficPolicy:
 Local` + an explicit least-privilege `NetworkPolicy` (gitops repo's
-`services/platform/wireguard/config`), plus a dedicated
+`services/platform/wireguard-site-to-site/config`), plus a dedicated
 `scaleway_instance_security_group` replacing Scaleway's auto-managed
 default one, which ships with zero inbound rules and would otherwise block
 this (and everything else) at the instance level regardless of any
