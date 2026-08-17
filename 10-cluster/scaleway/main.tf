@@ -32,12 +32,12 @@ resource "scaleway_k8s_cluster" "this" {
 # that traffic arrives via the LB over Scaleway's internal path, never
 # subject to this instance-level firewall.
 #
-# COUPLING: the port below must match the gitops repo's
-# services/platform/wireguard/config/values.yaml `server.nodePort` exactly
-# — same "two systems kept in sync by convention" pattern already used for
-# 05-secrets/openbao/managed's secrets_sync_github vs. that repo's
-# apps/secrets-sync/values.yaml. Changing one without the other silently
-# breaks the tunnel again, the same way this whole investigation started.
+# COUPLING: each port below must match its gitops chart's
+# server.nodePort exactly — same "two systems kept in sync by convention"
+# pattern already used for 05-secrets/openbao/managed's secrets_sync_github
+# vs. that repo's apps/secrets-sync/values.yaml. Changing one without the
+# other silently breaks the tunnel again, the same way this whole
+# investigation started.
 resource "scaleway_instance_security_group" "cluster_nodes" {
   name        = "${var.cluster_name}-nodes"
   description = "Explicit inbound allowlist for cluster nodes' public IPs — see main.tf's comment on this resource."
@@ -49,7 +49,13 @@ resource "scaleway_instance_security_group" "cluster_nodes" {
   inbound_rule {
     action   = "accept"
     protocol = "UDP"
-    port     = 30820 # gitops: services/platform/wireguard/config/values.yaml server.nodePort
+    port     = 30820 # gitops: services/platform/wireguard-site-to-site/config/values.yaml server.nodePort
+  }
+
+  inbound_rule {
+    action   = "accept"
+    protocol = "UDP"
+    port     = 30821 # gitops: services/platform/wireguard-exit/config/values.yaml server.nodePort
   }
 }
 

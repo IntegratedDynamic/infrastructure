@@ -55,7 +55,7 @@ description = "Reset local minikube cluster"
 run = "minikube delete"
 
 
-# ── VPN (WireGuard, 04-vpn/wireguard) ────────────────────────────────────────
+# ── VPN (WireGuard, 04-vpn/wireguard-site-to-site) ───────────────────────────
 # `wg-quick`'s own "bare name" lookup only resolves configs already living in
 # its own directory (/opt/homebrew/etc/wireguard on macOS) — not the ones
 # written under generated/. These just point it at the right file so the
@@ -65,9 +65,9 @@ run = "minikube delete"
 # macOS) — not mise-managed, no mise plugin for it.
 
 [tasks.vpn-generate]
-usage = 'arg "<peer>" help="Peer name from 04-vpn/wireguard/variables.tf var.peers" default="nicolas"'
+usage = 'arg "<peer>" help="Peer name from 04-vpn/wireguard-site-to-site/variables.tf var.peers" default="nicolas"'
 description = "Write your own WireGuard config to disk (never anyone else's)"
-dir = "04-vpn/wireguard"
+dir = "04-vpn/wireguard-site-to-site"
 run = """
 terraform init
 terraform workspace select -or-create 04-network-wireguard
@@ -79,9 +79,9 @@ echo "wrote generated/${usage_peer?}.conf"
 """
 
 [tasks.vpn-up]
-usage = 'arg "<peer>" help="Peer name from 04-vpn/wireguard/variables.tf var.peers" default="nicolas"'
+usage = 'arg "<peer>" help="Peer name from 04-vpn/wireguard-site-to-site/variables.tf var.peers" default="nicolas"'
 description = "Bring up your WireGuard tunnel to OpenBao"
-dir = "04-vpn/wireguard"
+dir = "04-vpn/wireguard-site-to-site"
 run = """
 conf="generated/${usage_peer?}.conf"
 if [ ! -f "$conf" ]; then
@@ -92,9 +92,48 @@ sudo wg-quick up "$(pwd)/$conf"
 """
 
 [tasks.vpn-down]
-usage = 'arg "<peer>" help="Peer name from 04-vpn/wireguard/variables.tf var.peers" default="nicolas"'
+usage = 'arg "<peer>" help="Peer name from 04-vpn/wireguard-site-to-site/variables.tf var.peers" default="nicolas"'
 description = "Tear down your WireGuard tunnel"
-dir = "04-vpn/wireguard"
+dir = "04-vpn/wireguard-site-to-site"
+run = 'sudo wg-quick down "$(pwd)/generated/${usage_peer?}.conf"'
+
+# ── VPN exit node (WireGuard, 04-vpn/wireguard-exit) ─────────────────────────
+# Same generate/up/down shape as the site-to-site tunnel above, pointed at
+# the separate exit-node root — different keys, different overlay subnet,
+# routes ALL of the peer's traffic (not just OpenBao) through the cluster's
+# public IP. See 04-vpn/wireguard-exit/README.md.
+
+[tasks.vpn-exit-generate]
+usage = 'arg "<peer>" help="Peer name from 04-vpn/wireguard-exit/variables.tf var.peers" default="nicolas"'
+description = "Write your own WireGuard exit-node config to disk (never anyone else's)"
+dir = "04-vpn/wireguard-exit"
+run = """
+terraform init
+terraform workspace select -or-create 04-network-wireguard-exit
+terraform apply -var-file=env/04-network-wireguard-exit.tfvars
+mkdir -p generated
+terraform output -json peer_confs | jq -r --arg peer "${usage_peer?}" '.[$peer]' > "generated/${usage_peer?}.conf"
+chmod 600 "generated/${usage_peer?}.conf"
+echo "wrote generated/${usage_peer?}.conf"
+"""
+
+[tasks.vpn-exit-up]
+usage = 'arg "<peer>" help="Peer name from 04-vpn/wireguard-exit/variables.tf var.peers" default="nicolas"'
+description = "Bring up your WireGuard exit-node tunnel (routes all your traffic through the cluster)"
+dir = "04-vpn/wireguard-exit"
+run = """
+conf="generated/${usage_peer?}.conf"
+if [ ! -f "$conf" ]; then
+  echo "error: $conf not found — run 'mise run vpn-exit-generate' first" >&2
+  exit 1
+fi
+sudo wg-quick up "$(pwd)/$conf"
+"""
+
+[tasks.vpn-exit-down]
+usage = 'arg "<peer>" help="Peer name from 04-vpn/wireguard-exit/variables.tf var.peers" default="nicolas"'
+description = "Tear down your WireGuard exit-node tunnel"
+dir = "04-vpn/wireguard-exit"
 run = 'sudo wg-quick down "$(pwd)/generated/${usage_peer?}.conf"'
 
 
@@ -136,7 +175,8 @@ terraform -chdir=01-iam/bootstrap/scaleway          providers lock -platform=dar
 terraform -chdir=01-iam/workload/scaleway           providers lock -platform=darwin_arm64 -platform=linux_amd64
 terraform -chdir=02-encryption/aws                  providers lock -platform=darwin_arm64 -platform=linux_amd64
 terraform -chdir=03-storage/scaleway                providers lock -platform=darwin_arm64 -platform=linux_amd64
-terraform -chdir=04-vpn/wireguard                   providers lock -platform=darwin_arm64 -platform=linux_amd64
+terraform -chdir=04-vpn/wireguard-site-to-site      providers lock -platform=darwin_arm64 -platform=linux_amd64
+terraform -chdir=04-vpn/wireguard-exit              providers lock -platform=darwin_arm64 -platform=linux_amd64
 terraform -chdir=05-secrets/openbao/bootstrap        providers lock -platform=darwin_arm64 -platform=linux_amd64
 terraform -chdir=10-cluster/local                   providers lock -platform=darwin_arm64 -platform=linux_amd64
 terraform -chdir=10-cluster/scaleway                providers lock -platform=darwin_arm64 -platform=linux_amd64

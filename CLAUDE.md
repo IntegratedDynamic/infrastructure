@@ -40,7 +40,8 @@ terraform -chdir=01-iam/bootstrap/scaleway          providers lock -platform=dar
 terraform -chdir=01-iam/workload/scaleway           providers lock -platform=darwin_arm64 -platform=linux_amd64
 terraform -chdir=02-encryption/aws                  providers lock -platform=darwin_arm64 -platform=linux_amd64
 terraform -chdir=03-storage/scaleway                providers lock -platform=darwin_arm64 -platform=linux_amd64
-terraform -chdir=04-vpn/wireguard               providers lock -platform=darwin_arm64 -platform=linux_amd64
+terraform -chdir=04-vpn/wireguard-site-to-site      providers lock -platform=darwin_arm64 -platform=linux_amd64
+terraform -chdir=04-vpn/wireguard-exit              providers lock -platform=darwin_arm64 -platform=linux_amd64
 terraform -chdir=05-secrets/openbao/bootstrap        providers lock -platform=darwin_arm64 -platform=linux_amd64
 terraform -chdir=06-monitoring/grafana/bootstrap     providers lock -platform=darwin_arm64 -platform=linux_amd64
 terraform -chdir=06-monitoring/grafana/managed       providers lock -platform=darwin_arm64 -platform=linux_amd64
@@ -111,11 +112,26 @@ modules/
                                #   identities (backup, velero today; home for
                                #   future tool buckets)
 04-vpn/
-  wireguard/                   # domain: WireGuard peer keypairs for the
+  wireguard-site-to-site/      # domain: WireGuard peer keypairs for the
                                #   OpenBao tunnel (05-secrets/openbao's vault
                                #   provider, not the human OIDC/UI login) —
                                #   EXPLICITLY TEMPORARY, see its own README
-                               #   for why it isn't 01-iam/ or 05-secrets/ yet
+                               #   for why it isn't 01-iam/ or 05-secrets/ yet.
+                               #   Renamed from wireguard/ once a second,
+                               #   unrelated WireGuard deployment showed up
+                               #   below — pure directory rename, zero state
+                               #   migration (workspace_key_prefix/tfvars
+                               #   filename untouched, see "Backend keys are
+                               #   decoupled from paths" below)
+  wireguard-exit/              # domain: a second, unrelated WireGuard
+                               #   deployment — a consumer-style "exit node".
+                               #   Peers route ALL their traffic through it
+                               #   (real kernel IP forwarding + NAT), unlike
+                               #   the site-to-site tunnel's app-layer
+                               #   proxying — different scope, different
+                               #   threat model, deliberately not an
+                               #   extension of wireguard-site-to-site/. Own
+                               #   keys, own gitops app, own README
 05-secrets/
   openbao/                     # domain: OpenBao itself (bootstrap/ + managed/,
                                #   see that directory) — untouched by the

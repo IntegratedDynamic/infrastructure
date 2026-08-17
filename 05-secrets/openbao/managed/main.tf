@@ -225,11 +225,12 @@ data "terraform_remote_state" "backup_scaleway" {
   }
 }
 
-# 04-vpn/wireguard's own state — read directly instead of a hand-copied
-# local.auto.tfvars value, same as every other cross-root credential on
-# this page (dns_scaleway/backup_scaleway above, openbao_bootstrap in
-# version.tf). Key is workspace_key_prefix/workspace/key from that root's
-# version.tf — both left unchanged by the 04-network -> 04-vpn rename
+# 04-vpn/wireguard-site-to-site's own state — read directly instead of a
+# hand-copied local.auto.tfvars value, same as every other cross-root
+# credential on this page (dns_scaleway/backup_scaleway above,
+# openbao_bootstrap in version.tf). Key is workspace_key_prefix/workspace/key
+# from that root's version.tf — left unchanged by both the 04-network ->
+# 04-vpn rename and the later wireguard -> wireguard-site-to-site rename
 # (CLAUDE.md's "backend keys are decoupled from paths"), so this doesn't
 # move if that domain gets renamed again.
 data "terraform_remote_state" "wireguard" {
@@ -238,6 +239,18 @@ data "terraform_remote_state" "wireguard" {
     bucket = "id-terraform-state20260612164136440800000001"
     region = "eu-west-3"
     key    = "network/wireguard/04-network-wireguard/terraform.tfstate"
+  }
+}
+
+# 04-vpn/wireguard-exit's own state — the second, unrelated WireGuard
+# deployment (consumer-style exit node, not the site-to-site tunnel above).
+# Same read-directly-via-remote-state pattern.
+data "terraform_remote_state" "wireguard_exit" {
+  backend = "s3"
+  config = {
+    bucket = "id-terraform-state20260612164136440800000001"
+    region = "eu-west-3"
+    key    = "network/wireguard-exit/04-network-wireguard-exit/terraform.tfstate"
   }
 }
 
@@ -459,6 +472,46 @@ resource "vault_kv_secret_v2" "wireguard_confs" {
   # Bumped from 1 — same raft-snapshot-predates-the-write gap as
   # wireguard_peers above, confirmed live 2026-08-10.
   data_json_wo_version = 2
+}
+
+# apps/wireguard-exit/{server-key,peers,confs} — same three-object shape as
+# apps/wireguard/* above, for the separate exit-node deployment
+# (04-vpn/wireguard-exit). Read straight from that root's own state
+# (data.terraform_remote_state.wireguard_exit above), no local.auto.tfvars
+# copy-paste.
+resource "vault_kv_secret_v2" "wireguard_exit_server_key" {
+  mount = vault_mount.kv.path
+  name  = "apps/wireguard-exit/server-key"
+
+  data_json_wo = jsonencode({
+    "private-key" = data.terraform_remote_state.wireguard_exit.outputs.server_private_key
+  })
+  data_json_wo_version = 1
+}
+
+resource "vault_kv_secret_v2" "wireguard_exit_peers" {
+  mount = vault_mount.kv.path
+  name  = "apps/wireguard-exit/peers"
+
+  data_json_wo = jsonencode({
+    for name, key in data.terraform_remote_state.wireguard_exit.outputs.peer_public_keys :
+    name => {
+      publicKey  = key
+      allowedIPs = data.terraform_remote_state.wireguard_exit.outputs.peer_addresses[name]
+    }
+  })
+  data_json_wo_version = 1
+}
+
+# Same "self-service retrieval without needing this repo's state" rationale
+# as apps/wireguard/confs above — deliberately not synced into the cluster
+# by anything.
+resource "vault_kv_secret_v2" "wireguard_exit_confs" {
+  mount = vault_mount.kv.path
+  name  = "apps/wireguard-exit/confs"
+
+  data_json_wo         = jsonencode(data.terraform_remote_state.wireguard_exit.outputs.peer_confs)
+  data_json_wo_version = 1
 }
 
 # apps/velero/scaleway-s3-credentials — Velero's Object Storage credentials
