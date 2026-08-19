@@ -57,3 +57,25 @@ variable "argocd_admin_password_hash" {
   # default     = ""
 }
 
+# ── Cross-root state reads (Scaleway state buckets, see 00-foundation/scaleway) ──
+
+variable "backup_scaleway_state_bucket" {
+  description = "Scaleway bucket holding 03-storage/scaleway's remote state."
+  type        = string
+}
+
+variable "backup_scaleway_state_key" {
+  description = "Object key for 03-storage/scaleway's state within backup_scaleway_state_bucket."
+  type        = string
+}
+
+variable "openbao_unseal_aws_state_bucket" {
+  description = "Scaleway bucket holding 02-encryption/aws's remote state."
+  type        = string
+}
+
+variable "openbao_unseal_aws_state_key" {
+  description = "Object key for 02-encryption/aws's state within openbao_unseal_aws_state_bucket."
+  type        = string
+}
+

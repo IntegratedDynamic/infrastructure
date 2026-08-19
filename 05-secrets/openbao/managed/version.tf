@@ -1,11 +1,21 @@
 terraform {
+  # Migrated to the dedicated Scaleway state bucket (00-foundation/scaleway,
+  # state_buckets["secrets_openbao_managed"]).
   backend "s3" {
-    bucket               = "id-terraform-state20260612164136440800000001"
-    region               = "eu-west-3"
-    workspace_key_prefix = "secrets/managed/openbao"
-    key                  = "terraform.tfstate"
-    encrypt              = true
-    use_lockfile         = true
+    bucket                      = "id-terraform-state-05-secrets-openbao-managed"
+    region                      = "fr-par"
+    workspace_key_prefix        = "secrets/managed/openbao"
+    key                         = "terraform.tfstate"
+    encrypt                     = true
+    use_lockfile                = true
+    skip_credentials_validation = true
+    skip_region_validation      = true
+    skip_requesting_account_id  = true
+    skip_s3_checksum            = true
+    use_path_style              = true
+    endpoints = {
+      s3 = "https://s3.fr-par.scw.cloud"
+    }
   }
 
   required_providers {
@@ -16,6 +26,10 @@ terraform {
     random = {
       source  = "hashicorp/random"
       version = "~> 3.6"
+    }
+    external = {
+      source  = "hashicorp/external"
+      version = "~> 2.0"
     }
   }
 }
@@ -29,11 +43,10 @@ terraform {
 # off a resource attribute.
 data "terraform_remote_state" "openbao_bootstrap" {
   backend = "s3"
-  config = {
-    bucket = "id-terraform-state20260612164136440800000001"
-    region = "eu-west-3"
-    key    = "secrets/bootstrap/openbao/05-secrets-openbao/terraform.tfstate"
-  }
+  config = merge(local.scaleway_state_backend, {
+    bucket = var.openbao_bootstrap_state_bucket
+    key    = var.openbao_bootstrap_state_key
+  })
 }
 
 # Authenticates as the `terraform` AppRole from 05-secrets/openbao/bootstrap —

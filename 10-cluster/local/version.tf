@@ -12,6 +12,10 @@ terraform {
       version = "~> 0.16"
       source  = "infisical/infisical"
     }
+    external = {
+      source  = "hashicorp/external"
+      version = "~> 2.0"
+    }
   }
 }
 

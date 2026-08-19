@@ -35,6 +35,7 @@ The `.terraform.lock.hcl` in each root must cover **both** `darwin_arm64` (local
 
 ```bash
 terraform -chdir=00-foundation/aws                providers lock -platform=darwin_arm64 -platform=linux_amd64
+terraform -chdir=00-foundation/scaleway             providers lock -platform=darwin_arm64 -platform=linux_amd64
 terraform -chdir=01-iam/bootstrap/aws               providers lock -platform=darwin_arm64 -platform=linux_amd64
 terraform -chdir=01-iam/bootstrap/scaleway          providers lock -platform=darwin_arm64 -platform=linux_amd64
 terraform -chdir=01-iam/workload/scaleway           providers lock -platform=darwin_arm64 -platform=linux_amd64
@@ -77,18 +78,38 @@ modules/
   scaleway-machine-identity/   # shared: IAM application + map of policies +
                                #   rotating API key. Used by every Scaleway
                                #   identity below instead of copy-pasted HCL.
-  scaleway-bucket-with-identity/ # shared: one bucket + one scoped identity
-                               #   (wraps scaleway-machine-identity). Used by
-                               #   03-storage/scaleway's for_each over
-                               #   var.buckets — add a tool bucket there by
-                               #   adding a map entry, not new resources.
+  scaleway-bucket-with-identity/ # shared: one bucket + (by default,
+                               #   create_identity = true) one scoped
+                               #   identity, generated/unique-by-construction
+                               #   from bucket_name (wraps
+                               #   scaleway-machine-identity). Used by
+                               #   03-storage/scaleway's and
+                               #   00-foundation/scaleway's for_each over
+                               #   var.buckets/var.state_buckets — add a
+                               #   bucket there by adding a map entry, not
+                               #   new resources. expiration_enabled = false
+                               #   opts a bucket's current-version object out
+                               #   of ever expiring (state buckets).
 00-foundation/
   aws/                         # domain: the base AWS layer everything else
-                               #   depends on — the S3 bucket holding every
-                               #   root's remote state, PLUS the GitHub OIDC
-                               #   provider + the one role (terraform-state-
-                               #   access) every workflow in this repo assumes
-                               #   for state R/W. Admin-applied.
+                               #   used to depend on — the S3 bucket that USED
+                               #   TO hold every root's remote state (now only
+                               #   its own — see scaleway/ below), PLUS the
+                               #   GitHub OIDC provider + the one role
+                               #   (terraform-state-access) every workflow in
+                               #   this repo assumes for state R/W.
+                               #   Admin-applied.
+  scaleway/                    # domain: where every other root's state now
+                               #   lives (migrated 2026-08-19) — one dedicated
+                               #   bucket PER CONSUMING ROOT (var.state_buckets),
+                               #   not one shared bucket, since Scaleway IAM
+                               #   can only scope Object Storage permissions
+                               #   at the project level. See its README for
+                               #   the confirmed backend config (S3 native
+                               #   locking works, path-style + skip_s3_checksum
+                               #   required) and the still-open follow-up
+                               #   (.github/actions/terraform/action.yml isn't
+                               #   updated for Scaleway-hosted backends yet).
 01-iam/                        # domain: IAM identities & grants (non-AWS)
   bootstrap/
     aws/                       #   CI role scoped to 02-encryption/aws only
@@ -151,15 +172,24 @@ modules/
 ```
 
 **The dependency spine** runs forward: `00-foundation/aws` (bucket + CI's AWS
-role) → everything else, since every other root's backend points at that
-bucket. `terraform-state-access` (the role every workflow assumes by default)
-is scoped to exactly S3 read/write on the state bucket — no IAM-management
-capability at all. Only one other role exists, `01-iam/bootstrap/aws`'s
-`openbao-unseal-ci`, and it's narrowly scoped too: KMS + IAM user/access-key
-CRUD under `/openbao/`, nothing broader, plus (via a `terraform_remote_state`
-lookup, not a hardcoded ARN) the same state-bucket policy
-`terraform-state-access` uses, so it can read/write the bucket for its own
-backend. (This two-role setup replaced a larger system, retired 2026-07-30: the
+role) → everything else, since every other root's backend USED TO point at
+that bucket. As of the AWS→Scaleway state-backend migration
+(`00-foundation/scaleway`, 2026-08-19), only `00-foundation/aws` itself still
+does — every other root's state now lives in its own dedicated bucket under
+`00-foundation/scaleway` instead (one bucket per root, see that root's
+README for why). `terraform-state-access` (the role every workflow assumes
+by default) is scoped to exactly S3 read/write on the AWS state bucket — no
+IAM-management capability at all — but is now only load-bearing for roots
+that still live there (`00-foundation/aws` itself); its continued presence
+in `.github/actions/terraform/action.yml` as a required input is dead weight
+for every migrated root's workflow until that action is updated to pass
+Scaleway credentials instead (follow-up work, not yet done). Only one other
+role exists, `01-iam/bootstrap/aws`'s `openbao-unseal-ci`, and it's narrowly
+scoped too: KMS + IAM user/access-key CRUD under `/openbao/`, nothing
+broader, plus (via a `terraform_remote_state` lookup, not a hardcoded ARN)
+the same state-bucket policy `terraform-state-access` uses — a grant that's
+now vestigial too, since `01-iam/bootstrap/aws`'s own backend also migrated
+to Scaleway and no longer needs it. (This two-role setup replaced a larger system, retired 2026-07-30: the
 original `01-iam/bootstrap/aws` + `01-iam/ci-managed/aws-state-access` together
 built a "CI can safely mint further IAM roles" mechanism — a permissions
 boundary + a policy letting the CI role create/attach *any* other role under a
@@ -206,6 +236,64 @@ Same bootstrap pattern as `local/`, but with the Kapsule cluster + node pool (`D
 ### `00-foundation/aws/`
 
 The shared org S3 bucket holding **every** root's remote state (built on `terraform-aws-modules/s3-bucket`: versioning, SSE, public-access block, TLS-only). Chicken-and-egg: its own state lives in the bucket it creates (one-time local-state bootstrap — see its README). Also creates the GitHub OIDC provider and the one role, `terraform-state-access` (via `terraform-aws-modules/iam`), every GitHub Actions workflow in this repo assumes — trust scoped to `repo:IntegratedDynamic/infrastructure:*`, policy scoped to exactly S3 list/get/put/delete on the state bucket, nothing else. Wired to CI via `vars.AWS_TERRAFORM_ROLE_ARN`. Applied by an admin (this root creates the very identity CI would otherwise need to apply it). See its README.
+
+### `00-foundation/scaleway/`
+
+Scaleway counterpart to `00-foundation/aws/` — and, as of 2026-08-19, where
+every root's state actually lives except `00-foundation/aws` itself. Unlike
+the AWS bucket (one bucket, many `workspace_key_prefix` values), this is
+**one dedicated Object Storage bucket per consuming root module**
+(`var.state_buckets`, a `for_each` map — add a future root's bucket by
+adding a map entry, no new resources) — Scaleway IAM can only scope Object
+Storage permissions at the project level, so a shared bucket would give every
+root's CI identity read/write on every other root's state with no way to
+narrow it, worse than the AWS setup's already-documented lack of per-root
+isolation. Built on `modules/scaleway-bucket-with-identity` (the same module
+`03-storage/scaleway` uses) — as of 2026-08-19, each bucket gets its **own**
+dedicated identity by default (`create_identity = true`, generated/
+unique-by-construction names from `bucket_name`), not one shared identity
+for all buckets; a root needing broader Scaleway rights sets
+`create_identity = false` and gets its identity in `01-iam/` instead. This
+root's own state is self-hosted here too
+(`state_buckets["foundation_scaleway"]`) — bootstrapped the same one-time
+chicken-and-egg way `00-foundation/aws` was: created while its state still
+lived in the AWS bucket, then repointed and migrated.
+
+The migration procedure was rehearsed first against a throwaway root
+(`99-scratch/migration-test`, since deleted) — confirmed working — then
+rolled out to every real domain (`01-iam/*`, `02-encryption/aws`,
+`03-storage/scaleway`, `04-vpn/*`, `05-secrets/openbao/*`,
+`06-monitoring/grafana/*`, `10-cluster/scaleway`) plus this root itself. See
+this root's README for the confirmed findings: `use_lockfile` native S3
+locking works against Scaleway, and the required backend config is
+`use_path_style = true` + `skip_s3_checksum = true` + a literal
+`endpoints.s3` — a Terraform hard constraint (`backend` blocks can't
+reference variables) that's why those five lines are repeated verbatim in
+every migrated root's `version.tf` rather than parametrized.
+
+Every `data "terraform_remote_state"` cross-root read repo-wide (there are
+~11 of them — see `05-secrets/openbao/managed/main.tf` for the densest
+cluster, 4 in one file) was updated to point at the new buckets too, and
+**parametrized**: bucket/key are now named variables set in that root's
+`env/*.tfvars` (visible as config), not hardcoded literals in `.tf`. The
+`data` source's own technical Scaleway-endpoint attributes (region,
+`skip_*`, `endpoints`) — unlike a `backend` block — CAN reference locals, so
+each file with cross-root reads defines one `local.scaleway_state_backend`
+merged into every `config` block instead of repeating those five lines per
+data source.
+
+**Known follow-up, not yet done**: `.github/actions/terraform/action.yml`
+still only knows how to assume an AWS role for backend state R/W — every
+migrated root's workflow needs it updated to pass Scaleway credentials via
+`-backend-config` instead (needed *specifically* for roots that also carry a
+real `provider "aws"` block, e.g. `02-encryption/aws`, since Terraform's s3
+backend and that provider both read `AWS_ACCESS_KEY_ID`/
+`AWS_SECRET_ACCESS_KEY` — colliding if both need real values at once).
+Locally this was worked around per-command with an explicit
+`-backend-config=<gitignored file>` instead of ambient env vars. The
+rehearsal bucket (`state_buckets["scratch"]`) is intentionally left in
+place, `prevent_destroy` included — cleanup is a manual admin action on
+their own timeline, not something to automate away.
 
 ### `01-iam/bootstrap/aws/`
 

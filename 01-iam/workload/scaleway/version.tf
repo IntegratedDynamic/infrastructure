@@ -1,16 +1,26 @@
 terraform {
+  # Migrated to the dedicated Scaleway state bucket (00-foundation/scaleway,
+  # state_buckets["iam_workload_scaleway"]).
   backend "s3" {
-    bucket               = "id-terraform-state20260612164136440800000001"
-    region               = "eu-west-3"
+    bucket = "id-terraform-state-01-iam-workload-scaleway"
+    region = "fr-par"
     # Prefix kept as "dns/scaleway" (≠ this root's path 01-iam/workload/scaleway/,
     # moved here from 04-dns/scaleway/ since this root owns no DNS resource — it
     # only provisions the external-dns workload identity) on purpose: the state
     # key is decoupled from the directory, so the move was a pure git mv with
     # zero state migration.
-    workspace_key_prefix = "dns/scaleway"
-    key                  = "terraform.tfstate"
-    encrypt              = true
-    use_lockfile         = true
+    workspace_key_prefix        = "dns/scaleway"
+    key                         = "terraform.tfstate"
+    encrypt                     = true
+    use_lockfile                = true
+    skip_credentials_validation = true
+    skip_region_validation      = true
+    skip_requesting_account_id  = true
+    skip_s3_checksum            = true
+    use_path_style              = true
+    endpoints = {
+      s3 = "https://s3.fr-par.scw.cloud"
+    }
   }
 
   required_providers {

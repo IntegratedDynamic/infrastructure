@@ -47,6 +47,12 @@ variable "cold_storage_transition_days" {
   default     = 90
 }
 
+variable "expiration_enabled" {
+  description = "Whether current-version objects expire after retention_days. Default true (existing behavior). Set false for buckets whose current version must never expire regardless of age (e.g. Terraform state buckets) — noncurrent_version_expiry_days still applies either way."
+  type        = bool
+  default     = true
+}
+
 # ── Identity (modules/scaleway-machine-identity) ────────────────────────────
 
 variable "project_id" {
@@ -54,26 +60,34 @@ variable "project_id" {
   type        = string
 }
 
+variable "create_identity" {
+  description = "Whether to create a dedicated machine identity (IAM application + policy + API key) scoped to this bucket. Default true — most buckets want their own least-privilege identity; set false when a caller already has (or will create, e.g. in 01-iam/) its own broader identity instead."
+  type        = bool
+  default     = true
+}
+
 variable "identity_application_name" {
-  description = "Name of the IAM application backing this bucket's workload identity."
+  description = "Name of the IAM application backing this bucket's workload identity. Left unset (null), auto-generated from bucket_name — which Scaleway already guarantees is globally unique — so it's unique-by-construction without extra machinery."
   type        = string
+  default     = null
 }
 
 variable "identity_application_description" {
-  description = "Description of the IAM application."
+  description = "Description of the IAM application. Auto-generated from bucket_name when unset."
   type        = string
-  default     = ""
+  default     = null
 }
 
 variable "identity_policy_name" {
-  description = "Name of the IAM policy granting this identity access to the bucket."
+  description = "Name of the IAM policy granting this identity access to the bucket. Auto-generated from bucket_name when unset — see identity_application_name."
   type        = string
+  default     = null
 }
 
 variable "identity_policy_description" {
-  description = "Description of the IAM policy."
+  description = "Description of the IAM policy. Auto-generated from bucket_name when unset."
   type        = string
-  default     = ""
+  default     = null
 }
 
 variable "identity_permission_set_names" {
@@ -83,7 +97,7 @@ variable "identity_permission_set_names" {
 }
 
 variable "api_key_description" {
-  description = "Description of the generated API key."
+  description = "Description of the generated API key. Auto-generated from bucket_name when unset."
   type        = string
-  default     = ""
+  default     = null
 }

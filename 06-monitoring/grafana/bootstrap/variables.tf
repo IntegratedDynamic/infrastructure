@@ -7,3 +7,15 @@ variable "service_account_token_ttl_days" {
   type        = number
   default     = 0
 }
+
+# ── Cross-root state reads (Scaleway state buckets, see 00-foundation/scaleway) ──
+
+variable "openbao_managed_state_bucket" {
+  description = "Scaleway bucket holding 05-secrets/openbao/managed's remote state."
+  type        = string
+}
+
+variable "openbao_managed_state_key" {
+  description = "Object key for 05-secrets/openbao/managed's state within openbao_managed_state_bucket."
+  type        = string
+}

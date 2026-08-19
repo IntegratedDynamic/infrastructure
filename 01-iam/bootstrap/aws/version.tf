@@ -1,11 +1,25 @@
 terraform {
+  # Migrated to the dedicated Scaleway state bucket (00-foundation/scaleway,
+  # state_buckets["iam_bootstrap_aws"]) — independent of the real AWS
+  # credentials `provider "aws"` below uses to manage actual AWS resources.
+  # Migrated to the dedicated Scaleway state bucket (00-foundation/scaleway,
+  # state_buckets["iam_bootstrap_aws"]) — independent of the real AWS
+  # credentials `provider "aws"` below uses to manage actual AWS resources.
   backend "s3" {
-    bucket               = "id-terraform-state20260612164136440800000001"
-    region               = "eu-west-3"
-    workspace_key_prefix = "01-iam/bootstrap/aws"
-    key                  = "terraform.tfstate"
-    encrypt              = true
-    use_lockfile         = true
+    bucket                      = "id-terraform-state-01-iam-bootstrap-aws"
+    region                      = "fr-par"
+    workspace_key_prefix        = "01-iam/bootstrap/aws"
+    key                         = "terraform.tfstate"
+    encrypt                     = true
+    use_lockfile                = true
+    skip_credentials_validation = true
+    skip_region_validation      = true
+    skip_requesting_account_id  = true
+    skip_s3_checksum            = true
+    use_path_style              = true
+    endpoints = {
+      s3 = "https://s3.fr-par.scw.cloud"
+    }
   }
 
   required_providers {
