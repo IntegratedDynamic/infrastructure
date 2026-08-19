@@ -14,13 +14,17 @@ data "aws_partition" "current" {}
 
 # 00-foundation/aws's own state — read to attach the SAME state-bucket
 # policy its terraform-state-access role uses, rather than duplicating the
-# policy document or hardcoding its ARN.
+# policy document or hardcoding its ARN. 00-foundation/aws never migrates off
+# the AWS bucket (it IS the AWS bucket — see its own README), so this is the
+# one cross-root reference in the repo that stays AWS-hosted permanently;
+# still parametrized like every other one, so the target is visible as
+# config in env/, not buried in code.
 data "terraform_remote_state" "remote_state_aws" {
   backend = "s3"
   config = {
-    bucket = "id-terraform-state20260612164136440800000001"
-    region = "eu-west-3"
-    key    = "state-backend/00-remote-state-backend/terraform.tfstate"
+    bucket = var.remote_state_aws_bucket
+    region = var.remote_state_aws_region
+    key    = var.remote_state_aws_key
   }
 }
 

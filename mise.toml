@@ -170,6 +170,7 @@ kubectl logs -n openbao "job/$job" --tail=5
 description = "Re-generate all .terraform.lock.hcl files for darwin_arm64 + linux_amd64"
 run = """
 terraform -chdir=00-foundation/aws                providers lock -platform=darwin_arm64 -platform=linux_amd64
+terraform -chdir=00-foundation/scaleway             providers lock -platform=darwin_arm64 -platform=linux_amd64
 terraform -chdir=01-iam/bootstrap/aws               providers lock -platform=darwin_arm64 -platform=linux_amd64
 terraform -chdir=01-iam/bootstrap/scaleway          providers lock -platform=darwin_arm64 -platform=linux_amd64
 terraform -chdir=01-iam/workload/scaleway           providers lock -platform=darwin_arm64 -platform=linux_amd64

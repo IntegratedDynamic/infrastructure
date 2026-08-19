@@ -1,13 +1,13 @@
 terraform {
-  # Migrated to the dedicated Scaleway state bucket (00-foundation/scaleway,
-  # state_buckets["iam_bootstrap_scaleway"]).
+  # Bootstrapped: created while this root's own state still lived in the AWS
+  # bucket, then repointed here and migrated with `terraform init
+  # -migrate-state` — the same one-time chicken-and-egg pattern
+  # 00-foundation/aws used for itself. See README.md for the confirmed
+  # backend config findings (path style, checksum, credential wiring).
   backend "s3" {
-    bucket = "id-terraform-state-01-iam-bootstrap-scaleway"
-    region = "fr-par"
-    # Prefix kept as "github-ci" (≠ this root's path 01-iam/bootstrap/scaleway/)
-    # on purpose: the state key is decoupled from the directory, so the repo
-    # restructure was a pure move with zero state migration.
-    workspace_key_prefix        = "github-ci"
+    bucket                      = "id-terraform-state-00-foundation-scaleway"
+    region                      = "fr-par"
+    workspace_key_prefix        = "state-backend-scaleway"
     key                         = "terraform.tfstate"
     encrypt                     = true
     use_lockfile                = true
@@ -33,5 +33,6 @@ terraform {
   }
 }
 
-# Creds, region and project_id come from the scw CLI config (like the other roots).
+# Creds, region and project_id come from the scw CLI config (like the other
+# Scaleway roots).
 provider "scaleway" {}

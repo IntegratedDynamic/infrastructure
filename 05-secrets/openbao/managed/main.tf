@@ -1,3 +1,37 @@
+# Credentials for the cross-root Scaleway state reads below: read straight
+# from the scw CLI's own config (the same credentials `provider "scaleway"
+# {}` already uses implicitly everywhere else) instead of requiring
+# AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY set ambiently. Terraform's s3
+# backend/data source has no notion of the scw CLI's own config format —
+# this bridges the two credential systems automatically, so any admin who
+# already has `scw` configured (a repo-wide prerequisite already) needs zero
+# extra setup.
+data "external" "scw_credentials" {
+  program = ["sh", "-c", "jq -n --arg ak \"$(scw config get access-key)\" --arg sk \"$(scw config get secret-key)\" '{access_key:$ak, secret_key:$sk}'"]
+}
+
+# Shared technical attributes for every cross-root Scaleway state read on
+# this page — not "config" in the meaningful sense (they never vary), just
+# the Scaleway S3-compatible endpoint mechanics repeated per data source
+# otherwise. The actual config — which bucket/key, i.e. which root's state —
+# is parametrized via variables.tf + env/, visible there instead of buried
+# here.
+locals {
+  scaleway_state_backend = {
+    region                      = "fr-par"
+    access_key                  = data.external.scw_credentials.result.access_key
+    secret_key                  = data.external.scw_credentials.result.secret_key
+    skip_credentials_validation = true
+    skip_region_validation      = true
+    skip_requesting_account_id  = true
+    skip_s3_checksum            = true
+    use_path_style              = true
+    endpoints = {
+      s3 = "https://s3.fr-par.scw.cloud"
+    }
+  }
+}
+
 # --- KV v2: application/service secret data. Mounted manually 2026-07-20 (see
 # gitops repo's PLAN-secrets-sync-github.md) — brought under Terraform here
 # without changing its shape. The secret content itself is managed further
@@ -209,20 +243,18 @@ resource "vault_policy" "admin" {
 
 data "terraform_remote_state" "dns_scaleway" {
   backend = "s3"
-  config = {
-    bucket = "id-terraform-state20260612164136440800000001"
-    region = "eu-west-3"
-    key    = "dns/scaleway/04-dns-scaleway/terraform.tfstate"
-  }
+  config = merge(local.scaleway_state_backend, {
+    bucket = var.dns_scaleway_state_bucket
+    key    = var.dns_scaleway_state_key
+  })
 }
 
 data "terraform_remote_state" "backup_scaleway" {
   backend = "s3"
-  config = {
-    bucket = "id-terraform-state20260612164136440800000001"
-    region = "eu-west-3"
-    key    = "backup/scaleway/03-backup-dev-bucket/terraform.tfstate"
-  }
+  config = merge(local.scaleway_state_backend, {
+    bucket = var.backup_scaleway_state_bucket
+    key    = var.backup_scaleway_state_key
+  })
 }
 
 # 04-vpn/wireguard-site-to-site's own state — read directly instead of a
@@ -235,11 +267,10 @@ data "terraform_remote_state" "backup_scaleway" {
 # move if that domain gets renamed again.
 data "terraform_remote_state" "wireguard" {
   backend = "s3"
-  config = {
-    bucket = "id-terraform-state20260612164136440800000001"
-    region = "eu-west-3"
-    key    = "network/wireguard/04-network-wireguard/terraform.tfstate"
-  }
+  config = merge(local.scaleway_state_backend, {
+    bucket = var.wireguard_state_bucket
+    key    = var.wireguard_state_key
+  })
 }
 
 # 04-vpn/wireguard-exit's own state — the second, unrelated WireGuard
@@ -247,11 +278,10 @@ data "terraform_remote_state" "wireguard" {
 # Same read-directly-via-remote-state pattern.
 data "terraform_remote_state" "wireguard_exit" {
   backend = "s3"
-  config = {
-    bucket = "id-terraform-state20260612164136440800000001"
-    region = "eu-west-3"
-    key    = "network/wireguard-exit/04-network-wireguard-exit/terraform.tfstate"
-  }
+  config = merge(local.scaleway_state_backend, {
+    bucket = var.wireguard_exit_state_bucket
+    key    = var.wireguard_exit_state_key
+  })
 }
 
 # --- Arbitrary Dex<->client shared secrets: nothing external constrains

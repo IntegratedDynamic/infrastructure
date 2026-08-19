@@ -14,12 +14,12 @@ output "bucket_endpoint" {
 }
 
 output "access_key" {
-  description = "Public access key for the scoped workload identity."
-  value       = module.identity.access_key
+  description = "Public access key for the scoped workload identity, or null when create_identity = false."
+  value       = try(module.identity[0].access_key, null)
 }
 
 output "secret_key" {
-  description = "Secret access key for the scoped workload identity."
+  description = "Secret access key for the scoped workload identity, or null when create_identity = false."
   sensitive   = true
-  value       = module.identity.secret_key
+  value       = try(module.identity[0].secret_key, null)
 }

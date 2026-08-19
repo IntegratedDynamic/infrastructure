@@ -17,3 +17,32 @@ variable "argocd_admin_password_hash" {
   # default     = ""
 }
 
+# ── Cross-root state reads (Scaleway state buckets, see 00-foundation/scaleway) ──
+# Defaulted (unlike other roots' env/*.tfvars-required equivalents) since this
+# root's own vars come from a per-developer, gitignored nico.auto.tfvars file
+# — defaults keep it working without every developer having to add these.
+
+variable "backup_scaleway_state_bucket" {
+  description = "Scaleway bucket holding 03-storage/scaleway's remote state."
+  type        = string
+  default     = "id-terraform-state-03-storage-scaleway"
+}
+
+variable "backup_scaleway_state_key" {
+  description = "Object key for 03-storage/scaleway's state within backup_scaleway_state_bucket."
+  type        = string
+  default     = "backup/scaleway/03-backup-dev-bucket/terraform.tfstate"
+}
+
+variable "openbao_unseal_aws_state_bucket" {
+  description = "Scaleway bucket holding 02-encryption/aws's remote state."
+  type        = string
+  default     = "id-terraform-state-02-encryption-aws"
+}
+
+variable "openbao_unseal_aws_state_key" {
+  description = "Object key for 02-encryption/aws's state within openbao_unseal_aws_state_bucket."
+  type        = string
+  default     = "openbao-unseal/aws/03-backup-dev-bucket/terraform.tfstate"
+}
+

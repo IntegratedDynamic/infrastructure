@@ -1,17 +1,31 @@
 terraform {
+  # Migrated to the dedicated Scaleway state bucket (00-foundation/scaleway,
+  # state_buckets["monitoring_grafana_bootstrap"]).
   backend "s3" {
-    bucket               = "id-terraform-state20260612164136440800000001"
-    region               = "eu-west-3"
-    workspace_key_prefix = "monitoring/bootstrap/grafana"
-    key                  = "terraform.tfstate"
-    encrypt              = true
-    use_lockfile         = true
+    bucket                      = "id-terraform-state-06-monitoring-grafana-bootstrap"
+    region                      = "fr-par"
+    workspace_key_prefix        = "monitoring/bootstrap/grafana"
+    key                         = "terraform.tfstate"
+    encrypt                     = true
+    use_lockfile                = true
+    skip_credentials_validation = true
+    skip_region_validation      = true
+    skip_requesting_account_id  = true
+    skip_s3_checksum            = true
+    use_path_style              = true
+    endpoints = {
+      s3 = "https://s3.fr-par.scw.cloud"
+    }
   }
 
   required_providers {
     grafana = {
       source  = "grafana/grafana"
       version = "~> 4.0"
+    }
+    external = {
+      source  = "hashicorp/external"
+      version = "~> 2.0"
     }
   }
 }
@@ -24,13 +38,44 @@ terraform {
 # own actual workspace (confirmed via `terraform workspace show`), distinct
 # from 05-secrets/openbao/bootstrap's "05-secrets-openbao" — don't assume
 # the two roots under openbao/ share one workspace name.
+# Credentials for the cross-root Scaleway state read below: read straight
+# from the scw CLI's own config (the same credentials `provider "scaleway"
+# {}` already uses implicitly everywhere else) instead of requiring
+# AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY set ambiently. Terraform's s3
+# backend/data source has no notion of the scw CLI's own config format —
+# this bridges the two credential systems automatically, so any admin who
+# already has `scw` configured (a repo-wide prerequisite already) needs zero
+# extra setup.
+data "external" "scw_credentials" {
+  program = ["sh", "-c", "jq -n --arg ak \"$(scw config get access-key)\" --arg sk \"$(scw config get secret-key)\" '{access_key:$ak, secret_key:$sk}'"]
+}
+
+locals {
+  # See main.tf-equivalent comment elsewhere in the repo: shared technical
+  # attributes for the cross-root Scaleway state read below, not "config" in
+  # the meaningful sense. The actual target is parametrized via variables.tf
+  # + env/, visible there instead of buried here.
+  scaleway_state_backend = {
+    region                      = "fr-par"
+    access_key                  = data.external.scw_credentials.result.access_key
+    secret_key                  = data.external.scw_credentials.result.secret_key
+    skip_credentials_validation = true
+    skip_region_validation      = true
+    skip_requesting_account_id  = true
+    skip_s3_checksum            = true
+    use_path_style              = true
+    endpoints = {
+      s3 = "https://s3.fr-par.scw.cloud"
+    }
+  }
+}
+
 data "terraform_remote_state" "openbao_managed" {
   backend = "s3"
-  config = {
-    bucket = "id-terraform-state20260612164136440800000001"
-    region = "eu-west-3"
-    key    = "secrets/managed/openbao/05-secrets-openbao-secrets/terraform.tfstate"
-  }
+  config = merge(local.scaleway_state_backend, {
+    bucket = var.openbao_managed_state_bucket
+    key    = var.openbao_managed_state_key
+  })
 }
 
 # Authenticates as Grafana's own admin via basic auth — the same admin
