@@ -60,9 +60,17 @@ resource "scaleway_instance_security_group" "cluster_nodes" {
 }
 
 resource "scaleway_k8s_pool" "default" {
-  cluster_id        = scaleway_k8s_cluster.this.id
-  name              = "default"
-  node_type         = "DEV1-M"
+  cluster_id = scaleway_k8s_cluster.this.id
+  name       = "default"
+  # Bumped DEV1-M (3 vCPU/4GB) -> DEV1-L (4 vCPU/8GB) 2026-08-20: confirmed
+  # live that DEV1-M was routinely hitting MemoryPressure/evicting pods
+  # during a full ArgoCD tree sync -- the more waves ArgoCD advances
+  # through, the more DaemonSets (Cilium, node-exporter, Alloy, ...) run a
+  # pod on every node, compounding the same small-node pressure. Doubling
+  # RAM at roughly double the price (~15€ -> ~31€/mo/node) is the
+  # proportionate fix; create_before_destroy below means this replaces the
+  # pool without a bare window.
+  node_type         = "DEV1-L"
   security_group_id = scaleway_instance_security_group.cluster_nodes.id
   # Put whatever number is required to avoid node pressure signals during startup: https://kubernetes.io/docs/concepts/scheduling-eviction/node-pressure-eviction/
   # Node pressure during startup can end-up with unexcepted race conditions.

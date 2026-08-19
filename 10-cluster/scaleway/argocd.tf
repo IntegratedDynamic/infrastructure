@@ -36,9 +36,54 @@ resource "helm_release" "argocd" {
 configs:
   params:
     server.insecure: true
+    # JSON, not the default logfmt-ish text -- Alloy (gitops repo,
+    # services/platform/monitoring/alloy-chart) already tails every pod's
+    # logs into Loki cluster-wide from wave 4 on, well before Grafana's own
+    # UI is reachable (wave 5+), so ArgoCD's own state is already being
+    # captured from early boot -- this just makes what's captured reliably
+    # field-parseable once actually queried, instead of Loki's logfmt
+    # heuristic guessing at a text format that isn't guaranteed stable.
+    controller.log.format: json
+    server.log.format: json
+    reposerver.log.format: json
+    applicationsetcontroller.log.format: json
 
   cm:
     url: https://argocd.scalepack.fr
+
+    # Cuts cluster-cache memory, not just the controller's own footprint --
+    # by default the controller watches every API resource kind in the
+    # cluster for live-state diffing, regardless of whether any Application
+    # actually manages instances of that kind. events.k8s.io/*,
+    # metrics.k8s.io/* and coordination.k8s.io/Lease are already excluded
+    # by Argo CD itself unconditionally; these two rules add the next-
+    # highest-churn kinds this cluster actually has plenty of and no
+    # Application ever references:
+    #  - discovery.k8s.io/EndpointSlice (+ legacy v1/Endpoints): one
+    #    object (Endpoints) or more (EndpointSlice) per Service, rewritten
+    #    on every pod readiness flip -- never something an Application's
+    #    health/sync depends on here.
+    #  - cilium.io/* (CiliumEndpoint, CiliumIdentity, CiliumNode, ...):
+    #    Cilium is the Kapsule cluster's CNI (main.tf's scaleway_k8s_cluster.this,
+    #    cni = "cilium"), provisioned by Scaleway itself, not an ArgoCD
+    #    Application -- no Application here ever references these, and
+    #    Cilium creates one CiliumEndpoint per pod cluster-wide, the kind
+    #    of per-pod-times-every-DaemonSet growth this exclusion is
+    #    specifically meant to blunt.
+    # https://argo-cd.readthedocs.io/en/stable/operator-manual/declarative-setup/#resource-exclusioninclusion
+    resource.exclusions: |
+      - apiGroups:
+        - discovery.k8s.io
+        kinds:
+        - EndpointSlice
+      - apiGroups:
+        - ""
+        kinds:
+        - Endpoints
+      - apiGroups:
+        - cilium.io
+        kinds:
+        - "*"
 
     # Local admin login is redundant now that OIDC via Dex is working —
     # one login path, no separate password to rotate/leak. To bring back
@@ -212,6 +257,22 @@ dex:
 # same generous limit despite low observed idle usage (8m/131Mi).
 controller:
   replicas: 1
+  # NOT sharded, on purpose: Argo CD's controller sharding
+  # (ARGOCD_CONTROLLER_REPLICAS + --sharding-method) splits load by
+  # *registered cluster*, never by Application/namespace/resource within
+  # one cluster -- confirmed against the docs and community sources, not
+  # assumed. This instance only ever registers one cluster (itself,
+  # https://kubernetes.default.svc), so every additional replica would
+  # sit fully idle: nothing to shard to it. Kept at 1 rather than chasing
+  # an HA pattern that's a no-op here — see resource.exclusions and
+  # GOMEMLIMIT below for the levers that actually apply to a
+  # single-cluster controller.
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+      additionalLabels:
+        release: kube-prometheus-stack
   # GOMEMLIMIT (see the locals block above this resource): observed live
   # 2026-08-20 that even 2048Mi wasn't enough headroom during a full
   # 22-Application reconcile burst -- OOMKilled twice before stabilizing.
@@ -241,6 +302,12 @@ controller:
 
 repoServer:
   replicas: 1
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+      additionalLabels:
+        release: kube-prometheus-stack
   resources:
     requests:
       cpu: 25m
@@ -250,6 +317,12 @@ repoServer:
       memory: 768Mi
 
 server:
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+      additionalLabels:
+        release: kube-prometheus-stack
   resources:
     requests:
       cpu: 10m
@@ -279,6 +352,13 @@ applicationSet:
   # not prevent those pods starting before their credentials existed.
   extraArgs:
     - --enable-progressive-syncs
+
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+      additionalLabels:
+        release: kube-prometheus-stack
 
   resources:
     requests:
