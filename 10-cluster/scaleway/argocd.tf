@@ -4,6 +4,19 @@
 #   folder_path  = "/"
 # }
 
+locals {
+  # GOMEMLIMIT mitigation for the argocd-application-controller OOMKilled
+  # loop (confirmed live 2026-08-19/20, see controller.resources.limits.memory's
+  # own comment below) -- makes the Go runtime trigger GC proactively before
+  # the cgroup hard limit kills the process, instead of only reacting to the
+  # kernel OOM killer. Per ArgoCD's own docs (80-90% of the container limit;
+  # 85% splits the difference), computed from the limit instead of a second
+  # hardcoded literal so the two can't drift out of the recommended ratio:
+  # https://argo-cd.readthedocs.io/en/stable/operator-manual/high_availability/#mitigating-oomkilled-events-from-memory-spikes
+  argocd_controller_memory_limit_mib = 1000
+  argocd_controller_gomemlimit_mib   = floor(local.argocd_controller_memory_limit_mib * 0.85)
+}
+
 resource "helm_release" "argocd" {
   name             = "argocd"
   namespace        = "argocd"
@@ -199,6 +212,16 @@ dex:
 # same generous limit despite low observed idle usage (8m/131Mi).
 controller:
   replicas: 1
+  # GOMEMLIMIT (see the locals block above this resource): observed live
+  # 2026-08-20 that even 2048Mi wasn't enough headroom during a full
+  # 22-Application reconcile burst -- OOMKilled twice before stabilizing.
+  # Rather than keep raising the hard limit, this makes the controller GC
+  # proactively at ${local.argocd_controller_gomemlimit_mib}MiB instead of
+  # waiting for the kernel to kill it at the ${local.argocd_controller_memory_limit_mib}Mi
+  # cgroup limit below.
+  env:
+    - name: GOMEMLIMIT
+      value: "${local.argocd_controller_gomemlimit_mib}MiB"
   resources:
     requests:
       cpu: 50m
@@ -212,7 +235,9 @@ controller:
       memory: 768Mi
     limits:
       cpu: 1000m
-      memory: 2048Mi
+      # Lowered from 2048Mi 2026-08-20: paired with GOMEMLIMIT above instead
+      # of just raising this further -- see that env var's own comment.
+      memory: "${local.argocd_controller_memory_limit_mib}Mi"
 
 repoServer:
   replicas: 1
