@@ -19,3 +19,10 @@ variable "openbao_managed_state_key" {
   description = "Object key for 05-secrets/openbao/managed's state within openbao_managed_state_bucket."
   type        = string
 }
+
+# See version.tf's provider "grafana" block for why this is a variable.
+variable "grafana_url" {
+  description = "URL the grafana provider authenticates against."
+  type        = string
+  default     = "https://grafana.scalepack.fr/"
+}

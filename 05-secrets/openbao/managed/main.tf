@@ -1,13 +1,20 @@
-# Credentials for the cross-root Scaleway state reads below: read straight
-# from the scw CLI's own config (the same credentials `provider "scaleway"
-# {}` already uses implicitly everywhere else) instead of requiring
-# AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY set ambiently. Terraform's s3
-# backend/data source has no notion of the scw CLI's own config format —
-# this bridges the two credential systems automatically, so any admin who
-# already has `scw` configured (a repo-wide prerequisite already) needs zero
-# extra setup.
+# Credentials for the cross-root Scaleway state reads below. Two genuinely
+# different execution contexts apply this root, not a speculative one: an
+# admin's machine (scw CLI configured, a repo-wide prerequisite already) and
+# the Argo Workflows CronWorkflow (gitops repo services/platform/argo-
+# workflows) that runs it hourly from inside the cluster, where there's no
+# scw CLI and no local config — only SCW_ACCESS_KEY/SCW_SECRET_KEY landed as
+# env vars from the apps/argo-workflows/scaleway-state-credentials KV object
+# below. Env vars win when set; falling back to `scw config get` keeps the
+# admin path exactly as it was.
 data "external" "scw_credentials" {
-  program = ["sh", "-c", "jq -n --arg ak \"$(scw config get access-key)\" --arg sk \"$(scw config get secret-key)\" '{access_key:$ak, secret_key:$sk}'"]
+  program = ["sh", "-c", <<-EOT
+    jq -n \
+      --arg ak "$${SCW_ACCESS_KEY:-$(scw config get access-key)}" \
+      --arg sk "$${SCW_SECRET_KEY:-$(scw config get secret-key)}" \
+      '{access_key:$ak, secret_key:$sk}'
+  EOT
+  ]
 }
 
 # Shared technical attributes for every cross-root Scaleway state read on
@@ -612,4 +619,55 @@ resource "vault_kv_secret_v2" "tempo_scaleway_s3_credentials" {
     SCW_SECRET_KEY = data.terraform_remote_state.backup_scaleway.outputs.tempo_workload_secret_key
   })
   data_json_wo_version = 1
+}
+
+# apps/argo-workflows/scaleway-state-credentials — read by the gitops repo's
+# Argo Workflows CronWorkflow (services/platform/argo-workflows) for both its
+# own `terraform init` backend (this root's own bucket, R/W) and the
+# data.external.scw_credentials fallback above (the other state buckets this
+# file's data.terraform_remote_state blocks read). A dedicated workload
+# identity (01-iam/workload/scaleway's "argo-workflows-state"), not one of
+# 00-foundation/scaleway's state-bucket identities reused — this credential
+# leaves the admin's own machine and lands on the cluster, unlike every
+# other cross-root read on this page, so it gets its own identity in
+# 01-iam/ like any other in-cluster workload (external-dns, above), not a
+# repurposed foundation-layer one.
+resource "vault_kv_secret_v2" "argo_workflows_scaleway_state_credentials" {
+  mount = vault_mount.kv.path
+  name  = "apps/argo-workflows/scaleway-state-credentials"
+
+  data_json_wo = jsonencode({
+    SCW_ACCESS_KEY = data.terraform_remote_state.dns_scaleway.outputs.access_keys["argo-workflows-state"]
+    SCW_SECRET_KEY = data.terraform_remote_state.dns_scaleway.outputs.secret_keys["argo-workflows-state"]
+  })
+  data_json_wo_version = 1
+}
+
+# apps/argo-workflows/openbao-managed-tfvars — a duplicate of the three
+# other required, no-default variables this root's own `terraform apply`
+# needs (dex_github_connector, secrets_sync_github_eso_private_key,
+# secrets_sync_github), so the CronWorkflow's unattended apply is the exact
+# same apply an admin would run, not a narrower one. Deliberately a
+# duplicate WRITE from the same var, in the same apply, not a read-back of
+# the "real" objects above (this file's write-only `data_json_wo` design —
+# see the top-of-file comment — never reads secret values back from Vault,
+# on purpose; this resource doesn't change that, it just writes the same
+# admin-supplied value to a second path). Keys are TF_VAR_*-prefixed and
+# values JSON-encoded strings, not nested objects, so the gitops repo's
+# shared terraform-apply WorkflowTemplate can just `envFrom: secretRef` this
+# whole object straight into the container's environment (only this root's
+# CronWorkflow instance references it — the others' extra-secret-name
+# points at nothing, see that WorkflowTemplate's optional envFrom) — no
+# per-key templating step needed, and Terraform's CLI accepts a
+# JSON-encoded string for a map/object-typed variable either way.
+resource "vault_kv_secret_v2" "argo_workflows_openbao_managed_tfvars" {
+  mount = vault_mount.kv.path
+  name  = "apps/argo-workflows/openbao-managed-tfvars"
+
+  data_json_wo = jsonencode({
+    TF_VAR_dex_github_connector                = jsonencode(var.dex_github_connector)
+    TF_VAR_secrets_sync_github_eso_private_key = jsonencode(var.secrets_sync_github_eso_private_key)
+    TF_VAR_secrets_sync_github                 = jsonencode(var.secrets_sync_github)
+  })
+  data_json_wo_version = 2
 }

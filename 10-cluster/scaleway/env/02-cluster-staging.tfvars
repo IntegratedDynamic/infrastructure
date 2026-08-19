@@ -1,5 +1,5 @@
 cluster_name = "scaleway-homelab"
-node_count   = 2
+node_count   = 4
 
 # Cross-root state reads — see 00-foundation/scaleway/env/00-remote-state-backend.tfvars
 # for the full bucket list.

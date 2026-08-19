@@ -68,7 +68,7 @@ resource "scaleway_k8s_pool" "default" {
   # Node pressure during startup can end-up with unexcepted race conditions.
   size        = var.node_count
   min_size    = 1
-  max_size    = 3
+  max_size    = 5
   autoscaling = true
   autohealing = true
 
@@ -105,16 +105,22 @@ resource "null_resource" "update_kubeconfig" {
 }
 
 
-# Credentials for the cross-root Scaleway state reads below: read straight
-# from the scw CLI's own config (the same credentials `provider "scaleway"
-# {}` already uses implicitly everywhere else) instead of requiring
-# AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY set ambiently. Terraform's s3
-# backend/data source has no notion of the scw CLI's own config format —
-# this bridges the two credential systems automatically, so any admin who
-# already has `scw` configured (a repo-wide prerequisite already) needs zero
-# extra setup.
+# Credentials for the cross-root Scaleway state reads below. Two execution
+# contexts apply this root: an admin's machine (scw CLI configured) and
+# .github/workflows/scaleway.yml's CI job, which already sets
+# SCW_ACCESS_KEY/SCW_SECRET_KEY as job env (for `provider "scaleway" {}`)
+# but had no way to hand them to this data source — env vars now win when
+# set, falling back to `scw config get` for the admin path. Same fix as
+# 05-secrets/openbao/managed/main.tf's identical comment (that root's own
+# CronWorkflow prompted finding this one too — see infra PR #66).
 data "external" "scw_credentials" {
-  program = ["sh", "-c", "jq -n --arg ak \"$(scw config get access-key)\" --arg sk \"$(scw config get secret-key)\" '{access_key:$ak, secret_key:$sk}'"]
+  program = ["sh", "-c", <<-EOT
+    jq -n \
+      --arg ak "$${SCW_ACCESS_KEY:-$(scw config get access-key)}" \
+      --arg sk "$${SCW_SECRET_KEY:-$(scw config get secret-key)}" \
+      '{access_key:$ak, secret_key:$sk}'
+  EOT
+  ]
 }
 
 # Shared technical attributes for every cross-root Scaleway state read below

@@ -85,6 +85,25 @@ that triggers a rewrite; bump it to rotate:
   sharing OpenBao's bucket broke its own `s3cmd`-based retention cleanup
   (confirmed live 2026-07-28), so Velero gets `scaleway_object_bucket.velero`
   + `scaleway_iam_application.velero` of its own.
+- `argo_workflows_scaleway_state_credentials`
+  (`apps/argo-workflows/scaleway-state-credentials`) — `SCW_ACCESS_KEY`/
+  `SCW_SECRET_KEY` for the gitops repo's Argo Workflows CronWorkflow (runs
+  `terraform apply` on this very root, hourly, from inside the cluster —
+  see that chart's own README for why). A dedicated workload identity
+  (`01-iam/workload/scaleway`'s `argo-workflows-state`,
+  `data.terraform_remote_state.dns_scaleway`), not a reused state-bucket
+  identity — this credential is landed on the cluster, unlike every other
+  cross-root read in this file, so it gets its own identity like any other
+  in-cluster workload.
+- `argo_workflows_openbao_managed_tfvars`
+  (`apps/argo-workflows/openbao-managed-tfvars`) — a duplicate, JSON-encoded
+  copy of `var.dex_github_connector` /
+  `var.secrets_sync_github_eso_private_key` / `var.secrets_sync_github`, so
+  the CronWorkflow's own unattended `terraform apply` of THIS root can
+  satisfy those three required variables too (same admin-supplied value,
+  written to a second KV path in the same apply — not a read-back of the
+  "real" objects those variables also feed; see `main.tf`'s comment on this
+  resource for why that distinction matters).
 
 Deliberately **not** managed: `default` and `root` (OpenBao built-ins), and
 the `approle`/`terraform` auth backend/policy/role (owned by

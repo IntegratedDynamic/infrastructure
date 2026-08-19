@@ -11,8 +11,8 @@ variable "project_id" {
 variable "identities" {
   description = "Map of identity key => config."
   type = map(object({
-    purpose             = string
-    policy_description  = string
+    purpose               = string
+    policy_description    = string
     api_key_rotation_days = optional(number, 365)
     rules = list(object({
       project_ids          = optional(list(string))

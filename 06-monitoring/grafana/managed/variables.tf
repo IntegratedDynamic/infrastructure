@@ -17,3 +17,10 @@ variable "grafana_bootstrap_state_key" {
   description = "Object key for 06-monitoring/grafana/bootstrap's state within grafana_bootstrap_state_bucket."
   type        = string
 }
+
+# See version.tf's provider "grafana" block for why this is a variable.
+variable "grafana_url" {
+  description = "URL the grafana provider authenticates against."
+  type        = string
+  default     = "https://grafana.scalepack.fr/"
+}

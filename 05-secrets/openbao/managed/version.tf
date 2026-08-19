@@ -55,20 +55,30 @@ data "terraform_remote_state" "openbao_bootstrap" {
 # not Vault's VAULT_ADDR/VAULT_TOKEN, so relying on the env var is a trap (see
 # the bootstrap root's version.tf/README for the incident this came from).
 provider "vault" {
-  # Same hostname as OpenBao's public route, on purpose — not a fallback,
-  # the actual mechanism: split-DNS (the tunnel's dns sidecar, gitops
-  # repo's services/platform/wireguard/config) resolves this to the
-  # WireGuard tunnel's own address (04-vpn/wireguard) while it's up,
+  # Defaults to OpenBao's public route — same hostname whether or not the
+  # WireGuard tunnel is up, on purpose: split-DNS (the tunnel's dns
+  # sidecar, gitops repo's services/platform/wireguard/config) resolves
+  # this to the tunnel's own address (04-vpn/wireguard) while it's up,
   # routing privately through Envoy Gateway's real Service (proxy-gateway
   # sidecar) instead of the public internet. Same address either way —
   # bring the tunnel up first (`wg-quick up <peer_conf_paths output>`), or
   # this just hits the real public route (fine; that's still there for
   # human OIDC/UI login, this provider just doesn't need it anymore).
-  address = "https://openbao.scalepack.fr/"
+  #
+  # Overridden via -var for the two other real execution contexts this root
+  # runs in: the Argo Workflows CronWorkflow (gitops repo
+  # services/platform/argo-workflows) passes the in-cluster Service address
+  # (http://openbao.openbao.svc:8200, matches services/platform/openbao/
+  # init's baoAddr) — the whole reason that CronWorkflow exists is OpenBao
+  # not being reachable from outside the cluster for a while after boot, so
+  # it never needs the tunnel/public-route dance below. A direct port-
+  # forward (`kubectl port-forward -n openbao openbao-0 8200:8200`,
+  # requires Kubernetes permissions) is the third: -var
+  # vault_address=http://127.0.0.1:8200/.
+  address = var.vault_address
 
-  # Direct port-forward, independent of the tunnel/gateway path entirely.
-  # Requires Kubernetes permissions to run `kubectl port-forward -n openbao openbao-0 8200:8200`
-  # address = "http://127.0.0.1:8200/"
+  # address = "http://127.0.0.1:8200"
+  # token = var.root_token
 
   auth_login {
     path = "auth/approle/login"
@@ -77,4 +87,11 @@ provider "vault" {
       secret_id = data.terraform_remote_state.openbao_bootstrap.outputs.secret_id
     }
   }
+}
+
+variable "root_token" {
+  description = "Temporary variable used for debug with kubectl port-forward with openbao in hearly stage"
+  default     = null
+  type        = string
+  sensitive   = true
 }
