@@ -13,7 +13,15 @@ locals {
   # 85% splits the difference), computed from the limit instead of a second
   # hardcoded literal so the two can't drift out of the recommended ratio:
   # https://argo-cd.readthedocs.io/en/stable/operator-manual/high_availability/#mitigating-oomkilled-events-from-memory-spikes
-  argocd_controller_memory_limit_mib = 1000
+  #
+  # Bumped 1000 -> 1500 2026-08-20: confirmed live that 1000Mi + GOMEMLIMIT
+  # alone wasn't enough headroom for a full from-scratch tree resync (all
+  # ~30 Applications across every wave at once, not just the steady-state
+  # reconciliation loop the earlier 1000Mi figure was sized from) --
+  # GOMEMLIMIT only forces proactive GC, it can't shrink genuinely live
+  # working-set below what a full resync actually needs to hold in memory
+  # at once.
+  argocd_controller_memory_limit_mib = 1500
   argocd_controller_gomemlimit_mib   = floor(local.argocd_controller_memory_limit_mib * 0.85)
 }
 
@@ -212,6 +220,16 @@ dex:
 # same generous limit despite low observed idle usage (8m/131Mi).
 controller:
   replicas: 1
+  # Small node pool (see the "small nodes, no real headroom" comment on
+  # repoServer's sizing below) -- system-cluster-critical (built into every
+  # Kubernetes cluster, usable outside kube-system unlike
+  # system-node-critical) protects this pod specifically from the kubelet's
+  # own node-memory-pressure eviction (confirmed live 2026-08-20: this pod
+  # was evicted at 91% of a node's memory even while under its own
+  # container limit -- a different mechanism than the cgroup OOM kill
+  # GOMEMLIMIT below addresses) and gives it scheduling priority over
+  # everything else in this namespace.
+  priorityClassName: system-cluster-critical
   # GOMEMLIMIT (see the locals block above this resource): observed live
   # 2026-08-20 that even 2048Mi wasn't enough headroom during a full
   # 22-Application reconcile burst -- OOMKilled twice before stabilizing.
