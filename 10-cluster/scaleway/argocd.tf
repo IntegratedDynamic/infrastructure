@@ -202,10 +202,17 @@ controller:
   resources:
     requests:
       cpu: 50m
-      memory: 512Mi
+      # Bumped 2026-08-19: confirmed live, OOMKilled repeatedly (6+ times)
+      # reconciling a fresh cluster boot with the gitops repo's Argo
+      # Workflows addition (argo-workflows, argo-workflows-secret,
+      # terraform-apply + its 3 CronWorkflows) pushing total tracked
+      # resource count past what 512Mi/1024Mi had headroom for -- the
+      # comment above already flagged that pairing as "no real headroom
+      # at all" before this addition.
+      memory: 768Mi
     limits:
       cpu: 1000m
-      memory: 1024Mi
+      memory: 2048Mi
 
 repoServer:
   replicas: 1

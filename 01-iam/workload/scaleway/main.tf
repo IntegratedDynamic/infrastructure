@@ -18,7 +18,7 @@ module "identities" {
     }
   }
 
-  project_id             = var.project_id
-  api_key_description    = "${each.key} workload credentials (${terraform.workspace})."
-  api_key_rotation_days  = each.value.api_key_rotation_days
+  project_id            = var.project_id
+  api_key_description   = "${each.key} workload credentials (${terraform.workspace})."
+  api_key_rotation_days = each.value.api_key_rotation_days
 }

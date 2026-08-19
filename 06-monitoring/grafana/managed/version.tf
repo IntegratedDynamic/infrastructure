@@ -34,16 +34,26 @@ terraform {
 # account token this root authenticates as. Cross-root remote-state read,
 # not a hand-copied value, same convention as every other cross-root
 # credential in this repo.
-# Credentials for the cross-root Scaleway state read below: read straight
-# from the scw CLI's own config (the same credentials `provider "scaleway"
-# {}` already uses implicitly everywhere else) instead of requiring
-# AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY set ambiently. Terraform's s3
-# backend/data source has no notion of the scw CLI's own config format —
-# this bridges the two credential systems automatically, so any admin who
-# already has `scw` configured (a repo-wide prerequisite already) needs zero
-# extra setup.
+# Credentials for the cross-root Scaleway state read below. Two execution
+# contexts apply this root: an admin's machine (scw CLI configured) and
+# the gitops repo's Argo Workflows terraform-apply CronWorkflow, which
+# already sets SCW_ACCESS_KEY/SCW_SECRET_KEY as env vars but had no way to
+# hand them to this data source -- confirmed live, silently returned empty
+# credentials without this fallback (no error, since `scw` command
+# substitution failing just yields an empty string), which then broke the
+# cross-root state read below with a confusing "No valid credential
+# sources found" error instead of failing at the actual source. Env vars
+# now win when set; falling back to `scw config get` keeps the admin path
+# exactly as it was. Same fix as 05-secrets/openbao/managed/main.tf's
+# identical comment.
 data "external" "scw_credentials" {
-  program = ["sh", "-c", "jq -n --arg ak \"$(scw config get access-key)\" --arg sk \"$(scw config get secret-key)\" '{access_key:$ak, secret_key:$sk}'"]
+  program = ["sh", "-c", <<-EOT
+    jq -n \
+      --arg ak "$${SCW_ACCESS_KEY:-$(scw config get access-key)}" \
+      --arg sk "$${SCW_SECRET_KEY:-$(scw config get secret-key)}" \
+      '{access_key:$ak, secret_key:$sk}'
+  EOT
+  ]
 }
 
 locals {
@@ -76,7 +86,9 @@ data "terraform_remote_state" "grafana_bootstrap" {
 
 # Already a bearer-style API token (grafana_service_account_token.key) — no
 # "user:pass" formatting needed, unlike bootstrap's admin basic-auth.
+# See that root's version.tf for why `url` is a variable, not a literal --
+# same reason applies here.
 provider "grafana" {
-  url  = "https://grafana.scalepack.fr/"
+  url  = var.grafana_url
   auth = data.terraform_remote_state.grafana_bootstrap.outputs.service_account_token
 }
