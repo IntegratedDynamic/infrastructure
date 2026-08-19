@@ -319,6 +319,11 @@ resource "random_password" "openbao_client_secret" {
   special = false
 }
 
+resource "random_password" "argo_workflows_client_secret" {
+  length  = 32
+  special = false
+}
+
 resource "vault_kv_secret_v2" "dex_credentials" {
   mount = vault_mount.kv.path
   name  = "apps/dex/credentials"
@@ -330,10 +335,19 @@ resource "vault_kv_secret_v2" "dex_credentials" {
     "openbao-client-secret" = random_password.openbao_client_secret.result
     "github-client-id"      = var.dex_github_connector["github-client-id"]
     "github-client-secret"  = var.dex_github_connector["github-client-secret"]
+    # Not secret (it's Dex's public staticClients.id, gitops repo's
+    # services/platform/dex/chart/values-scaleway.yaml), but stored
+    # alongside the secret anyway: the argo-workflows Helm chart's
+    # server.sso.clientId only accepts a Secret name/key reference, no
+    # literal-string option (unlike ArgoCD's own cm.oidc.config, which
+    # takes clientID as a literal) -- see argo-workflows/secret's
+    # ExternalSecret in the gitops repo for both properties landing
+    # together in one Secret.
+    "argo-workflows-client-id"     = "argo-workflows"
+    "argo-workflows-client-secret" = random_password.argo_workflows_client_secret.result
   })
-  # Bumped from 1: content changed from "adopted existing values" to
-  # "Terraform-generated" — this is a deliberate one-time rotation.
-  data_json_wo_version = 2
+  # Bumped from 2: added the argo-workflows SSO client (id + secret).
+  data_json_wo_version = 3
 }
 
 # admin-password is arbitrary (previously openssl rand, per gitops commit
