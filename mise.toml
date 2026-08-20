@@ -144,9 +144,12 @@ run = 'sudo wg-quick down "$(pwd)/generated/${usage_peer?}.conf"'
 # values-scaleway.yaml (gitops repo) — see that file + this repo's
 # services/platform/gateway/config/README.md for the full restore-hook
 # writeup. Selecting the velero pod by the `name=velero` label (not
-# `app.kubernetes.io/name=velero`, which the node-agent DaemonSet pods
-# share) — `kubectl exec deploy/velero` has been observed picking a
-# node-agent pod instead, confirmed live 2026-08-14.
+# `app.kubernetes.io/name=velero`) — historically also matched the
+# node-agent DaemonSet's pods, causing `kubectl exec deploy/velero` to pick
+# the wrong one (confirmed live 2026-08-14); moot since infra#75 dropped
+# that DaemonSet entirely (grafana-data now backs up via CSI VolumeSnapshot,
+# not kopia file-system-backup), but the narrower selector is still the
+# more correct one to keep.
 
 [tasks.backup-now]
 description = "Trigger an on-demand backup: both Velero schedules + an OpenBao snapshot"
