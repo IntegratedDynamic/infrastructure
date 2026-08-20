@@ -39,11 +39,16 @@ destroy it).
 - `vault_policy.eso_read` / `.snapshot` / `.admin` — the policies the roles
   above bind to.
 
-**Secret content** (`kv/apps/*`), each a `vault_kv_secret_v2` using the
-write-only `data_json_wo`/`data_json_wo_version` pair — the provider never
-reads secret values back from Vault to diff them (deliberate, avoids leaking
-plaintext into the state file), so `data_json_wo_version` is the only signal
-that triggers a rewrite; bump it to rotate:
+**Secret content** (`kv/apps/*`), each a `vault_kv_secret_v2` using plain
+`data_json` — not the write-only `data_json_wo`/`data_json_wo_version` pair
+this root used until 2026-08-20 (infra issue #73): write-only never reads
+secret values back from Vault to diff them, so every content change also
+needed a manual version bump, and a forgotten one meant `apply` reported "no
+changes" while live OpenBao silently drifted from state (hit for real twice
+— see the grafana_admin/wireguard_peers history in `main.tf`). Plaintext
+ends up in state either way, since every value here already originates from
+state (a `random_password.result`, a var, or a `terraform_remote_state`
+output), so `data_json` costs nothing extra and buys real drift detection:
 - `dex_credentials` (`apps/dex/credentials`) — Dex's client secrets for
   argocd/envoy/grafana/openbao are **Terraform-generated**
   (`random_password.*`, arbitrary shared secrets, nothing external
@@ -183,11 +188,10 @@ terraform -chdir=05-secrets/openbao/managed workspace select -or-create 05-secre
 terraform -chdir=05-secrets/openbao/managed plan
 ```
 
-A clean plan on the structure resources (zero changes) confirms the code
-matches reality. The `vault_kv_secret_v2` resources will always show
-`data_json_wo`-related churn only when `data_json_wo_version` changes —
-otherwise they stay silent even though their actual content is never
-diffed (by design, see above).
+A clean plan (zero changes across the board, including the `vault_kv_secret_v2`
+resources) confirms the code matches reality — `data_json` diffs actual
+content now, so a clean plan is a real guarantee, not just silence born of
+write-only never looking.
 
 ## Apply
 
@@ -203,9 +207,9 @@ terraform -chdir=05-secrets/openbao/managed apply
 > out access to the cluster's own secrets.
 >
 > Rotating any Terraform-generated secret (bump the corresponding
-> `random_password`'s underlying trigger, or `-replace` it, **and** bump
-> the owning `vault_kv_secret_v2`'s `data_json_wo_version` in the same
-> change) takes effect live immediately, but downstream consumers
+> `random_password`'s underlying trigger, or `-replace` it — `data_json`
+> picks up the new value on the next apply, no separate version bump
+> needed) takes effect live immediately, but downstream consumers
 > (Dex/ArgoCD/Grafana pods reading via `secretKeyRef` env vars) do **not**
 > hot-reload — force their `ExternalSecret`s to refresh (e.g. annotate them
 > to trigger reconciliation) and roll out the affected deployments right

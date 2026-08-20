@@ -240,13 +240,19 @@ resource "vault_policy" "admin" {
   EOT
 }
 
-# --- kv/data/apps/*: secret content, not just structure. Uses data_json_wo
-# (write-only) + a static data_json_wo_version instead of data_json: the
-# provider never reads secret values back from Vault to diff them (deliberate
-# — avoids leaking plaintext into the state file), so the plain data_json
-# attribute would show a spurious "changed" on every single plan. The
-# write-only pair only triggers a write when data_json_wo_version is bumped,
-# giving genuinely stable plans once applied. Bump the version to rotate.
+# --- kv/data/apps/*: secret content, not just structure. Uses plain
+# data_json, not the write-only data_json_wo/data_json_wo_version pair this
+# root used until 2026-08-20 (see infra issue #73): write-only never reads
+# secret values back from Vault to diff them, so every content change needed
+# a version bump too, by hand, on top of the value change itself — and a
+# forgotten bump meant `apply` reported "no changes" while live OpenBao
+# silently drifted from state (hit for real after a raft snapshot restore).
+# data_json's plaintext-in-state tradeoff buys nothing here to offset that
+# risk: every value below already originates from state either way
+# (random_password.result, a var, or a terraform_remote_state output), so
+# state already holds it in the clear regardless of which attribute writes
+# it to Vault. data_json also means drift is now visible on `plan`, not just
+# silently accepted.
 
 data "terraform_remote_state" "dns_scaleway" {
   backend = "s3"
@@ -296,9 +302,8 @@ data "terraform_remote_state" "wireguard_exit" {
 # Grafana, and Dex itself all read the *same* kv/apps/dex/credentials object
 # below via their own ExternalSecret, so a rotation here propagates to every
 # consumer through their existing refresh cycle, no separate copies to sync.
-# To rotate: `terraform apply -replace=random_password.<name>` and bump
-# vault_kv_secret_v2.dex_credentials's data_json_wo_version in the same change
-# (the write-only field only re-writes to Vault when that version bumps).
+# To rotate: `terraform apply -replace=random_password.<name>` — data_json
+# picks up the new value on the next apply, no separate version bump needed.
 resource "random_password" "argocd_client_secret" {
   length  = 32
   special = false
@@ -328,7 +333,7 @@ resource "vault_kv_secret_v2" "dex_credentials" {
   mount = vault_mount.kv.path
   name  = "apps/dex/credentials"
 
-  data_json_wo = jsonencode({
+  data_json = jsonencode({
     "argocd-client-secret"  = random_password.argocd_client_secret.result
     "envoy-client-secret"   = random_password.envoy_client_secret.result
     "grafana-client-secret" = random_password.grafana_client_secret.result
@@ -346,8 +351,6 @@ resource "vault_kv_secret_v2" "dex_credentials" {
     "argo-workflows-client-id"     = "argo-workflows"
     "argo-workflows-client-secret" = random_password.argo_workflows_client_secret.result
   })
-  # Bumped from 2: added the argo-workflows SSO client (id + secret).
-  data_json_wo_version = 3
 }
 
 # admin-password is arbitrary (previously openssl rand, per gitops commit
@@ -362,21 +365,18 @@ resource "vault_kv_secret_v2" "grafana_admin" {
   mount = vault_mount.kv.path
   name  = "apps/grafana/admin"
 
-  data_json_wo = jsonencode({
+  data_json = jsonencode({
     "admin-user"     = "admin"
     "admin-password" = random_password.grafana_admin_password.result
   })
-  # Bumped from 2: confirmed live 2026-08-14 that a cluster rebuild restored
-  # OpenBao from a raft snapshot holding a stale admin-password (mismatched
-  # sha256 vs random_password.grafana_admin_password's own Terraform-state
-  # value) — write-only diffing has no way to detect that kind of
-  # out-of-band data loss on its own (it never reads the live value back, by
-  # design), same gap already hit for wireguard_peers/wireguard_confs above.
-  # The version bump is what actually re-triggers the write. Requires a
-  # Grafana pod restart afterward too: it only applies
-  # GF_SECURITY_ADMIN_PASSWORD at admin-user creation (fresh/ephemeral DB),
-  # not on every boot against an already-existing admin user.
-  data_json_wo_version = 3
+  # Confirmed live 2026-08-14 that a cluster rebuild restored OpenBao from a
+  # raft snapshot holding a stale admin-password — plain data_json now
+  # re-diffs and re-writes on the next apply automatically instead of
+  # needing a manual version bump (see the write-only postmortem in the
+  # top-of-file comment). Still requires a Grafana pod restart afterward:
+  # it only applies GF_SECURITY_ADMIN_PASSWORD at admin-user creation
+  # (fresh/ephemeral DB), not on every boot against an already-existing
+  # admin user.
 }
 
 # SCW_ACCESS_KEY/SCW_SECRET_KEY sourced straight from infra's own IAM root
@@ -386,19 +386,17 @@ resource "vault_kv_secret_v2" "external_dns_scaleway_dns_credentials" {
   mount = vault_mount.kv.path
   name  = "apps/external-dns/scaleway-dns-credentials"
 
-  data_json_wo = jsonencode({
+  data_json = jsonencode({
     SCW_ACCESS_KEY = data.terraform_remote_state.dns_scaleway.outputs.workload_access_key
     SCW_SECRET_KEY = data.terraform_remote_state.dns_scaleway.outputs.workload_secret_key
   })
-  data_json_wo_version = 1
 }
 
 resource "vault_kv_secret_v2" "secrets_sync_github_eso_private_key" {
   mount = vault_mount.kv.path
   name  = "apps/secrets-sync/github/eso-github-app-private-key"
 
-  data_json_wo         = jsonencode(var.secrets_sync_github_eso_private_key)
-  data_json_wo_version = 1
+  data_json = jsonencode(var.secrets_sync_github_eso_private_key)
 }
 
 # --- GitHub secrets-sync content, scoped explicitly by org/repo/repo+env
@@ -411,8 +409,7 @@ resource "vault_kv_secret_v2" "secrets_sync_github_global" {
   mount = vault_mount.kv.path
   name  = "apps/secrets-sync/github/global"
 
-  data_json_wo         = jsonencode(var.secrets_sync_github.global)
-  data_json_wo_version = 1
+  data_json = jsonencode(var.secrets_sync_github.global)
 }
 
 # One object per repo that has repo-wide (no environment) secrets.
@@ -420,7 +417,7 @@ resource "vault_kv_secret_v2" "secrets_sync_github_repo" {
   # for_each can't be derived from a sensitive value (Terraform can't tell
   # the *keys* apart from the *values* it's tainting) — nonsensitive() here
   # is scoped to just the repo names, never the actual secret content, which
-  # stays properly sensitive-tracked in data_json_wo below.
+  # stays properly sensitive-tracked in data_json below.
   for_each = nonsensitive({
     for repo, cfg in var.secrets_sync_github.repos : repo => true
     if length(cfg.secrets) > 0
@@ -429,8 +426,7 @@ resource "vault_kv_secret_v2" "secrets_sync_github_repo" {
   mount = vault_mount.kv.path
   name  = "apps/secrets-sync/github/${each.key}"
 
-  data_json_wo         = jsonencode(var.secrets_sync_github.repos[each.key].secrets)
-  data_json_wo_version = 1
+  data_json = jsonencode(var.secrets_sync_github.repos[each.key].secrets)
 }
 
 # The only repo+environment target today. Written as a plain resource, not a
@@ -445,7 +441,7 @@ resource "vault_kv_secret_v2" "secrets_sync_github_infrastructure_scaleway" {
   mount = vault_mount.kv.path
   name  = "apps/secrets-sync/github/infrastructure-scaleway"
 
-  data_json_wo = jsonencode(merge(
+  data_json = jsonencode(merge(
     var.secrets_sync_github.repos["infrastructure"].environments["scaleway"],
     {
       SCW_ACCESS_KEY = data.terraform_remote_state.dns_scaleway.outputs.workload_access_key
@@ -458,11 +454,6 @@ resource "vault_kv_secret_v2" "secrets_sync_github_infrastructure_scaleway" {
       WG_CI_PRIVATE_KEY = data.terraform_remote_state.wireguard.outputs.peer_private_keys["ci-github-actions"]
     }
   ))
-  # Bumped from 1: adding WG_CI_PRIVATE_KEY to the merge above is a content
-  # change data_json_wo's write-only diffing can't see on its own (see the
-  # write-only explainer near the top of this file) — without this bump,
-  # `apply` would report "no changes" and never actually write the new key.
-  data_json_wo_version = 2
 }
 
 # apps/wireguard/server-key — the tunnel server's own key, read back out by
@@ -474,10 +465,9 @@ resource "vault_kv_secret_v2" "wireguard_server_key" {
   mount = vault_mount.kv.path
   name  = "apps/wireguard/server-key"
 
-  data_json_wo = jsonencode({
+  data_json = jsonencode({
     "private-key" = data.terraform_remote_state.wireguard.outputs.server_private_key
   })
-  data_json_wo_version = 1
 }
 
 # apps/wireguard/peers — not actually secret (public keys + overlay
@@ -490,19 +480,18 @@ resource "vault_kv_secret_v2" "wireguard_peers" {
   mount = vault_mount.kv.path
   name  = "apps/wireguard/peers"
 
-  data_json_wo = jsonencode({
+  data_json = jsonencode({
     for name, key in data.terraform_remote_state.wireguard.outputs.peer_public_keys :
     name => {
       publicKey  = key
       allowedIPs = data.terraform_remote_state.wireguard.outputs.peer_addresses[name]
     }
   })
-  # Bumped from 1: confirmed live 2026-08-10 that a cluster rebuild restored
-  # OpenBao from an hourly raft snapshot taken *before* this object was
-  # first written — write-only diffing has no way to detect that kind of
-  # out-of-band data loss on its own (it never reads the live value back,
-  # by design), so the version bump is what actually re-triggers the write.
-  data_json_wo_version = 2
+  # Confirmed live 2026-08-10 that a cluster rebuild restored OpenBao from an
+  # hourly raft snapshot taken *before* this object was first written —
+  # plain data_json now re-diffs and re-writes on the next apply
+  # automatically instead of needing a manual version bump (see the
+  # write-only postmortem in the top-of-file comment).
 }
 
 # apps/wireguard/confs — full rendered wg-quick config per peer (server
@@ -519,10 +508,7 @@ resource "vault_kv_secret_v2" "wireguard_confs" {
   mount = vault_mount.kv.path
   name  = "apps/wireguard/confs"
 
-  data_json_wo = jsonencode(data.terraform_remote_state.wireguard.outputs.peer_confs)
-  # Bumped from 1 — same raft-snapshot-predates-the-write gap as
-  # wireguard_peers above, confirmed live 2026-08-10.
-  data_json_wo_version = 2
+  data_json = jsonencode(data.terraform_remote_state.wireguard.outputs.peer_confs)
 }
 
 # apps/wireguard-exit/{server-key,peers,confs} — same three-object shape as
@@ -534,24 +520,22 @@ resource "vault_kv_secret_v2" "wireguard_exit_server_key" {
   mount = vault_mount.kv.path
   name  = "apps/wireguard-exit/server-key"
 
-  data_json_wo = jsonencode({
+  data_json = jsonencode({
     "private-key" = data.terraform_remote_state.wireguard_exit.outputs.server_private_key
   })
-  data_json_wo_version = 1
 }
 
 resource "vault_kv_secret_v2" "wireguard_exit_peers" {
   mount = vault_mount.kv.path
   name  = "apps/wireguard-exit/peers"
 
-  data_json_wo = jsonencode({
+  data_json = jsonencode({
     for name, key in data.terraform_remote_state.wireguard_exit.outputs.peer_public_keys :
     name => {
       publicKey  = key
       allowedIPs = data.terraform_remote_state.wireguard_exit.outputs.peer_addresses[name]
     }
   })
-  data_json_wo_version = 1
 }
 
 # Same "self-service retrieval without needing this repo's state" rationale
@@ -561,8 +545,7 @@ resource "vault_kv_secret_v2" "wireguard_exit_confs" {
   mount = vault_mount.kv.path
   name  = "apps/wireguard-exit/confs"
 
-  data_json_wo         = jsonencode(data.terraform_remote_state.wireguard_exit.outputs.peer_confs)
-  data_json_wo_version = 1
+  data_json = jsonencode(data.terraform_remote_state.wireguard_exit.outputs.peer_confs)
 }
 
 # apps/velero/scaleway-s3-credentials — Velero's Object Storage credentials
@@ -578,11 +561,10 @@ resource "vault_kv_secret_v2" "velero_scaleway_s3_credentials" {
   mount = vault_mount.kv.path
   name  = "apps/velero/scaleway-s3-credentials"
 
-  data_json_wo = jsonencode({
+  data_json = jsonencode({
     SCW_ACCESS_KEY = data.terraform_remote_state.backup_scaleway.outputs.velero_workload_access_key
     SCW_SECRET_KEY = data.terraform_remote_state.backup_scaleway.outputs.velero_workload_secret_key
   })
-  data_json_wo_version = 2
 }
 
 # apps/monitoring/thanos-scaleway-s3-credentials — the Prometheus Thanos
@@ -596,11 +578,10 @@ resource "vault_kv_secret_v2" "thanos_scaleway_s3_credentials" {
   mount = vault_mount.kv.path
   name  = "apps/monitoring/thanos-scaleway-s3-credentials"
 
-  data_json_wo = jsonencode({
+  data_json = jsonencode({
     SCW_ACCESS_KEY = data.terraform_remote_state.backup_scaleway.outputs.thanos_workload_access_key
     SCW_SECRET_KEY = data.terraform_remote_state.backup_scaleway.outputs.thanos_workload_secret_key
   })
-  data_json_wo_version = 1
 }
 
 # apps/monitoring/loki-scaleway-s3-credentials — Loki's own Object Storage
@@ -613,11 +594,10 @@ resource "vault_kv_secret_v2" "loki_scaleway_s3_credentials" {
   mount = vault_mount.kv.path
   name  = "apps/monitoring/loki-scaleway-s3-credentials"
 
-  data_json_wo = jsonencode({
+  data_json = jsonencode({
     SCW_ACCESS_KEY = data.terraform_remote_state.backup_scaleway.outputs.loki_workload_access_key
     SCW_SECRET_KEY = data.terraform_remote_state.backup_scaleway.outputs.loki_workload_secret_key
   })
-  data_json_wo_version = 1
 }
 
 # apps/monitoring/tempo-scaleway-s3-credentials — Tempo's own Object Storage
@@ -628,11 +608,10 @@ resource "vault_kv_secret_v2" "tempo_scaleway_s3_credentials" {
   mount = vault_mount.kv.path
   name  = "apps/monitoring/tempo-scaleway-s3-credentials"
 
-  data_json_wo = jsonencode({
+  data_json = jsonencode({
     SCW_ACCESS_KEY = data.terraform_remote_state.backup_scaleway.outputs.tempo_workload_access_key
     SCW_SECRET_KEY = data.terraform_remote_state.backup_scaleway.outputs.tempo_workload_secret_key
   })
-  data_json_wo_version = 1
 }
 
 # apps/argo-workflows/scaleway-state-credentials — read by the gitops repo's
@@ -650,11 +629,10 @@ resource "vault_kv_secret_v2" "argo_workflows_scaleway_state_credentials" {
   mount = vault_mount.kv.path
   name  = "apps/argo-workflows/scaleway-state-credentials"
 
-  data_json_wo = jsonencode({
+  data_json = jsonencode({
     SCW_ACCESS_KEY = data.terraform_remote_state.dns_scaleway.outputs.access_keys["argo-workflows-state"]
     SCW_SECRET_KEY = data.terraform_remote_state.dns_scaleway.outputs.secret_keys["argo-workflows-state"]
   })
-  data_json_wo_version = 1
 }
 
 # apps/argo-workflows/openbao-managed-tfvars — a duplicate of the three
@@ -663,10 +641,10 @@ resource "vault_kv_secret_v2" "argo_workflows_scaleway_state_credentials" {
 # secrets_sync_github), so the CronWorkflow's unattended apply is the exact
 # same apply an admin would run, not a narrower one. Deliberately a
 # duplicate WRITE from the same var, in the same apply, not a read-back of
-# the "real" objects above (this file's write-only `data_json_wo` design —
-# see the top-of-file comment — never reads secret values back from Vault,
-# on purpose; this resource doesn't change that, it just writes the same
-# admin-supplied value to a second path). Keys are TF_VAR_*-prefixed and
+# the "real" objects above — Terraform has no way to read one resource's
+# input back out of another resource's state, so this just writes the same
+# admin-supplied value to a second path directly from the var. Keys are
+# TF_VAR_*-prefixed and
 # values JSON-encoded strings, not nested objects, so the gitops repo's
 # shared terraform-apply WorkflowTemplate can just `envFrom: secretRef` this
 # whole object straight into the container's environment (only this root's
@@ -678,10 +656,9 @@ resource "vault_kv_secret_v2" "argo_workflows_openbao_managed_tfvars" {
   mount = vault_mount.kv.path
   name  = "apps/argo-workflows/openbao-managed-tfvars"
 
-  data_json_wo = jsonencode({
+  data_json = jsonencode({
     TF_VAR_dex_github_connector                = jsonencode(var.dex_github_connector)
     TF_VAR_secrets_sync_github_eso_private_key = jsonencode(var.secrets_sync_github_eso_private_key)
     TF_VAR_secrets_sync_github                 = jsonencode(var.secrets_sync_github)
   })
-  data_json_wo_version = 2
 }
