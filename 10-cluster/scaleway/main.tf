@@ -1,7 +1,26 @@
 resource "scaleway_vpc_private_network" "cluster" {}
 
+# Scaleway rejects a new cluster sharing a name with one still in a
+# terminal-but-not-gone state — confirmed live 2026-08-20: a previous
+# "scaleway-homelab" cluster got wedged in `deleting` for 9+ hours (an
+# orphaned instance server still holding 2 block volumes, itself stuck
+# `archived`, blocked Scaleway's own cascade cleanup) and blocked recreation
+# under the same name the whole time. random_id is stable across applies
+# (only regenerates on explicit -replace), so this doesn't rename the
+# cluster on every apply — it just guarantees a fresh name if a future
+# delete gets wedged again. var.cluster_name stays the stable local kubectl
+# context name (null_resource.update_kubeconfig below), independent of the
+# actual Scaleway resource name.
+resource "random_id" "cluster_suffix" {
+  byte_length = 2
+}
+
+locals {
+  cluster_resource_name = "${var.cluster_name}-${random_id.cluster_suffix.hex}"
+}
+
 resource "scaleway_k8s_cluster" "this" {
-  name    = var.cluster_name
+  name    = local.cluster_resource_name
   version = "1.35"
 
   auto_upgrade {
@@ -39,7 +58,7 @@ resource "scaleway_k8s_cluster" "this" {
 # other silently breaks the tunnel again, the same way this whole
 # investigation started.
 resource "scaleway_instance_security_group" "cluster_nodes" {
-  name        = "${var.cluster_name}-nodes"
+  name        = "${local.cluster_resource_name}-nodes"
   description = "Explicit inbound allowlist for cluster nodes' public IPs — see main.tf's comment on this resource."
 
   inbound_default_policy  = "drop"
