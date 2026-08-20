@@ -39,10 +39,6 @@ terraform {
       source  = "hashicorp/helm"
       version = "~> 3.0"
     }
-    # infisical = {
-    #   source  = "infisical/infisical"
-    #   version = "~> 0.16"
-    # }
     external = {
       source  = "hashicorp/external"
       version = "~> 2.0"
@@ -51,16 +47,6 @@ terraform {
 }
 
 provider "scaleway" {}
-
-# provider "infisical" {
-
-#   auth = { 
-#     ## Uncomment `universal` and comment `oidc` when running terraform locally.
-#     ## By default, even with `INFISICAL_UNIVERSAL_AUTH_CLIENT_XXXX` environment variable, due to `auth.oidc` being present, infisical provider expect OIDC configuration, and nothing else.
-#     # universal = {} 
-#     oidc = {} 
-#   }
-# }
 
 provider "kubernetes" {
   host                   = scaleway_k8s_cluster.this.kubeconfig[0].host
