@@ -539,6 +539,23 @@ resource "vault_kv_secret_v2" "tempo_scaleway_s3_credentials" {
   })
 }
 
+# apps/argo-workflows/scaleway-log-archive-credentials — the Argo Workflows
+# controller's own object-storage credentials for archiving container logs
+# (artifactRepository.archiveLogs, gitops repo services/platform/argo-
+# workflows/chart values-scaleway.yaml). Separate bucket + IAM key from every
+# other tool bucket (03-storage/scaleway/env/*.tfvars' argo_workflows_logs
+# entry) — same "one bucket, one identity, per consumer, never shared"
+# contract (03-storage/README.md) as thanos/loki/tempo above.
+resource "vault_kv_secret_v2" "argo_workflows_logs_scaleway_s3_credentials" {
+  mount = vault_mount.kv.path
+  name  = "apps/argo-workflows/scaleway-log-archive-credentials"
+
+  data_json = jsonencode({
+    SCW_ACCESS_KEY = data.terraform_remote_state.backup_scaleway.outputs.argo_workflows_logs_workload_access_key
+    SCW_SECRET_KEY = data.terraform_remote_state.backup_scaleway.outputs.argo_workflows_logs_workload_secret_key
+  })
+}
+
 # apps/argo-workflows/scaleway-state-credentials — read by the gitops repo's
 # Argo Workflows CronWorkflow (services/platform/argo-workflows) for both its
 # own `terraform init` backend (this root's own bucket, R/W) and the
