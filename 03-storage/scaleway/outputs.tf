@@ -95,3 +95,21 @@ output "tempo_workload_secret_key" {
   description = "Secret access key for the scoped Tempo Kubernetes workload identity."
   value       = module.buckets["tempo"].secret_key
 }
+
+# ── Argo Workflows log archive (separate bucket + identity) ──────────────────
+
+output "argo_workflows_logs_bucket_name" {
+  description = "Provisioned Argo Workflows log-archive bucket name."
+  value       = module.buckets["argo_workflows_logs"].bucket_name
+}
+
+output "argo_workflows_logs_workload_access_key" {
+  description = "Public access key for the scoped Argo Workflows log-archive Kubernetes workload identity."
+  value       = module.buckets["argo_workflows_logs"].access_key
+}
+
+output "argo_workflows_logs_workload_secret_key" {
+  sensitive   = true
+  description = "Secret access key for the scoped Argo Workflows log-archive Kubernetes workload identity."
+  value       = module.buckets["argo_workflows_logs"].secret_key
+}

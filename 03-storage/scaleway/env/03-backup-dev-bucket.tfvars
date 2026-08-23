@@ -85,4 +85,24 @@ buckets = {
     retention_days        = 1
     cold_storage_enabled  = false
   }
+  argo_workflows_logs = {
+    bucket_name             = "argo-workflows-logs-dev-id"
+    identity_app_prefix     = "argo-workflows-logs-k8s"
+    identity_policy_prefix  = "argo-workflows-logs-objects"
+    identity_purpose        = "grants the Argo Workflows controller object read/write for archived container logs (artifactRepository.archiveLogs)"
+    api_key_purpose         = "Argo Workflows log-archive credentials"
+    api_key_consumer        = "Consumed via OpenBao (kv/apps/argo-workflows/scaleway-log-archive-credentials) → ESO → Kubernetes Secret"
+
+    # Same rolling-expiry shape as loki/tempo above: archived run logs are a
+    # debugging aid (mainly for CronWorkflow runs whose pods already got GC'd
+    # by podGC), not a durability target — no need for versioning/GLACIER.
+    # 1 day, matching loki/tempo: kept deliberately tight to bound cost —
+    # useful for debugging a run and any consecutive retrigger of it, not a
+    # backlog to browse days later. No versioning either — Argo's own S3
+    # artifact driver does plain unversioned PUT/GET by key, nothing about
+    # its integration relies on bucket versioning.
+    versioning_enabled    = false
+    retention_days        = 1
+    cold_storage_enabled  = false
+  }
 }
