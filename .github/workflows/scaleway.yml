@@ -98,6 +98,6 @@ jobs:
       - uses: ./.github/actions/terraform
         with:
           root: 10-cluster/scaleway
-          tfvars-file: 02-cluster-staging.tfvars
+          tfvars-file: 10-cluster-scaleway-dev.tfvars
           command: ${{ steps.cmd.outputs.command }}
           aws-role-arn: ${{ vars.AWS_TERRAFORM_ROLE_ARN }}
