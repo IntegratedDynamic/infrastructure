@@ -229,3 +229,103 @@ resource "kubernetes_secret" "openbao_unseal_aws" {
     AWS_SECRET_ACCESS_KEY = data.terraform_remote_state.openbao_unseal_aws.outputs.openbao_unseal_secret_access_key
   }
 }
+
+# ── Secrets/monitoring/backups direct provisioning (infra#84) ───────────────
+#
+# monitoring/velero namespaces: Terraform-managed for the same reason
+# kubernetes_namespace.openbao above already was — the Secrets below must
+# exist before ArgoCD's own CreateNamespace=true sync gets a chance to run,
+# not after. external-secrets/secrets-sync namespaces get no such treatment
+# (see argocd-platform-apps/README.md's "Namespace decision") since nothing
+# Terraform-side writes into them.
+resource "kubernetes_namespace" "monitoring" {
+  metadata {
+    name = "monitoring"
+  }
+  depends_on = [scaleway_k8s_pool.default]
+}
+
+resource "kubernetes_namespace" "velero" {
+  metadata {
+    name = "velero"
+  }
+  depends_on = [scaleway_k8s_pool.default]
+}
+
+# thanos-objstore-config / loki-s3-credentials / tempo-s3-credentials /
+# velero-scaleway-credentials: written directly here instead of via
+# OpenBao+ESO's ExternalSecret round-trip (gitops repo's former
+# monitoring/thanos-secret, loki-secret, tempo-secret, velero/secret charts
+# — deleted, see platform-apps/README.md's "The secret-delivery pattern").
+# Terraform already originates all four credentials (03-storage/scaleway's
+# workload identities, read here via the same data.terraform_remote_state.backup_scaleway
+# 11-secrets/openbao/managed also reads) so there's no reason to hand them
+# to ESO just to hand them back — OpenBao stays the audited source of truth
+# via 11-secrets/openbao/managed's own vault_kv_secret_v2 writes (unchanged,
+# dual-written independently of this Secret).
+resource "kubernetes_secret" "thanos_objstore_config" {
+  metadata {
+    name      = "thanos-objstore-config"
+    namespace = kubernetes_namespace.monitoring.metadata[0].name
+  }
+
+  data = {
+    # Matches gitops repo's former monitoring/thanos-secret ExternalSecret
+    # template exactly (single objstore.yaml key, Thanos's own format:
+    # https://thanos.io/tip/thanos/storage.md/#s3) — bucket/endpoint/region
+    # kept in sync by hand with 03-storage/scaleway/env/*.tfvars' thanos
+    # entry, same convention that chart's values.yaml already documented.
+    "objstore.yaml" = yamlencode({
+      type = "S3"
+      config = {
+        bucket     = data.terraform_remote_state.backup_scaleway.outputs.thanos_bucket_name
+        endpoint   = "s3.fr-par.scw.cloud"
+        region     = "fr-par"
+        access_key = data.terraform_remote_state.backup_scaleway.outputs.thanos_workload_access_key
+        secret_key = data.terraform_remote_state.backup_scaleway.outputs.thanos_workload_secret_key
+      }
+    })
+  }
+}
+
+resource "kubernetes_secret" "loki_s3_credentials" {
+  metadata {
+    name      = "loki-s3-credentials"
+    namespace = kubernetes_namespace.monitoring.metadata[0].name
+  }
+
+  data = {
+    AWS_ACCESS_KEY_ID     = data.terraform_remote_state.backup_scaleway.outputs.loki_workload_access_key
+    AWS_SECRET_ACCESS_KEY = data.terraform_remote_state.backup_scaleway.outputs.loki_workload_secret_key
+  }
+}
+
+resource "kubernetes_secret" "tempo_s3_credentials" {
+  metadata {
+    name      = "tempo-s3-credentials"
+    namespace = kubernetes_namespace.monitoring.metadata[0].name
+  }
+
+  data = {
+    AWS_ACCESS_KEY_ID     = data.terraform_remote_state.backup_scaleway.outputs.tempo_workload_access_key
+    AWS_SECRET_ACCESS_KEY = data.terraform_remote_state.backup_scaleway.outputs.tempo_workload_secret_key
+  }
+}
+
+resource "kubernetes_secret" "velero_scaleway_credentials" {
+  metadata {
+    name      = "velero-scaleway-credentials"
+    namespace = kubernetes_namespace.velero.metadata[0].name
+  }
+
+  data = {
+    # Matches gitops repo's former velero/secret ExternalSecret template
+    # exactly (single "cloud" key, AWS shared-config/INI format
+    # velero-plugin-for-aws reads via credentials.existingSecret).
+    cloud = <<-EOT
+      [default]
+      aws_access_key_id=${data.terraform_remote_state.backup_scaleway.outputs.velero_workload_access_key}
+      aws_secret_access_key=${data.terraform_remote_state.backup_scaleway.outputs.velero_workload_secret_key}
+    EOT
+  }
+}

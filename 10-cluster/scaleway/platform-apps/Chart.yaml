@@ -1,0 +1,10 @@
+apiVersion: v2
+name: platform-apps
+description: >-
+  Renders one domain's ArgoCD child Applications (secrets, monitoring, or
+  backups — see values-*.yaml) as this chart's own managed resources, so
+  ArgoCD's sync-wave ordering applies within the domain. Pulled directly by
+  ArgoCD (source.path in argocd.tf's argocd_platform_apps helm_release) — see
+  README.md for why this lives here instead of the gitops repo.
+type: application
+version: 0.1.0

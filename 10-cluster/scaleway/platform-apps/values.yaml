@@ -1,0 +1,17 @@
+# Base defaults, always overridden per-domain by argocd.tf's
+# argocd_platform_apps helm_release (which selects one of
+# values-secrets.yaml / values-monitoring.yaml / values-backups.yaml via
+# source.helm.valueFiles, and passes repoURL/revision as Helm parameters —
+# see argocd.tf).
+repoURL: https://github.com/IntegratedDynamic/gitops.git
+revision: main
+
+# Populated per-domain by values-secrets.yaml / values-monitoring.yaml /
+# values-backups.yaml. Each entry: {name, namespace, chartPath, valueFile,
+# wave, skipCrds?, syncWaveLabelPaths?} — same shape as gitops repo's
+# bootstrap/values.yaml scalewayApps list (this chart's templates/apps.yaml
+# renders it the same way). wave here is domain-local (parallel across
+# secrets/monitoring/backups, ordered only within one domain) — NOT the
+# same numbering the gitops repo's bootstrap chart uses for its own
+# remaining apps.
+apps: []

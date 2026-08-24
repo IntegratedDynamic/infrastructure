@@ -287,6 +287,37 @@ Two-step, one-time bootstrap:
 
 Same bootstrap pattern as `local/`, but with the Kapsule cluster + node pool (`DEV1-M`, min=0/max=3) instead.
 
+**Secrets/monitoring/backups (infra#84, 2026-08-24):** OpenBao+ESO, monitoring
+(kube-prometheus-stack/loki/tempo/alloy/otel-collector, NOT Grafana — that
+stays in `gitops`), and Velero were extracted from `gitops` repo's
+`bootstrap` app-of-apps into this root's own `platform-apps/` chart —
+three ArgoCD Applications (`secrets-apps`/`monitoring-apps`/`backups-apps`,
+created via `argocd.tf`'s `argocd_platform_apps` helm_release, same
+`argocd-apps` chart mechanism `bootstrap` itself uses) that start in
+parallel with each other and must reach Healthy before `bootstrap`'s own
+Application resource is even created — a real Terraform `depends_on`
+(`null_resource.wait_platform_apps_healthy`, polling via `kubectl` +
+a self-generated kubeconfig), not an ArgoCD sync-wave, since ArgoCD has no
+native ordering primitive across independent top-level Applications (only
+within one parent's own sync — see `platform-apps/README.md`). The actual
+product charts (`services/platform/openbao/chart`, `monitoring/chart`, ...)
+are untouched, still pulled from the `gitops` repo — only which parent
+Application claims them as managed resources moved. Four credentials
+Terraform already originates (thanos/loki/tempo/velero Object Storage
+access keys, from `03-storage/scaleway`) are now written directly as
+`kubernetes_secret` resources in this root's `main.tf` instead of via
+OpenBao+ESO's `ExternalSecret` round-trip — OpenBao (`11-secrets/openbao/managed`)
+still gets the same values written to it independently, staying the
+audited source of truth, but ESO is no longer in the delivery path for
+these four. `monitoring`/`velero` namespaces are Terraform-managed
+(`kubernetes_namespace`, same pattern `openbao`'s namespace already used)
+purely because these Secrets must exist before ArgoCD's own
+`CreateNamespace=true` would otherwise create them — every other extracted
+app's namespace is still ArgoCD-created, unaffected. See
+`platform-apps/README.md` for the full design rationale (including the
+namespace and secret-delivery decisions), and `gitops` repo's
+`bootstrap/README.md` for what changed on that side.
+
 ### `00-foundation/aws/`
 
 The shared org S3 bucket holding **every** root's remote state (built on `terraform-aws-modules/s3-bucket`: versioning, SSE, public-access block, TLS-only). Chicken-and-egg: its own state lives in the bucket it creates (one-time local-state bootstrap — see its README). Also creates the GitHub OIDC provider and the one role, `terraform-state-access` (via `terraform-aws-modules/iam`), every GitHub Actions workflow in this repo assumes — trust scoped to `repo:IntegratedDynamic/infrastructure:*`, policy scoped to exactly S3 list/get/put/delete on the state bucket, nothing else. Wired to CI via `vars.AWS_TERRAFORM_ROLE_ARN`. Applied by an admin (this root creates the very identity CI would otherwise need to apply it). See its README.

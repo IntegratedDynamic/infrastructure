@@ -340,7 +340,11 @@ resource "helm_release" "argocd_apps" {
   chart      = "argocd-apps"
   version    = "2.0.4"
 
-  depends_on = [helm_release.argocd]
+  # wait_platform_apps_healthy (below) is the real Terraform-enforced
+  # prerequisite: bootstrap's Application must not even be created until
+  # secrets-apps/monitoring-apps/backups-apps are Healthy — see
+  # platform-apps/README.md.
+  depends_on = [helm_release.argocd, null_resource.wait_platform_apps_healthy]
 
   values = [<<EOF
 applications:
@@ -365,8 +369,8 @@ applications:
 
     syncPolicy:
       # Since this application bootstrap all the gitops repo, it's equal to cluster startup duration, which is greated than default argocd timeout values.
-      retry: 
-        limit: 10 
+      retry:
+        limit: 10
       automated:
         prune: true
         selfHeal: true
@@ -374,4 +378,184 @@ applications:
         - CreateNamespace=true
 EOF
   ]
+}
+
+# ── Secrets/monitoring/backups, extracted from gitops repo (infra#84) ───────
+#
+# Three parent Applications (secrets-apps/monitoring-apps/backups-apps),
+# each pointing at this repo's own platform-apps/ chart (not gitops) for
+# their OWN list of child Applications — see that chart's README.md for the
+# full "why" (ArgoCD sync-wave only orders resources within one parent
+# Application's own sync, so three separate parents is what actually lets
+# these domains start in parallel with each other while keeping each
+# domain's own real intra-domain ordering, e.g. kube-prometheus-stack-crds
+# before kube-prometheus-stack). The child Applications' own charts
+# (services/platform/openbao/chart, monitoring/chart, ...) are untouched,
+# still pulled from the gitops repo, same as before this split — only which
+# parent Application claims them as managed resources changed.
+resource "helm_release" "argocd_platform_apps" {
+  name      = "argocd-platform-apps"
+  namespace = "argocd"
+
+  repository = "https://argoproj.github.io/argo-helm"
+  chart      = "argocd-apps"
+  version    = "2.0.4"
+
+  depends_on = [
+    helm_release.argocd,
+    kubernetes_secret.thanos_objstore_config,
+    kubernetes_secret.loki_s3_credentials,
+    kubernetes_secret.tempo_s3_credentials,
+    kubernetes_secret.velero_scaleway_credentials,
+  ]
+
+  values = [<<EOF
+applications:
+  secrets-apps:
+    namespace: argocd
+    project: default
+    source:
+      repoURL: https://github.com/IntegratedDynamic/infrastructure.git
+      targetRevision: ${var.infra_revision}
+      path: 10-cluster/scaleway/platform-apps
+      helm:
+        valueFiles:
+          - values-secrets.yaml
+        parameters:
+          - name: revision
+            value: ${var.gitops_revision}
+    destination:
+      server: https://kubernetes.default.svc
+      namespace: argocd
+    syncPolicy:
+      retry:
+        limit: 10
+      automated:
+        prune: true
+        selfHeal: true
+      syncOptions:
+        - CreateNamespace=true
+
+  monitoring-apps:
+    namespace: argocd
+    project: default
+    source:
+      repoURL: https://github.com/IntegratedDynamic/infrastructure.git
+      targetRevision: ${var.infra_revision}
+      path: 10-cluster/scaleway/platform-apps
+      helm:
+        valueFiles:
+          - values-monitoring.yaml
+        parameters:
+          - name: revision
+            value: ${var.gitops_revision}
+    destination:
+      server: https://kubernetes.default.svc
+      namespace: argocd
+    syncPolicy:
+      retry:
+        limit: 10
+      automated:
+        prune: true
+        selfHeal: true
+      syncOptions:
+        - CreateNamespace=true
+
+  backups-apps:
+    namespace: argocd
+    project: default
+    source:
+      repoURL: https://github.com/IntegratedDynamic/infrastructure.git
+      targetRevision: ${var.infra_revision}
+      path: 10-cluster/scaleway/platform-apps
+      helm:
+        valueFiles:
+          - values-backups.yaml
+        parameters:
+          - name: revision
+            value: ${var.gitops_revision}
+    destination:
+      server: https://kubernetes.default.svc
+      namespace: argocd
+    syncPolicy:
+      retry:
+        limit: 10
+      automated:
+        prune: true
+        selfHeal: true
+      syncOptions:
+        - CreateNamespace=true
+EOF
+  ]
+}
+
+# Self-contained kubeconfig for the health-wait below — deliberately NOT the
+# ~/.kube/config context null_resource.update_kubeconfig (main.tf) manages,
+# since that resource is opt-in (var.update_kubeconfig, "mainly for local
+# debugging") and this wait must work unconditionally, in CI or locally.
+resource "local_sensitive_file" "platform_apps_wait_kubeconfig" {
+  filename = "${path.module}/.terraform/tmp-platform-apps-wait-kubeconfig.yaml"
+
+  content = <<-EOT
+    apiVersion: v1
+    kind: Config
+    clusters:
+      - name: wait-cluster
+        cluster:
+          server: ${scaleway_k8s_cluster.this.kubeconfig[0].host}
+          certificate-authority-data: ${scaleway_k8s_cluster.this.kubeconfig[0].cluster_ca_certificate}
+    contexts:
+      - name: wait-context
+        context:
+          cluster: wait-cluster
+          user: wait-user
+    current-context: wait-context
+    users:
+      - name: wait-user
+        user:
+          token: ${scaleway_k8s_cluster.this.kubeconfig[0].token}
+  EOT
+
+  file_permission = "0600"
+}
+
+# The Terraform-enforced prerequisite itself: secrets-apps/monitoring-apps/
+# backups-apps must all reach Healthy before bootstrap's own Application
+# resource is even created (see that resource's depends_on above) — ArgoCD
+# has no native way to express "wait for these independent top-level
+# Applications" (sync-wave doesn't cross Application boundaries), so this is
+# enforced as a real Terraform apply-order dependency instead. Polls rather
+# than a single `kubectl wait --for=jsonpath=...`, since that fails
+# immediately (not "waits") when `.status.health` doesn't exist yet at all —
+# which is true for the first several seconds of a brand new Application.
+resource "null_resource" "wait_platform_apps_healthy" {
+  depends_on = [helm_release.argocd_platform_apps]
+
+  triggers = {
+    # Re-run the wait whenever the platform apps are re-applied.
+    platform_apps = helm_release.argocd_platform_apps.metadata.revision
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      set -eu
+      export KUBECONFIG=${local_sensitive_file.platform_apps_wait_kubeconfig.filename}
+      for app in secrets-apps monitoring-apps backups-apps; do
+        echo "Waiting for Application/$app to become Healthy..."
+        deadline=$(($(date +%s) + 600))
+        while true; do
+          status=$(kubectl get application "$app" -n argocd -o jsonpath='{.status.health.status}' 2>/dev/null || true)
+          if [ "$status" = "Healthy" ]; then
+            echo "Application/$app is Healthy."
+            break
+          fi
+          if [ "$(date +%s)" -ge "$deadline" ]; then
+            echo "Timed out waiting for Application/$app to become Healthy (last status: '$status')." >&2
+            exit 1
+          fi
+          sleep 5
+        done
+      done
+    EOT
+  }
 }
