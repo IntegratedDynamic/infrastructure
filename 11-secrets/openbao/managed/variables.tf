@@ -56,12 +56,12 @@ variable "secrets_sync_github" {
 }
 
 # See version.tf's provider "vault" block for the three real addresses this
-# resolves to (public route / in-cluster Service / port-forward) and which
+# resolves to (in-cluster Service / port-forward / public route) and which
 # execution context uses each.
 variable "vault_address" {
   description = "Address the vault provider authenticates against."
   type        = string
-  default     = "https://openbao.scalepack.fr/"
+  default     = "http://openbao.openbao.svc:8200/"
 }
 
 # ── Cross-root state reads (Scaleway state buckets, see 00-foundation/scaleway) ──

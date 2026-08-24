@@ -64,26 +64,27 @@ data "terraform_remote_state" "openbao_bootstrap" {
 # not Vault's VAULT_ADDR/VAULT_TOKEN, so relying on the env var is a trap (see
 # the bootstrap root's version.tf/README for the incident this came from).
 provider "vault" {
-  # Defaults to OpenBao's public route — same hostname whether or not the
-  # WireGuard tunnel is up, on purpose: split-DNS (the tunnel's dns
-  # sidecar, gitops repo's services/platform/wireguard/config) resolves
-  # this to the tunnel's own address (04-vpn/wireguard) while it's up,
-  # routing privately through Envoy Gateway's real Service (proxy-gateway
-  # sidecar) instead of the public internet. Same address either way —
-  # bring the tunnel up first (`wg-quick up <peer_conf_paths output>`), or
-  # this just hits the real public route (fine; that's still there for
-  # human OIDC/UI login, this provider just doesn't need it anymore).
+  # Defaults to the same internal Service address Argo Workflows already
+  # uses in-cluster (http://openbao.openbao.svc:8200, matches
+  # services/platform/openbao/init's baoAddr) — since infrastructure#81,
+  # reachable here too through the WireGuard tunnel's internal-cluster DNS +
+  # proxyTargets (04-vpn/wireguard-site-to-site/README.md's "Internal
+  # cluster DNS" section) instead of the public route. Bring the tunnel up
+  # first (`wg-quick up <peer_conf_paths output>`).
   #
   # Overridden via -var for the two other real execution contexts this root
   # runs in: the Argo Workflows CronWorkflow (gitops repo
-  # services/platform/argo-workflows) passes the in-cluster Service address
-  # (http://openbao.openbao.svc:8200, matches services/platform/openbao/
-  # init's baoAddr) — the whole reason that CronWorkflow exists is OpenBao
-  # not being reachable from outside the cluster for a while after boot, so
-  # it never needs the tunnel/public-route dance below. A direct port-
-  # forward (`kubectl port-forward -n openbao openbao-0 8200:8200`,
-  # requires Kubernetes permissions) is the third: -var
-  # vault_address=http://127.0.0.1:8200/.
+  # services/platform/argo-workflows) passes this same address directly
+  # (-var vault_address=http://openbao.openbao.svc:8200/ — redundant with
+  # the default now, kept explicit in that chart's values since it's the
+  # whole reason that CronWorkflow exists: OpenBao not being reachable from
+  # outside the cluster for a while after boot, so it can't depend on this
+  # default ever changing back). A direct port-forward (`kubectl
+  # port-forward -n openbao openbao-0 8200:8200`, requires Kubernetes
+  # permissions) is the third, for when the tunnel itself is the thing
+  # being debugged: -var vault_address=http://127.0.0.1:8200/. The public
+  # route (https://openbao.scalepack.fr/) still works too — that's still
+  # there for human OIDC/UI login — just isn't the default anymore.
   address = var.vault_address
 
   # address = "http://127.0.0.1:8200"
