@@ -24,5 +24,5 @@ variable "openbao_managed_state_key" {
 variable "grafana_url" {
   description = "URL the grafana provider authenticates against."
   type        = string
-  default     = "https://grafana.scalepack.fr/"
+  default     = "http://grafana.monitoring.svc:80/"
 }

@@ -48,11 +48,16 @@ Terraform-managed by `11-secrets/openbao/managed`
 
 - **`grafana` provider**: authenticates as Grafana's admin via basic auth
   (`"admin:${password}"`), password read straight from
-  `11-secrets/openbao/managed`'s state — see `version.tf`. Public route
-  (`https://grafana.scalepack.fr/`): Grafana's basic-auth API path isn't
-  gated behind the shared sso-guard edge policy (gitops repo's
-  `services/platform/monitoring/grafana-gateway` deliberately bypasses it,
-  same as OpenBao's own public route), so no WireGuard tunnel is needed.
+  `11-secrets/openbao/managed`'s state — see `version.tf`. Defaults to
+  Grafana's internal Service address (`http://grafana.monitoring.svc:80/`),
+  reachable via the WireGuard tunnel's internal-cluster DNS + proxy-dynamic
+  sidecar (`04-vpn/wireguard-site-to-site/README.md`, infrastructure#81) — same
+  pattern as the `vault` provider's own default. The public route
+  (`https://grafana.scalepack.fr/`) still works too if the tunnel isn't up:
+  Grafana's basic-auth API path isn't gated behind the shared sso-guard edge
+  policy (gitops repo's `services/platform/monitoring/grafana-gateway`
+  deliberately bypasses it), same as OpenBao's own public route — just
+  isn't the default anymore.
 - **S3 state backend**: same AWS-style env vars as every other root (via
   `mise.toml`'s `[env]` block).
 

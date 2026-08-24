@@ -68,8 +68,8 @@ provider "vault" {
   # uses in-cluster (http://openbao.openbao.svc:8200, matches
   # services/platform/openbao/init's baoAddr) — since infrastructure#81,
   # reachable here too through the WireGuard tunnel's internal-cluster DNS +
-  # proxyTargets (04-vpn/wireguard-site-to-site/README.md's "Internal
-  # cluster DNS" section) instead of the public route. Bring the tunnel up
+  # proxy-dynamic sidecar (04-vpn/wireguard-site-to-site/README.md's
+  # "Internal cluster DNS" section) instead of the public route. Bring the tunnel up
   # first (`wg-quick up <peer_conf_paths output>`).
   #
   # Overridden via -var for the two other real execution contexts this root

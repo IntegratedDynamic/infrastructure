@@ -42,8 +42,8 @@ terraform {
 provider "vault" {
   # Same internal Service address Argo Workflows already uses in-cluster
   # (gitops repo's services/platform/argo-workflows), reachable here through
-  # the WireGuard tunnel's internal-cluster DNS + proxyTargets (04-vpn/
-  # wireguard-site-to-site/README.md's "Internal cluster DNS" section,
+  # the WireGuard tunnel's internal-cluster DNS + proxy-dynamic sidecar
+  # (04-vpn/wireguard-site-to-site/README.md's "Internal cluster DNS" section,
   # infrastructure#81) — bring the tunnel up first (`wg-quick up
   # <peer_conf_paths output>`). No -var override exists for this root (it
   # only ever runs admin-applied locally, never in CI or in-cluster, unlike
