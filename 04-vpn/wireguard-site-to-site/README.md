@@ -93,20 +93,46 @@ whichever node currently has a live pod), so `wg.scalepack.fr` — the
 other `*.scalepack.fr` hostname in this cluster already relies on. See
 that chart's `templates/service.yaml` annotation.
 
-## Why the tunnel doesn't route to OpenBao's ClusterIP directly
+## Why the tunnel doesn't route to internal ClusterIPs directly
 
-An earlier design routed/NAT'd traffic to OpenBao's `ClusterIP` at the
+An earlier design routed/NAT'd traffic to a target's `ClusterIP` at the
 kernel level (`net.ipv4.ip_forward` + `iptables` MASQUERADE) — a dead end:
 Kapsule's kubelet doesn't allowlist that sysctl, and Scaleway's
 `kubelet_args` API refuses to widen the allowlist for this cluster's k8s
 version at all. Even where available, that's a cluster-wide relaxation for
 one workload's benefit — worth avoiding regardless.
 
-The gitops chart instead terminates the tunnel and proxies to OpenBao at
-the application layer (a `socat` sidecar resolving
-`openbao.openbao.svc.cluster.local` via ordinary in-cluster DNS) — no
-kernel routing, no sysctls, no dependency on OpenBao's `ClusterIP` being
-stable across a cluster rebuild.
+The gitops chart instead terminates the tunnel and proxies to each target
+at the application layer (`proxyTargets`, one `socat` sidecar per entry,
+resolving its target — e.g. `openbao.openbao.svc.cluster.local` — via
+ordinary in-cluster DNS) — no kernel routing, no sysctls, no dependency on
+any `ClusterIP` being stable across a cluster rebuild. This is also why DNS
+resolution alone (see "Internal cluster DNS" below) doesn't make an
+*arbitrary* internal address reachable: a peer's traffic still needs a
+listener on the tunnel pod for the specific target port, so a new address
+means adding a `proxyTargets` entry, not just a DNS answer.
+
+## Internal cluster DNS
+
+The tunnel server's `dns` sidecar (gitops repo's
+`services/platform/wireguard-site-to-site/config`, `dnsInternalZones`)
+answers any hostname under the `svc` or `cluster.local` suffixes with its
+own tunnel address, instead of one hostname hardcoded per target — so a
+peer resolves any internal Service name generically (both the full
+`<name>.<namespace>.svc.cluster.local` form and the short
+`<name>.<namespace>.svc` form Argo Workflows already uses in-cluster).
+`*.scalepack.fr` split-DNS and the `proxy-gateway` sidecar it fed (SNI
+passthrough to Envoy Gateway, for OIDC-gated web UIs) were removed
+2026-08-24 (infrastructure#81) — this domain is for machine credentials
+reaching an internal API, not human OIDC/UI login, which stays on the
+public route untouched.
+
+With the tunnel up, `dig openbao.openbao.svc.cluster.local` should resolve
+to the tunnel's own address and `curl
+http://openbao.openbao.svc.cluster.local:8200/v1/sys/health` should reach
+OpenBao through the full chain (tunnel → gitops's `proxy-openbao` sidecar →
+OpenBao's Service) — the same address `11-secrets/openbao/{bootstrap,managed}`
+now default to (see their `version.tf`/`variables.tf`).
 
 ## Why its own domain, and why it's temporary
 

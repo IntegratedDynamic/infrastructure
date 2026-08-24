@@ -26,11 +26,15 @@ data "wireguard_config_document" "peer" {
   private_key = wireguard_asymmetric_key.peer[each.key].private_key
   addresses   = [each.value.address]
   # Split DNS: the tunnel server's own `dns` sidecar (gitops repo's
-  # services/platform/wireguard/config) answers *.scalepack.fr with its own
-  # tunnel address while forwarding everything else upstream — so every
-  # OIDC-gated app (Grafana, ArgoCD, ...) works over the tunnel using its
-  # real hostname, scoped to exactly this interface's lifetime (nothing to
-  # revert when the tunnel goes down, unlike an /etc/hosts edit).
+  # services/platform/wireguard-site-to-site/config, dnsInternalZones) answers
+  # internal-cluster hostnames (the "svc" / "cluster.local" suffixes — any
+  # Service in any namespace, e.g. openbao.openbao.svc.cluster.local) with
+  # its own tunnel address while forwarding everything else upstream — so a
+  # peer reaches any internal address using its real Service hostname,
+  # scoped to exactly this interface's lifetime (nothing to revert when the
+  # tunnel goes down, unlike an /etc/hosts edit). Resolving the name only
+  # gets a peer to the tunnel pod — that chart's proxyTargets is what
+  # actually forwards the traffic on to the real Service (infrastructure#81).
   dns = [split("/", var.server_address)[0]]
 
   peer {

@@ -40,10 +40,16 @@ terraform {
 # session doesn't populate the env var this hashicorp/vault provider expects.
 # Only the token stays in the environment — see README.
 provider "vault" {
-  # Same hostname as the public route, resolved through the WireGuard
-  # tunnel via split-DNS while it's up — see
-  # 11-secrets/openbao/managed/version.tf's comment for the full rationale.
-  address = "https://openbao.scalepack.fr/"
+  # Same internal Service address Argo Workflows already uses in-cluster
+  # (gitops repo's services/platform/argo-workflows), reachable here through
+  # the WireGuard tunnel's internal-cluster DNS + proxyTargets (04-vpn/
+  # wireguard-site-to-site/README.md's "Internal cluster DNS" section,
+  # infrastructure#81) — bring the tunnel up first (`wg-quick up
+  # <peer_conf_paths output>`). No -var override exists for this root (it
+  # only ever runs admin-applied locally, never in CI or in-cluster, unlike
+  # 11-secrets/openbao/managed's var.vault_address), so this is hardcoded
+  # the same way the previous public-route default was.
+  address = "http://openbao.openbao.svc:8200/"
   # address = "http://127.0.0.1:8200/"  # kubectl port-forward, independent of the tunnel
   # token = var.root_token
 }
