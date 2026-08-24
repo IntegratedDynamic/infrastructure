@@ -1,10 +1,21 @@
 terraform {
   # Migrated to the dedicated Scaleway state bucket (00-foundation/scaleway,
   # state_buckets["monitoring_grafana_managed"]).
+  #
+  # Prefix + workspace name now mirror this root's own path (2026-08-24
+  # workspace-naming refacto, which also moved this domain from
+  # 06-monitoring to 12-monitoring — postdating 10-cluster) — used to be
+  # "monitoring/managed/grafana" / "06-monitoring-grafana" (segment order
+  # didn't even match the directory path, and this workspace name literally
+  # collided with the bootstrap root's — different buckets, so no actual
+  # clash, but confusing). No terraform.workspace naming coupling in this
+  # root, so this is a plain state relocation, zero resource impact. Old
+  # state object left in place under the old prefix/workspace, orphaned on
+  # purpose (never deleted).
   backend "s3" {
     bucket                      = "id-terraform-state-06-monitoring-grafana-managed"
     region                      = "fr-par"
-    workspace_key_prefix        = "monitoring/managed/grafana"
+    workspace_key_prefix        = "12-monitoring/grafana/managed"
     key                         = "terraform.tfstate"
     encrypt                     = true
     use_lockfile                = true
