@@ -70,8 +70,8 @@ description = "Write your own WireGuard config to disk (never anyone else's)"
 dir = "04-vpn/wireguard-site-to-site"
 run = """
 terraform init
-terraform workspace select -or-create 04-network-wireguard
-terraform apply -var-file=env/04-network-wireguard.tfvars
+terraform workspace select -or-create 04-vpn-wireguard-site-to-site-dev
+terraform apply -var-file=env/04-vpn-wireguard-site-to-site-dev.tfvars
 mkdir -p generated
 terraform output -json peer_confs | jq -r --arg peer "${usage_peer?}" '.[$peer]' > "generated/${usage_peer?}.conf"
 chmod 600 "generated/${usage_peer?}.conf"
@@ -109,8 +109,8 @@ description = "Write your own WireGuard exit-node config to disk (never anyone e
 dir = "04-vpn/wireguard-exit"
 run = """
 terraform init
-terraform workspace select -or-create 04-network-wireguard-exit
-terraform apply -var-file=env/04-network-wireguard-exit.tfvars
+terraform workspace select -or-create 04-vpn-wireguard-exit-dev
+terraform apply -var-file=env/04-vpn-wireguard-exit-dev.tfvars
 mkdir -p generated
 terraform output -json peer_confs | jq -r --arg peer "${usage_peer?}" '.[$peer]' > "generated/${usage_peer?}.conf"
 chmod 600 "generated/${usage_peer?}.conf"
@@ -181,7 +181,10 @@ terraform -chdir=02-encryption/aws                  providers lock -platform=dar
 terraform -chdir=03-storage/scaleway                providers lock -platform=darwin_arm64 -platform=linux_amd64
 terraform -chdir=04-vpn/wireguard-site-to-site      providers lock -platform=darwin_arm64 -platform=linux_amd64
 terraform -chdir=04-vpn/wireguard-exit              providers lock -platform=darwin_arm64 -platform=linux_amd64
-terraform -chdir=05-secrets/openbao/bootstrap        providers lock -platform=darwin_arm64 -platform=linux_amd64
 terraform -chdir=10-cluster/local                   providers lock -platform=darwin_arm64 -platform=linux_amd64
 terraform -chdir=10-cluster/scaleway                providers lock -platform=darwin_arm64 -platform=linux_amd64
+terraform -chdir=11-secrets/openbao/bootstrap        providers lock -platform=darwin_arm64 -platform=linux_amd64
+terraform -chdir=11-secrets/openbao/managed          providers lock -platform=darwin_arm64 -platform=linux_amd64
+terraform -chdir=12-monitoring/grafana/bootstrap     providers lock -platform=darwin_arm64 -platform=linux_amd64
+terraform -chdir=12-monitoring/grafana/managed       providers lock -platform=darwin_arm64 -platform=linux_amd64
 """

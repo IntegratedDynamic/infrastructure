@@ -17,7 +17,7 @@ inputs:
     required: true
   tfvars-file:
     description: >
-      Filename of the .tfvars under env/ (e.g. 02-cluster-staging.tfvars).
+      Filename of the .tfvars under env/ (e.g. 10-cluster-scaleway-dev.tfvars).
       Workspace name is derived by stripping the .tfvars extension.
     required: true
   command:
