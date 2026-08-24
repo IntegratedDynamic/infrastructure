@@ -1,5 +1,5 @@
 # 0 = never expires (Grafana's own sentinel for seconds_to_live) — unlike
-# secret_id_ttl_days in 05-secrets/openbao/bootstrap, no forced rotation
+# secret_id_ttl_days in 11-secrets/openbao/bootstrap, no forced rotation
 # window by default for this low-stakes, single-consumer identity. Set a
 # positive value here to opt into rotation.
 variable "service_account_token_ttl_days" {
@@ -11,12 +11,12 @@ variable "service_account_token_ttl_days" {
 # ── Cross-root state reads (Scaleway state buckets, see 00-foundation/scaleway) ──
 
 variable "openbao_managed_state_bucket" {
-  description = "Scaleway bucket holding 05-secrets/openbao/managed's remote state."
+  description = "Scaleway bucket holding 11-secrets/openbao/managed's remote state."
   type        = string
 }
 
 variable "openbao_managed_state_key" {
-  description = "Object key for 05-secrets/openbao/managed's state within openbao_managed_state_bucket."
+  description = "Object key for 11-secrets/openbao/managed's state within openbao_managed_state_bucket."
   type        = string
 }
 

@@ -3,10 +3,14 @@
 Renamed from `04-vpn/wireguard` once a second, unrelated WireGuard
 deployment (`04-vpn/wireguard-exit` — a consumer-style exit node, all of a
 peer's traffic routed through the cluster, not just OpenBao) showed up
-alongside it. Pure directory rename — `workspace_key_prefix` and this root's
-`env/04-network-wireguard.tfvars` filename/workspace name are untouched, so
-it needed zero state migration (see root `CLAUDE.md`'s "Backend keys are
-decoupled from paths").
+alongside it. That directory rename was a pure `git mv` — `workspace_key_prefix`
+and the tfvars filename/workspace name were left untouched at the time, so it
+needed zero state migration.
+
+`workspace_key_prefix` and the workspace name (`env/04-vpn-wireguard-site-to-site-dev.tfvars`)
+now mirror this root's own path (2026-08-24 workspace-naming refacto — this
+one *did* need a real state migration, since the prefix/workspace were
+changing; see root `CLAUDE.md`'s "Backend keys are decoupled from paths").
 
 ## Connect
 
@@ -27,7 +31,7 @@ configs already living in its own config directory, not ones Terraform
 generates here.
 
 Adding a new peer: add an entry to `var.peers` (both `variables.tf`'s
-default and `env/04-network-wireguard.tfvars`), `mise run vpn-generate`,
+default and `env/04-vpn-wireguard-site-to-site-dev.tfvars`), `mise run vpn-generate`,
 then do the manual hand-offs below for just that new entry.
 
 ## Manual hand-offs — hardcoded cross-repo coupling to track
@@ -35,21 +39,21 @@ then do the manual hand-offs below for just that new entry.
 Nothing here talks to the gitops repo or to OpenBao directly. Every row is
 a human copying a `terraform output` value somewhere else — same "two
 systems kept in sync by convention, not automation" pattern as
-`05-secrets/openbao/managed`'s `secrets_sync_github` vs. the gitops repo's
+`11-secrets/openbao/managed`'s `secrets_sync_github` vs. the gitops repo's
 `apps/secrets-sync/values.yaml`. Accepted for now; each row is a spot that
 silently breaks if only one side changes.
 
 | Value | From | To | Why manual |
 |---|---|---|---|
 | `server_public_key`, `peer_public_keys` (not secret) | this root's outputs | gitops `services/platform/wireguard-site-to-site/config/values-scaleway.yaml` | no cross-repo automation exists anywhere in this setup |
-| `server_private_key` (sensitive) | this root's output | `05-secrets/openbao/managed`'s `wireguard_server_private_key` (`local.auto.tfvars`) → `kv/apps/wireguard/server-key` → gitops `wireguard-init`'s ExternalSecret | same |
-| `peer_private_keys["ci-github-actions"]` (sensitive) | this root's output | `05-secrets/openbao/managed`'s `wireguard_ci_private_key` → merged into the *existing* `kv/apps/secrets-sync/github/infrastructure-scaleway` object (not its own KV path — nothing reads that) → secrets-sync → GitHub Actions secret | same; direction is OpenBao→GitHub via in-cluster ESO, so CI never needs the tunnel to fetch its own tunnel key |
+| `server_private_key` (sensitive) | this root's output | `11-secrets/openbao/managed`'s `wireguard_server_private_key` (`local.auto.tfvars`) → `kv/apps/wireguard/server-key` → gitops `wireguard-init`'s ExternalSecret | same |
+| `peer_private_keys["ci-github-actions"]` (sensitive) | this root's output | `11-secrets/openbao/managed`'s `wireguard_ci_private_key` → merged into the *existing* `kv/apps/secrets-sync/github/infrastructure-scaleway` object (not its own KV path — nothing reads that) → secrets-sync → GitHub Actions secret | same; direction is OpenBao→GitHub via in-cluster ESO, so CI never needs the tunnel to fetch its own tunnel key |
 | every other peer's private key | this root's output | that peer's own machine only (`generated/<name>.conf`) | never touches OpenBao or git, by design |
 | NodePort `30820` | gitops `services/platform/wireguard-site-to-site/config/values.yaml` `server.nodePort` | infra `10-cluster/scaleway/main.tf`'s security group rule, **and** this root's `wg_endpoint` port | two independent files, must match exactly |
 
 ## Why this exists
 
-`05-secrets/openbao/{bootstrap,managed}`'s `vault` provider needs a network
+`11-secrets/openbao/{bootstrap,managed}`'s `vault` provider needs a network
 path to OpenBao's API — this root exists so that path can be a self-hosted
 tunnel instead of the public gateway route (`openbao.scalepack.fr`), which
 stays public only for a separate, legitimate reason: human OIDC/UI login
@@ -106,7 +110,7 @@ stable across a cluster rebuild.
 
 ## Why its own domain, and why it's temporary
 
-Identities normally live in `01-iam/`, secrets in `05-secrets/`. Neither
+Identities normally live in `01-iam/`, secrets in `11-secrets/`. Neither
 fits a WireGuard peer well: it isn't a cloud-provider IAM identity, and a
 keypair's public half isn't a secret at all. Placeholder domain of its
 own, explicitly temporary — expect this to fold into `01-iam/workload/` (or

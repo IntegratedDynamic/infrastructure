@@ -2,7 +2,7 @@
 
 Encryption exists to protect data from unauthorized access — and the most
 critical data to protect is your secrets. **OpenBao** was picked to hold
-those secrets (`05-secrets/openbao`) — open source, mature, and well
+those secrets (`11-secrets/openbao`) — open source, mature, and well
 integrated with Kubernetes.
 
 To stay concise: OpenBao needs an encryption key — think of it as a master

@@ -103,10 +103,10 @@ variable "wireguard_exit_state_key" {
 }
 
 variable "openbao_bootstrap_state_bucket" {
-  description = "Scaleway bucket holding 05-secrets/openbao/bootstrap's remote state."
+  description = "Scaleway bucket holding 11-secrets/openbao/bootstrap's remote state."
   type        = string
 }
 variable "openbao_bootstrap_state_key" {
-  description = "Object key for 05-secrets/openbao/bootstrap's state within openbao_bootstrap_state_bucket."
+  description = "Object key for 11-secrets/openbao/bootstrap's state within openbao_bootstrap_state_bucket."
   type        = string
 }

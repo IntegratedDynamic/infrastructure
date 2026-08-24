@@ -50,7 +50,7 @@ gitops repo or to OpenBao directly.
 | Value | From | To | Why manual |
 |---|---|---|---|
 | `server_public_key`, `peer_public_keys` (not secret) | this root's outputs | gitops `services/platform/wireguard-exit/config/values-scaleway.yaml` | no cross-repo automation exists anywhere in this setup |
-| `server_private_key` (sensitive) | this root's output | `05-secrets/openbao/managed`'s exit-node key resource → `kv/apps/wireguard-exit/server-key` → gitops `wireguard-exit-secret`'s ExternalSecret | same |
+| `server_private_key` (sensitive) | this root's output | `11-secrets/openbao/managed`'s exit-node key resource → `kv/apps/wireguard-exit/server-key` → gitops `wireguard-exit-secret`'s ExternalSecret | same |
 | every peer's private key | this root's output | that peer's own machine only (`generated/<name>.conf`) | never touches OpenBao or git, by design |
 | NodePort `30821` | gitops `services/platform/wireguard-exit/config/values.yaml` `server.nodePort` | infra `10-cluster/scaleway/main.tf`'s security group rule, **and** this root's `wg_endpoint` port | two independent files, must match exactly — one port after the site-to-site tunnel's `30820` |
 | egress interface `ens2` | gitops `services/platform/wireguard-exit/config/values-scaleway.yaml` `egressInterface` | this root's README (below) | Kapsule node-image specific; confirmed live via `kubectl exec` into an existing Cilium pod (`ip route get 1.1.1.1` → `dev ens2`) — re-verify if Scaleway ever changes the node image's interface naming |

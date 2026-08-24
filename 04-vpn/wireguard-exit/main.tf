@@ -1,5 +1,5 @@
 # The exit-node server's own keypair — one per cluster, not per peer.
-# Private key hands off to 05-secrets/openbao/managed (kv/apps/wireguard-exit/
+# Private key hands off to 11-secrets/openbao/managed (kv/apps/wireguard-exit/
 # server-key), which ESO then materializes into the gitops repo's
 # services/platform/wireguard-exit Deployment. Public key is non-secret —
 # copy it into that same chart's values (it's the identity peers dial, not a
@@ -7,7 +7,7 @@
 resource "wireguard_asymmetric_key" "server" {}
 
 # One keypair per peer in var.peers. Public keys are non-secret — routed
-# through 05-secrets/openbao/managed into the gitops repo's peer allowlist.
+# through 11-secrets/openbao/managed into the gitops repo's peer allowlist.
 # Private keys: every entry is a human peer's own credential — see
 # outputs.tf's peer_confs for why that never gets written to disk by this
 # root itself.

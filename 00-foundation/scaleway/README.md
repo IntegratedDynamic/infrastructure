@@ -98,9 +98,9 @@ was purely this rehearsal). Findings:
 to every real root in one session: `01-iam/bootstrap/aws`,
 `01-iam/bootstrap/scaleway`, `01-iam/workload/scaleway`, `02-encryption/aws`,
 `03-storage/scaleway`, `04-vpn/wireguard-exit`,
-`04-vpn/wireguard-site-to-site`, `05-secrets/openbao/bootstrap`,
-`05-secrets/openbao/managed`, `06-monitoring/grafana/bootstrap`,
-`06-monitoring/grafana/managed`, `10-cluster/scaleway`, plus this root
+`04-vpn/wireguard-site-to-site`, `11-secrets/openbao/bootstrap`,
+`11-secrets/openbao/managed`, `12-monitoring/grafana/bootstrap`,
+`12-monitoring/grafana/managed`, `10-cluster/scaleway`, plus this root
 itself. Every `data "terraform_remote_state"` cross-root read (~11 of them)
 was repointed and parametrized too — bucket/key are now variables set in
 `env/*.tfvars`, not hardcoded literals. `10-cluster/local` has no backend of
@@ -184,8 +184,8 @@ action doesn't use any of this yet — see the follow-up above).
 
 Every `data "terraform_remote_state"` reading a Scaleway-hosted bucket (see
 "Real rollout" above — `10-cluster/local`, `10-cluster/scaleway`,
-`05-secrets/openbao/managed`, `06-monitoring/grafana/bootstrap`,
-`06-monitoring/grafana/managed`) authenticates via a `data "external"`
+`11-secrets/openbao/managed`, `12-monitoring/grafana/bootstrap`,
+`12-monitoring/grafana/managed`) authenticates via a `data "external"`
 block that shells out to `scw config get access-key`/`secret-key` — the
 *exact same* credentials `provider "scaleway" {}` already uses implicitly
 everywhere in this repo. An admin who already has `scw` configured (already

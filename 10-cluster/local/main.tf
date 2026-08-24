@@ -43,7 +43,7 @@ locals {
 }
 
 # scaleway-s3-credentials source: 03-storage/scaleway's "backup" bucket + its
-# scoped workload identity. Same remote state key 05-secrets/openbao/managed
+# scoped workload identity. Same remote state key 11-secrets/openbao/managed
 # reads as its own `backup_scaleway` data source.
 data "terraform_remote_state" "backup_scaleway" {
   backend = "s3"

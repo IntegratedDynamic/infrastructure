@@ -41,7 +41,7 @@ terraform {
   }
 }
 
-# 06-monitoring/grafana/bootstrap's own state — the terraform service
+# 12-monitoring/grafana/bootstrap's own state — the terraform service
 # account token this root authenticates as. Cross-root remote-state read,
 # not a hand-copied value, same convention as every other cross-root
 # credential in this repo.
@@ -55,7 +55,7 @@ terraform {
 # cross-root state read below with a confusing "No valid credential
 # sources found" error instead of failing at the actual source. Env vars
 # now win when set; falling back to `scw config get` keeps the admin path
-# exactly as it was. Same fix as 05-secrets/openbao/managed/main.tf's
+# exactly as it was. Same fix as 11-secrets/openbao/managed/main.tf's
 # identical comment.
 data "external" "scw_credentials" {
   program = ["sh", "-c", <<-EOT

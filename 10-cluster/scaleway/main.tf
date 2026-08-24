@@ -53,7 +53,7 @@ resource "scaleway_k8s_cluster" "this" {
 #
 # COUPLING: each port below must match its gitops chart's
 # server.nodePort exactly — same "two systems kept in sync by convention"
-# pattern already used for 05-secrets/openbao/managed's secrets_sync_github
+# pattern already used for 11-secrets/openbao/managed's secrets_sync_github
 # vs. that repo's apps/secrets-sync/values.yaml. Changing one without the
 # other silently breaks the tunnel again, the same way this whole
 # investigation started.
@@ -138,7 +138,7 @@ resource "null_resource" "update_kubeconfig" {
 # SCW_ACCESS_KEY/SCW_SECRET_KEY as job env (for `provider "scaleway" {}`)
 # but had no way to hand them to this data source — env vars now win when
 # set, falling back to `scw config get` for the admin path. Same fix as
-# 05-secrets/openbao/managed/main.tf's identical comment (that root's own
+# 11-secrets/openbao/managed/main.tf's identical comment (that root's own
 # CronWorkflow prompted finding this one too — see infra PR #66).
 data "external" "scw_credentials" {
   program = ["sh", "-c", <<-EOT
@@ -173,7 +173,7 @@ locals {
 }
 
 # scaleway-s3-credentials source: 03-storage/scaleway's "backup" bucket + its
-# scoped workload identity. Same remote state key 05-secrets/openbao/managed
+# scoped workload identity. Same remote state key 11-secrets/openbao/managed
 # reads as its own `backup_scaleway` data source.
 data "terraform_remote_state" "backup_scaleway" {
   backend = "s3"

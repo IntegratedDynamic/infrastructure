@@ -4,13 +4,13 @@ output "server_public_key" {
 }
 
 output "server_private_key" {
-  description = "WireGuard exit-node server private key — sensitive. Read directly by 05-secrets/openbao/managed via terraform_remote_state (kv/apps/wireguard-exit/server-key). Never committed here."
+  description = "WireGuard exit-node server private key — sensitive. Read directly by 11-secrets/openbao/managed via terraform_remote_state (kv/apps/wireguard-exit/server-key). Never committed here."
   value       = wireguard_asymmetric_key.server.private_key
   sensitive   = true
 }
 
 output "peer_public_keys" {
-  description = "peer name -> public key. Non-secret. Read (with peer_addresses) by 05-secrets/openbao/managed via terraform_remote_state into kv/apps/wireguard-exit/peers, which the gitops repo's services/platform/wireguard-exit/secret syncs down — nothing hardcodes these."
+  description = "peer name -> public key. Non-secret. Read (with peer_addresses) by 11-secrets/openbao/managed via terraform_remote_state into kv/apps/wireguard-exit/peers, which the gitops repo's services/platform/wireguard-exit/secret syncs down — nothing hardcodes these."
   value       = { for name, key in wireguard_asymmetric_key.peer : name => key.public_key }
 }
 

@@ -373,7 +373,7 @@ resource "vault_kv_secret_v2" "secrets_sync_github_infrastructure_scaleway" {
       SCW_SECRET_KEY = data.terraform_remote_state.dns_scaleway.outputs.workload_secret_key
       # CI's own WireGuard peer key — brings up the tunnel to OpenBao
       # before CI's own `terraform plan/apply` on
-      # 05-secrets/openbao/{bootstrap,managed}. Read straight from
+      # 11-secrets/openbao/{bootstrap,managed}. Read straight from
       # 04-vpn/wireguard's state, no local.auto.tfvars copy-paste — same
       # as SCW_ACCESS_KEY/SCW_SECRET_KEY above.
       WG_CI_PRIVATE_KEY = data.terraform_remote_state.wireguard.outputs.peer_private_keys["ci-github-actions"]
