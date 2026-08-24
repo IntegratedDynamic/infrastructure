@@ -344,7 +344,7 @@ resource "helm_release" "argocd_apps" {
   # prerequisite: bootstrap's Application must not even be created until
   # secrets-apps/monitoring-apps/backups-apps/networking-apps are Healthy —
   # see platform-apps/README.md.
-  depends_on = [helm_release.argocd, null_resource.wait_platform_apps_healthy]
+  depends_on = [helm_release.argocd, kubernetes_job_v1.wait_platform_apps_healthy]
 
   values = [<<EOF
 applications:
@@ -515,74 +515,137 @@ EOF
   ]
 }
 
-# Self-contained kubeconfig for the health-wait below — deliberately NOT the
-# ~/.kube/config context null_resource.update_kubeconfig (main.tf) manages,
-# since that resource is opt-in (var.update_kubeconfig, "mainly for local
-# debugging") and this wait must work unconditionally, in CI or locally.
-resource "local_sensitive_file" "platform_apps_wait_kubeconfig" {
-  filename = "${path.module}/.terraform/tmp-platform-apps-wait-kubeconfig.yaml"
+# RBAC for the health-wait Job below — scoped to exactly what it needs
+# (read-only on Applications in the argocd namespace), nothing broader.
+# Runs as a real in-cluster Job via the Kubernetes API instead of a
+# local-exec provisioner: no dependency on a local `kubectl` binary or a
+# self-generated kubeconfig, works identically whether this root is applied
+# from an admin's machine or CI.
+resource "kubernetes_service_account" "wait_platform_apps" {
+  metadata {
+    name      = "wait-platform-apps-healthy"
+    namespace = "argocd"
+  }
+}
 
-  content = <<-EOT
-    apiVersion: v1
-    kind: Config
-    clusters:
-      - name: wait-cluster
-        cluster:
-          server: ${scaleway_k8s_cluster.this.kubeconfig[0].host}
-          certificate-authority-data: ${scaleway_k8s_cluster.this.kubeconfig[0].cluster_ca_certificate}
-    contexts:
-      - name: wait-context
-        context:
-          cluster: wait-cluster
-          user: wait-user
-    current-context: wait-context
-    users:
-      - name: wait-user
-        user:
-          token: ${scaleway_k8s_cluster.this.kubeconfig[0].token}
-  EOT
+resource "kubernetes_role" "wait_platform_apps" {
+  metadata {
+    name      = "wait-platform-apps-healthy"
+    namespace = "argocd"
+  }
 
-  file_permission = "0600"
+  rule {
+    api_groups = ["argoproj.io"]
+    resources  = ["applications"]
+    verbs      = ["get", "list"]
+  }
+}
+
+resource "kubernetes_role_binding" "wait_platform_apps" {
+  metadata {
+    name      = "wait-platform-apps-healthy"
+    namespace = "argocd"
+  }
+
+  role_ref {
+    api_group = "rbac.authorization.k8s.io"
+    kind      = "Role"
+    name      = kubernetes_role.wait_platform_apps.metadata[0].name
+  }
+
+  subject {
+    kind      = "ServiceAccount"
+    name      = kubernetes_service_account.wait_platform_apps.metadata[0].name
+    namespace = "argocd"
+  }
 }
 
 # The Terraform-enforced prerequisite itself: secrets-apps/monitoring-apps/
 # backups-apps/networking-apps must all reach Healthy before bootstrap's own
 # Application resource is even created (see that resource's depends_on
-# above) — ArgoCD
-# has no native way to express "wait for these independent top-level
-# Applications" (sync-wave doesn't cross Application boundaries), so this is
-# enforced as a real Terraform apply-order dependency instead. Polls rather
-# than a single `kubectl wait --for=jsonpath=...`, since that fails
-# immediately (not "waits") when `.status.health` doesn't exist yet at all —
-# which is true for the first several seconds of a brand new Application.
-resource "null_resource" "wait_platform_apps_healthy" {
-  depends_on = [helm_release.argocd_platform_apps]
-
-  triggers = {
-    # Re-run the wait whenever the platform apps are re-applied.
-    platform_apps = helm_release.argocd_platform_apps.metadata.revision
+# above) — ArgoCD has no native way to express "wait for these independent
+# top-level Applications" (sync-wave doesn't cross Application boundaries),
+# so this is enforced as a real Terraform apply-order dependency instead.
+# `wait_for_completion` makes Terraform itself block on this Job's Complete
+# condition — no manual polling of the Job from Terraform's side needed.
+# Checks all four Applications together on each iteration (not one at a
+# time with its own budget each) since they sync in parallel — a
+# sequential per-app budget would only be correct if they synced one after
+# another, which is exactly what this whole mechanism exists to avoid.
+resource "kubernetes_job_v1" "wait_platform_apps_healthy" {
+  metadata {
+    name      = "wait-platform-apps-healthy"
+    namespace = "argocd"
   }
 
-  provisioner "local-exec" {
-    command = <<-EOT
-      set -eu
-      export KUBECONFIG=${local_sensitive_file.platform_apps_wait_kubeconfig.filename}
-      for app in secrets-apps monitoring-apps backups-apps networking-apps; do
-        echo "Waiting for Application/$app to become Healthy..."
-        deadline=$(($(date +%s) + 600))
-        while true; do
-          status=$(kubectl get application "$app" -n argocd -o jsonpath='{.status.health.status}' 2>/dev/null || true)
-          if [ "$status" = "Healthy" ]; then
-            echo "Application/$app is Healthy."
-            break
-          fi
-          if [ "$(date +%s)" -ge "$deadline" ]; then
-            echo "Timed out waiting for Application/$app to become Healthy (last status: '$status')." >&2
-            exit 1
-          fi
-          sleep 5
-        done
-      done
-    EOT
+  spec {
+    # Overall budget for all four Applications combined — generous for the
+    # same "cluster boot, not steady-state" reason bootstrap's own
+    # syncPolicy.retry.limit comment gives.
+    active_deadline_seconds = 900
+    backoff_limit           = 0
+
+    template {
+      metadata {
+        labels = {
+          "app.kubernetes.io/name" = "wait-platform-apps-healthy"
+        }
+      }
+
+      spec {
+        service_account_name = kubernetes_service_account.wait_platform_apps.metadata[0].name
+        restart_policy       = "Never"
+
+        container {
+          name = "wait"
+          # Same image gitops repo's services/platform/gateway/config
+          # (cert-restore-job.yaml) already uses for the identical
+          # "kubectl + shell" shape — one fewer image to pull/trust.
+          image = "alpine/kubectl:1.35.3"
+
+          command = ["sh", "-c", <<-EOT
+            set -eu
+            apps="secrets-apps monitoring-apps backups-apps networking-apps"
+            while true; do
+              all_healthy=true
+              for app in $apps; do
+                status=$(kubectl get application "$app" -n argocd -o jsonpath='{.status.health.status}' 2>/dev/null || true)
+                if [ "$status" != "Healthy" ]; then
+                  all_healthy=false
+                  echo "Application/$app: $${status:-<none yet>}"
+                fi
+              done
+              if [ "$all_healthy" = "true" ]; then
+                echo "All platform apps are Healthy."
+                exit 0
+              fi
+              sleep 5
+            done
+          EOT
+          ]
+
+          # Forces a fresh Job (Kubernetes rejects in-place updates to a
+          # Job's pod template — Terraform replaces the whole resource
+          # instead) whenever the platform apps are actually re-applied,
+          # same "re-run the wait on redeploy" behavior the previous
+          # null_resource got from its own `triggers` block.
+          env {
+            name  = "PLATFORM_APPS_REVISION"
+            value = helm_release.argocd_platform_apps.metadata.revision
+          }
+        }
+      }
+    }
   }
+
+  wait_for_completion = true
+
+  timeouts {
+    create = "16m"
+  }
+
+  depends_on = [
+    helm_release.argocd_platform_apps,
+    kubernetes_role_binding.wait_platform_apps,
+  ]
 }
