@@ -197,6 +197,31 @@ bucket's dedicated identity key by hand every session, real unnecessary
 friction for someone who's already a full Scaleway admin on their own
 machine. Confirmed working with zero ambient credentials set (2026-08-19).
 
+**This does NOT extend to a root's own `backend "s3" {}` block.** That's the
+one place in Terraform where the `data "external"` trick above is
+structurally impossible — a `backend` block can only take literal values or
+read the fixed `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` env var names
+(same hard constraint noted in "Backend keys are decoupled from paths" in
+the root `CLAUDE.md` re: `endpoints.s3` — no variables, no data sources,
+full stop). So **every `terraform init`/`plan`/`apply` run locally against a
+Scaleway-hosted bucket — for every root in this repo, not just this one —
+needs those two exact env vars set to your Scaleway key first**:
+
+```bash
+export AWS_ACCESS_KEY_ID=$(scw config get access-key)
+export AWS_SECRET_ACCESS_KEY=$(scw config get secret-key)
+```
+
+`scw config info` showing valid credentials is **not sufficient** — the `scw`
+CLI and Terraform's S3 backend are two entirely separate credential paths;
+the backend never shells out to `scw`. Symptom if you skip this: `terraform
+init`/`plan` fails with `403 Forbidden` on `ListObjectsV2` against the state
+bucket, which looks identical regardless of whether no credentials, wrong
+credentials, or real (non-Scaleway) AWS credentials are ambient — all three
+produce the same opaque 403. Confirmed 2026-08-24: this pre-dates any
+particular branch/change — it's true on `main` too, for every root migrated
+to a Scaleway-hosted backend since the 2026-08-19 migration.
+
 ## The contract
 
 Same four requirements as `00-foundation/aws`'s README (durable+versioned

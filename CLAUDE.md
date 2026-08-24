@@ -9,6 +9,24 @@ mise install          # Install all tools (kubectl, minikube, terraform, helm, a
 .githooks/install.sh  # Configure git to use local hooks directory
 ```
 
+**Before running `terraform init`/`plan`/`apply` locally against any
+Scaleway-hosted root** (every root except `00-foundation/aws` — see
+`00-foundation/scaleway/README.md`'s "Cross-root reads need no manual
+credential setup" section for the full explanation):
+
+```bash
+export AWS_ACCESS_KEY_ID=$(scw config get access-key)
+export AWS_SECRET_ACCESS_KEY=$(scw config get secret-key)
+```
+
+Terraform's native `backend "s3" {}` block can only read the literal
+`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` env var names for any
+S3-compatible endpoint, Scaleway included — it never reads `scw` CLI config,
+so `scw config info` showing valid credentials does not mean the backend has
+them. Skipping this fails with an opaque `403 Forbidden` on `ListObjectsV2`
+that looks identical whether credentials are missing, wrong, or real
+(non-Scaleway) AWS credentials are ambient instead.
+
 ## Commands
 
 ```bash
