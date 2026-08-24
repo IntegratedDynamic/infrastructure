@@ -236,7 +236,14 @@ controller:
       # at all" before this addition.
       memory: 768Mi
     limits:
-      cpu: 1000m
+      # Bumped 1000m -> 3000m 2026-08-24: confirmed live, the controller was
+      # CPU-throttled (CFS quota) during a fresh cluster boot's full-tree
+      # reconcile while the node itself sat nowhere near its own CPU
+      # capacity (DEV1-M: 3800m allocatable, ~300m/7% in use) -- unlike the
+      # memory limit above, there's no node-pressure reason to keep this
+      # tight, so it's raised well past the request instead of paired with
+      # a throttling-avoidance mechanism the way GOMEMLIMIT addresses OOMs.
+      cpu: 3000m
       # Lowered from 2048Mi 2026-08-20: paired with GOMEMLIMIT above instead
       # of just raising this further -- see that env var's own comment.
       memory: "${local.argocd_controller_memory_limit_mib}Mi"
@@ -254,7 +261,11 @@ repoServer:
       cpu: 25m
       memory: 192Mi
     limits:
-      cpu: 1000m
+      # Bumped 1000m -> 3000m 2026-08-24, same reasoning as controller's CPU
+      # limit above: repo-server renders every chart in the tree during that
+      # same startup burst and was observed throttled well below the node's
+      # actual free CPU.
+      cpu: 3000m
       memory: 768Mi
 
 server:
