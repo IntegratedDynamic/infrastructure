@@ -43,11 +43,11 @@ terraform -chdir=02-encryption/aws                  providers lock -platform=dar
 terraform -chdir=03-storage/scaleway                providers lock -platform=darwin_arm64 -platform=linux_amd64
 terraform -chdir=04-vpn/wireguard-site-to-site      providers lock -platform=darwin_arm64 -platform=linux_amd64
 terraform -chdir=04-vpn/wireguard-exit              providers lock -platform=darwin_arm64 -platform=linux_amd64
-terraform -chdir=05-secrets/openbao/bootstrap        providers lock -platform=darwin_arm64 -platform=linux_amd64
-terraform -chdir=06-monitoring/grafana/bootstrap     providers lock -platform=darwin_arm64 -platform=linux_amd64
-terraform -chdir=06-monitoring/grafana/managed       providers lock -platform=darwin_arm64 -platform=linux_amd64
 terraform -chdir=10-cluster/local                   providers lock -platform=darwin_arm64 -platform=linux_amd64
 terraform -chdir=10-cluster/scaleway                providers lock -platform=darwin_arm64 -platform=linux_amd64
+terraform -chdir=11-secrets/openbao/bootstrap        providers lock -platform=darwin_arm64 -platform=linux_amd64
+terraform -chdir=12-monitoring/grafana/bootstrap     providers lock -platform=darwin_arm64 -platform=linux_amd64
+terraform -chdir=12-monitoring/grafana/managed       providers lock -platform=darwin_arm64 -platform=linux_amd64
 ```
 
 Commit the updated lock files alongside the version change.
@@ -59,11 +59,18 @@ Terraform roots are organized by **domain** — the top-level folder is a numeri
 literally owns (`00-foundation`, `01-iam`, `02-encryption`...). The number
 roughly encodes apply order / blast-radius
 across domains, though it's a convention, not something any tooling enforces.
-Gaps in the sequence (`04`, `07`-`09`) are deliberate — room for future domains
+Gaps in the sequence (`05`-`09`) are deliberate — room for future domains
 without a renumbering cascade; `10-cluster` in particular was moved up from
-`02-` on purpose to free up low numbers for domains like `02-encryption`. `06`
-was the first gap filled: `06-monitoring/` (Terraform-managed config for the
-monitoring stack's own tools — the tools themselves are gitops-deployed).
+`02-` on purpose to free up low numbers for domains like `02-encryption`.
+`11-secrets` and `12-monitoring` (2026-08-24, moved from `05-secrets` and
+`06-monitoring`) deliberately sit **after** `10-cluster`: both only apply
+successfully once the cluster exists and gitops has deployed the tool
+they configure onto it (`05-secrets/openbao/bootstrap`'s vault provider talks
+to OpenBao's own live route, `06-monitoring/grafana/bootstrap`'s grafana
+provider talks to Grafana's) — numbering them ahead of `10-cluster` inverted
+the apply-order convention the prefix is supposed to encode. `06` had briefly
+been the first `07`-`09` gap filled (`06-monitoring/`); that gap is open again
+now that monitoring moved to `12`.
 
 The second path segment is the **cloud provider** a root targets (`aws`,
 `scaleway`) — a domain with only one provider still nests under it (e.g.
@@ -119,25 +126,30 @@ modules/
     scaleway/                  #   Scaleway CI identity (github-ci: IAM app +
                                #     2 policies + static API key)
   workload/
-    scaleway/                  #   external-dns workload identity (DNS zone
-                               #     record R/W only — no bucket, no DNS zone
-                               #     resource managed here)
+    scaleway/                  #   simple scoped workload identities, one
+                               #     module block per var.identities entry:
+                               #     external-dns (DNS zone record R/W only —
+                               #     no bucket, no DNS zone resource managed
+                               #     here) and argo-workflows-state (Object
+                               #     Storage R/W for the terraform-apply
+                               #     CronWorkflows' own state reads)
 02-encryption/
   aws/                         # domain: AWS KMS key + dedicated IAM user for
                                #   OpenBao's auto-unseal. Standalone rather than
-                               #   folded into 05-secrets/openbao (different
+                               #   folded into 11-secrets/openbao (different
                                #   provider, different pattern — an AWS key/user
                                #   pair, not an OpenBao/Vault-provider resource)
 03-storage/
   scaleway/                    # domain: Scaleway tool buckets + their scoped
-                               #   identities (backup, velero today; home for
-                               #   future tool buckets)
+                               #   identities — backup, velero, thanos, loki,
+                               #   tempo, argo_workflows_logs today; home for
+                               #   future tool buckets
 04-vpn/
   wireguard-site-to-site/      # domain: WireGuard peer keypairs for the
-                               #   OpenBao tunnel (05-secrets/openbao's vault
+                               #   OpenBao tunnel (11-secrets/openbao's vault
                                #   provider, not the human OIDC/UI login) —
                                #   EXPLICITLY TEMPORARY, see its own README
-                               #   for why it isn't 01-iam/ or 05-secrets/ yet.
+                               #   for why it isn't 01-iam/ or 11-secrets/ yet.
                                #   Renamed from wireguard/ once a second,
                                #   unrelated WireGuard deployment showed up
                                #   below — pure directory rename, zero state
@@ -153,22 +165,24 @@ modules/
                                #   threat model, deliberately not an
                                #   extension of wireguard-site-to-site/. Own
                                #   keys, own gitops app, own README
-05-secrets/
-  openbao/                     # domain: OpenBao itself (bootstrap/ + managed/,
-                               #   see that directory) — untouched by the
-                               #   2026-07-30 buckets/IAM consolidation
-06-monitoring/
-  grafana/                     # domain: Grafana, managed by Terraform
-                               #   (bootstrap/ + managed/, same split as
-                               #   05-secrets/openbao) — its own domain
-                               #   since 05-secrets/ is scoped to OpenBao's
-                               #   own config specifically, not any tool
-                               #   that happens to need IaC. First of the
-                               #   06-09 gaps to get filled.
 10-cluster/                    # domain: the Kubernetes platform (moved up from
                                #   02- to free up low numbers for future domains)
   local/                       #   minikube — local dev and debugging. Local backend (local files)
   scaleway/                    #   Scaleway Kapsule cluster + ArgoCD bootstrap (homelab; WIP)
+11-secrets/                    # (was 05-secrets/, moved 2026-08-24 to sit
+                               #   after 10-cluster — see the numbering note
+                               #   above)
+  openbao/                     # domain: OpenBao itself (bootstrap/ + managed/,
+                               #   see that directory) — untouched by the
+                               #   2026-07-30 buckets/IAM consolidation
+12-monitoring/                 # (was 06-monitoring/, moved 2026-08-24, same
+                               #   reason as 11-secrets/ above)
+  grafana/                     # domain: Grafana, managed by Terraform
+                               #   (bootstrap/ + managed/, same split as
+                               #   11-secrets/openbao) — its own domain
+                               #   since 11-secrets/ is scoped to OpenBao's
+                               #   own config specifically, not any tool
+                               #   that happens to need IaC.
 ```
 
 **The dependency spine** runs forward: `00-foundation/aws` (bucket + CI's AWS
@@ -201,20 +215,42 @@ its own broader-than-S3 AWS rights later is why `01-iam/bootstrap/aws` came
 back — but scoped to just that one domain's resource types, not "create any
 role.")
 
-**Backend keys are decoupled from paths.** Each root pins its own
-`workspace_key_prefix` in `version.tf`, and the workspace name comes from the
-`env/<name>.tfvars` filename — **neither is tied to the directory**. This means
-moving a root to a new directory is a pure `git mv` with **zero state
-migration**, as long as you don't also rename the tfvars file or touch
-`workspace_key_prefix`. Several roots have been moved this way and deliberately
-keep a prefix/workspace name that no longer matches their path (e.g.
-`01-iam/bootstrap/scaleway` still uses prefix `github-ci`; `02-encryption/aws`
-still uses the workspace name `03-backup-dev-bucket`, inherited from before its
-resources were extracted from `03-storage/scaleway` — required there, since
-`local.unseal_name` in that root derives the live KMS alias + IAM user name from
-`terraform.workspace`, so renaming the workspace would rename/recreate them).
-Don't "fix" a prefix or rename a tfvars file to match its new path unless you
-also migrate the state.
+**Backend keys are decoupled from paths, but by convention they're kept in
+sync.** Each root pins its own `workspace_key_prefix` in `version.tf`, and the
+workspace name comes from the `env/<name>.tfvars` filename — **neither is
+mechanically tied to the directory**, so a `git mv` alone never breaks a
+backend. As of the 2026-08-24 workspace-naming refacto, every root's prefix
+mirrors its own directory path, and every workspace name is that path
+flattened with hyphens and suffixed `-dev` (the environment this whole repo
+runs — a personal dev homelab, never staging or prod), e.g.
+`11-secrets/openbao/bootstrap` → prefix `11-secrets/openbao/bootstrap`,
+workspace `11-secrets-openbao-bootstrap-dev`. Before this refacto several
+roots had drifted out of sync after being moved or renamed (prefixes in the
+wrong segment order, workspace names inherited from a since-renamed
+directory, `10-cluster/scaleway` even carrying the misleading name
+`02-cluster-staging`) — all fixed by migrating each root's state into its new
+prefix/workspace via `terraform state pull` + `state push` (old state objects
+left orphaned in the same bucket, never deleted — see each root's
+`version.tf` header comment for its specific before/after).
+
+**If a root's workspace name feeds a real resource name** (grep
+`terraform.workspace` in `main.tf` — as of this refacto that's
+`02-encryption/aws` (AWS KMS alias + IAM user; **`aws_iam_access_key.user` is
+`ForceNew`**, so a workspace rename there would rotate OpenBao's unseal
+credential unless the derived name is first frozen to a hardcoded local, as
+`02-encryption/aws/main.tf`'s `local.unseal_name` now is), `03-storage/scaleway`,
+and `01-iam/workload/scaleway` (both Scaleway IAM application/policy names —
+confirmed in-place-renamable, no credential rotation, since Scaleway API keys
+are tied to `application_id` not name) — always verify with `terraform plan`
+before applying a workspace rename, and don't assume every provider handles
+a name change the same way AWS's IAM access key does.
+
+Going forward: if you move a root to a new directory, keep the prefix/
+workspace in sync **only if you also migrate the state the same way**
+(pull from the old location, reconfigure, push into the new one, leave the
+old object orphaned). A pure `git mv` with the prefix/tfvars left alone is
+still valid and zero-risk — just don't let the drift linger indefinitely
+the way it did before this refacto.
 
 ### `10-cluster/*`
 
@@ -262,8 +298,8 @@ lived in the AWS bucket, then repointed and migrated.
 The migration procedure was rehearsed first against a throwaway root
 (`99-scratch/migration-test`, since deleted) — confirmed working — then
 rolled out to every real domain (`01-iam/*`, `02-encryption/aws`,
-`03-storage/scaleway`, `04-vpn/*`, `05-secrets/openbao/*`,
-`06-monitoring/grafana/*`, `10-cluster/scaleway`) plus this root itself. See
+`03-storage/scaleway`, `04-vpn/*`, `11-secrets/openbao/*`,
+`12-monitoring/grafana/*`, `10-cluster/scaleway`) plus this root itself. See
 this root's README for the confirmed findings: `use_lockfile` native S3
 locking works against Scaleway, and the required backend config is
 `use_path_style = true` + `skip_s3_checksum = true` + a literal
@@ -272,7 +308,7 @@ reference variables) that's why those five lines are repeated verbatim in
 every migrated root's `version.tf` rather than parametrized.
 
 Every `data "terraform_remote_state"` cross-root read repo-wide (there are
-~11 of them — see `05-secrets/openbao/managed/main.tf` for the densest
+~11 of them — see `11-secrets/openbao/managed/main.tf` for the densest
 cluster, 4 in one file) was updated to point at the new buckets too, and
 **parametrized**: bucket/key are now named variables set in that root's
 `env/*.tfvars` (visible as config), not hardcoded literals in `.tf`. The
@@ -305,15 +341,15 @@ Standalone root that stands up the **Scaleway IAM identity GitHub Actions uses t
 
 ### `01-iam/workload/scaleway/`
 
-One `module "identities" { for_each = var.identities }` block (via `modules/scaleway-machine-identity`, single policy per identity — this domain is for simple scoped workload credentials, not CI trust anchors) — `external-dns` today (Scaleway `DomainsDNSFullAccess`, scoped to the project scalepack.fr's zone lives in; no DNS zone/record resource is Terraform-managed here, this root exists purely to provision the identity). Add a future workload identity by adding a map entry to `var.identities`, no new `.tf` resources. `workload_access_key`/`workload_secret_key` outputs stay pinned to `external-dns` specifically (05-secrets/openbao/managed's `terraform_remote_state` reads them) — new identities' keys come from the generic `access_keys`/`secret_keys` map outputs instead. Moved here from `04-dns/scaleway` since it owns no bucket and isn't a CI trust anchor.
+One `module "identities" { for_each = var.identities }` block (via `modules/scaleway-machine-identity`, single policy per identity — this domain is for simple scoped workload credentials, not CI trust anchors) — two identities today: `external-dns` (Scaleway `DomainsDNSFullAccess`, scoped to the project scalepack.fr's zone lives in; no DNS zone/record resource is Terraform-managed here) and `argo-workflows-state` (Object Storage R/W, project-scoped, for the terraform-apply CronWorkflows' own cross-root state reads — its key leaves the admin's machine and lands on the cluster itself, unlike every other identity in this repo). Add a future workload identity by adding a map entry to `var.identities`, no new `.tf` resources. `workload_access_key`/`workload_secret_key` outputs stay pinned to `external-dns` specifically (11-secrets/openbao/managed's `terraform_remote_state` reads them) — new identities' keys come from the generic `access_keys`/`secret_keys` map outputs instead. Moved here from `04-dns/scaleway` since it owns no bucket and isn't a CI trust anchor.
 
 ### `02-encryption/aws/`
 
-AWS KMS key + a single-purpose IAM user for OpenBao's `seal "awskms"` auto-unseal (OpenBao runs on Scaleway Kapsule, not AWS, so there's no instance profile to lean on — a static AWS access key is required). Standalone domain rather than folded into `05-secrets/openbao/` (different provider/pattern — plain AWS resources, not an OpenBao/Vault-provider resource) or left in `03-storage/scaleway` (not a bucket, not really "storage"). Managed via the `01-iam/bootstrap/aws` role above — see the root's `main.tf` header comment for the full apply-path rationale. Moved here from `06-openbao-unseal/aws` to free up a low domain number.
+AWS KMS key + a single-purpose IAM user for OpenBao's `seal "awskms"` auto-unseal (OpenBao runs on Scaleway Kapsule, not AWS, so there's no instance profile to lean on — a static AWS access key is required). Standalone domain rather than folded into `11-secrets/openbao/` (different provider/pattern — plain AWS resources, not an OpenBao/Vault-provider resource) or left in `03-storage/scaleway` (not a bucket, not really "storage"). Managed via the `01-iam/bootstrap/aws` role above — see the root's `main.tf` header comment for the full apply-path rationale. Moved here from `06-openbao-unseal/aws` to free up a low domain number. `local.unseal_name` is hardcoded rather than derived from `terraform.workspace` — see "Backend keys are decoupled from paths" above for why.
 
 ### `03-storage/scaleway/`
 
-Scaleway tool buckets + their scoped identities: `backup` (OpenBao's own raft snapshots) and `velero` (Kubernetes backups), each with its own bucket AND its own workload identity — kept as separate buckets/identities because Velero writing into a shared bucket broke OpenBao's `s3cmd`-based retention cleanup (confirmed live 2026-07-28). One `module "buckets"` block with `for_each = var.buckets` (via `modules/scaleway-bucket-with-identity`) instantiates every bucket in `main.tf` — add a future tool bucket by adding a map entry to `var.buckets`, no new `.tf` resources. Renamed from `03-backup/scaleway` (which also held the OpenBao unseal KMS resources, now `02-encryption/aws`).
+Scaleway tool buckets + their scoped identities, each with its own bucket AND its own workload identity — kept as separate buckets/identities (not a shared bucket) because Velero writing into a shared bucket once broke OpenBao's `s3cmd`-based retention cleanup (confirmed live 2026-07-28), and Scaleway IAM can't scope Object Storage permissions below project level anyway. Six today: `backup` (OpenBao's own raft snapshots), `velero` (Kubernetes backups), `thanos` (Prometheus TSDB block storage, near-term/no-GLACIER), `loki` (log chunk storage, 1-day rolling retention matching Loki's own compactor), `tempo` (trace block storage, same 1-day shape), `argo_workflows_logs` (archived Argo Workflows container logs, same 1-day shape). One `module "buckets"` block with `for_each = var.buckets` (via `modules/scaleway-bucket-with-identity`) instantiates every bucket in `main.tf` — add a future tool bucket by adding a map entry to `var.buckets`, no new `.tf` resources. Renamed from `03-backup/scaleway` (which also held the OpenBao unseal KMS resources, now `02-encryption/aws`).
 
 ## Conventions
 
@@ -323,7 +359,7 @@ Scaleway tool buckets + their scoped identities: `backup` (OpenBao's own raft sn
 
 **PRs**: After each commit + push on a branch, create a draft PR if none exists. Title: `<type>: description`. Body: context, changes, linked issues (`Closes #123`), test instructions. Use [Conventional Comments](https://conventionalcomments.org/) in reviews (`praise`, `nitpick`, `suggestion`, `issue`, `todo`, `question`, `thought`).
 
-**Terraform workspaces**: a root that runs through CI declares its workspace variables in an `env/` folder — one `env/<name>.tfvars` per workspace. The **filename (without `.tfvars`) is the terraform workspace name** (so state lands at `<workspace_key_prefix>/<name>/<key>`, isolated per root) and the **file contents are that workspace's variable values**. The reusable **composite action `.github/actions/terraform`** takes `root` + `tfvars-file` + `command` (`plan`/`apply`/`destroy`) + `aws-role-arn` (all non-secret inputs) and runs `workspace select <name>` + the command `-var-file=env/<name>.tfvars`, after minting an Infisical OIDC token (skippable) and assuming the AWS role via OIDC. The action takes **no secret inputs**: provider credentials (`SCW_*`, `INFISICAL_MACHINE_IDENTITY_ID`) are read from the job env. The calling **workflow** owns the trigger→command mapping (push → apply, schedule → destroy, else plan), the `concurrency` guard, and the `environment` that scopes credentials — Scaleway keys live in the `scaleway` environment and are exposed to the action as job `env:` (never as plain inputs). The repo must be checked out before calling the action (it is a local action). This replaces the old reliance on a local, gitignored `.terraform/environment` (invisible to CI — a `default`-workspace run collides on the state key).
+**Terraform workspaces**: a root that runs through CI declares its workspace variables in an `env/` folder — one `env/<name>.tfvars` per workspace. The **filename (without `.tfvars`) is the terraform workspace name** (so state lands at `<workspace_key_prefix>/<name>/<key>`, isolated per root) and the **file contents are that workspace's variable values**. Name it `<root-path-flattened-with-hyphens>-<env>` (e.g. `11-secrets-openbao-bootstrap-dev`) — see "Backend keys are decoupled from paths" above for the full convention and why a rename needs a real state migration, not just a file rename. The reusable **composite action `.github/actions/terraform`** takes `root` + `tfvars-file` + `command` (`plan`/`apply`/`destroy`) + `aws-role-arn` (all non-secret inputs) and runs `workspace select <name>` + the command `-var-file=env/<name>.tfvars`, after minting an Infisical OIDC token (skippable) and assuming the AWS role via OIDC. The action takes **no secret inputs**: provider credentials (`SCW_*`, `INFISICAL_MACHINE_IDENTITY_ID`) are read from the job env. The calling **workflow** owns the trigger→command mapping (push → apply, schedule → destroy, else plan), the `concurrency` guard, and the `environment` that scopes credentials — Scaleway keys live in the `scaleway` environment and are exposed to the action as job `env:` (never as plain inputs). The repo must be checked out before calling the action (it is a local action). This replaces the old reliance on a local, gitignored `.terraform/environment` (invisible to CI — a `default`-workspace run collides on the state key).
 
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
