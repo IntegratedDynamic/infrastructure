@@ -37,5 +37,5 @@ variable "remote_state_aws_region" {
 variable "remote_state_aws_key" {
   description = "Object key for 00-foundation/aws's state within remote_state_aws_bucket."
   type        = string
-  default     = "state-backend/00-remote-state-backend/terraform.tfstate"
+  default     = "00-foundation/aws/00-foundation-aws-dev/terraform.tfstate"
 }
