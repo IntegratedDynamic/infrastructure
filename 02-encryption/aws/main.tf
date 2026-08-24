@@ -26,10 +26,17 @@ data "aws_caller_identity" "current" {}
 data "aws_partition" "current" {}
 
 locals {
-  # Kept identical to the value it had inside 03-backup/scaleway (this root's
-  # workspace name is deliberately unchanged — see env/ — so this doesn't
-  # rename/recreate the live KMS alias or IAM user).
-  unseal_name = "openbao-unseal-${terraform.workspace}"
+  # Hardcoded, NOT derived from terraform.workspace (2026-08-24
+  # workspace-naming refacto): this name feeds a real AWS IAM user + KMS
+  # alias below, and aws_iam_access_key.user is ForceNew — if the IAM
+  # user's name changed, the access key would be destroyed and recreated,
+  # rotating OpenBao's unseal credential out from under it until the new
+  # key is repropagated via gitops. Kept frozen at the value it had before
+  # this root's workspace was renamed (was 03-backup-dev-bucket, matching
+  # this root's old home inside 03-storage/scaleway before extraction) so
+  # the workspace can be renamed to match this root's own path without
+  # touching any live AWS resource.
+  unseal_name = "openbao-unseal-03-backup-dev-bucket"
 }
 
 # -----------------------------------------------------------------------------

@@ -2,13 +2,19 @@ terraform {
   # Migrated to the dedicated Scaleway state bucket (00-foundation/scaleway,
   # state_buckets["encryption_aws"]) — independent of the real AWS
   # credentials `provider "aws"` below uses to manage actual AWS resources.
+  #
+  # Prefix + workspace name now mirror this root's own path (2026-08-24
+  # workspace-naming refacto) — used to be "openbao-unseal/aws" /
+  # "03-backup-dev-bucket" (a leftover from before this root was extracted
+  # out of 03-storage/scaleway). See main.tf's local.unseal_name comment:
+  # that value was deliberately frozen to its pre-refacto literal first, so
+  # this workspace rename doesn't touch the live AWS IAM user / KMS alias /
+  # access key it names. Old state object left in place under the old
+  # prefix/workspace, orphaned on purpose (never deleted).
   backend "s3" {
     bucket = "id-terraform-state-02-encryption-aws"
     region = "fr-par"
-    # New backend key for this domain — moved out of 03-storage/scaleway
-    # (formerly 03-backup/scaleway) via a real cross-backend `terraform state
-    # mv`, not a directory rename.
-    workspace_key_prefix        = "openbao-unseal/aws"
+    workspace_key_prefix        = "02-encryption/aws"
     key                         = "terraform.tfstate"
     encrypt                     = true
     use_lockfile                = true
