@@ -1,4 +1,4 @@
-# 05-secrets — what this domain is for
+# 11-secrets — what this domain is for
 
 Terraform-managed OpenBao: its auth methods, mounts, policies, and secret
 content. That's it — this domain is IaC for OpenBao's own configuration, not

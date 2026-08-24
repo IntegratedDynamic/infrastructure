@@ -1,4 +1,4 @@
-# Read by 06-monitoring/grafana/bootstrap's own provider "grafana" block —
+# Read by 12-monitoring/grafana/bootstrap's own provider "grafana" block —
 # that root needs to authenticate as Grafana's admin to create its own
 # service-account trust anchor, and this root already owns that credential
 # (kv/apps/grafana/admin, see resource "vault_kv_secret_v2" "grafana_admin"

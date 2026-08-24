@@ -42,7 +42,7 @@ terraform {
 provider "vault" {
   # Same hostname as the public route, resolved through the WireGuard
   # tunnel via split-DNS while it's up — see
-  # 05-secrets/openbao/managed/version.tf's comment for the full rationale.
+  # 11-secrets/openbao/managed/version.tf's comment for the full rationale.
   address = "https://openbao.scalepack.fr/"
   # address = "http://127.0.0.1:8200/"  # kubectl port-forward, independent of the tunnel
   # token = var.root_token

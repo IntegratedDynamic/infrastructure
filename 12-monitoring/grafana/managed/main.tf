@@ -22,7 +22,7 @@ resource "grafana_service_account_token" "mcp_claude_code" {
 # wave after Velero, which the combined kube-prometheus-stack chart's own
 # wave couldn't give it). Recreated here instead of via a ConfigMap
 # sidecar, consistent with this root's whole purpose ("Grafana's actual
-# declarative configuration" per 06-monitoring/grafana/README.md).
+# declarative configuration" per 12-monitoring/grafana/README.md).
 #
 # URL is the in-cluster Service Prometheus still gets from
 # services/platform/monitoring/chart (unaffected by the split) — verified

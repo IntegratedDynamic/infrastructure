@@ -1,4 +1,4 @@
-# 05-secrets/openbao/managed — OpenBao's internal configuration as code
+# 11-secrets/openbao/managed — OpenBao's internal configuration as code
 
 Reconciles Terraform with OpenBao's **actual, already-running** state — not
 just structure (mounts, auth methods, policies) but the secret content
@@ -12,7 +12,7 @@ created, so that after the first `terraform apply` OpenBao ended up in
 exactly the state it was already in — as if it had been built by Terraform
 from the start. See "Reconciling on a fresh checkout" below.
 
-## Why its own root, separate from `05-secrets/openbao/bootstrap`
+## Why its own root, separate from `11-secrets/openbao/bootstrap`
 
 `bootstrap/openbao` created the `terraform` AppRole itself — that needed a
 human admin credential (OIDC), the same trust-anchor pattern as
@@ -112,7 +112,7 @@ output), so `data_json` costs nothing extra and buys real drift detection:
 
 Deliberately **not** managed: `default` and `root` (OpenBao built-ins), and
 the `approle`/`terraform` auth backend/policy/role (owned by
-`05-secrets/openbao/bootstrap` — importing them here too would split-brain
+`11-secrets/openbao/bootstrap` — importing them here too would split-brain
 two Terraform states over the same objects).
 
 ## `var.secrets_sync_github`'s shape
@@ -146,7 +146,7 @@ convention, not automation.
 ## Credentials
 
 - **AppRole** (`var.approle_role_id` / `var.approle_secret_id`): from
-  `05-secrets/openbao/bootstrap`'s outputs —
+  `11-secrets/openbao/bootstrap`'s outputs —
 
   ```bash
   terraform -chdir=../../bootstrap/openbao output -raw role_id
@@ -183,9 +183,9 @@ policies, then each `vault_kv_secret_v2` via `<mount>/data/<name>` as the
 import ID, e.g. `kv/data/apps/dex/credentials`).
 
 ```bash
-terraform -chdir=05-secrets/openbao/managed init
-terraform -chdir=05-secrets/openbao/managed workspace select -or-create 05-secrets-openbao-secrets
-terraform -chdir=05-secrets/openbao/managed plan
+terraform -chdir=11-secrets/openbao/managed init
+terraform -chdir=11-secrets/openbao/managed workspace select -or-create 11-secrets-openbao-managed-dev
+terraform -chdir=11-secrets/openbao/managed plan
 ```
 
 A clean plan (zero changes across the board, including the `vault_kv_secret_v2`
@@ -196,8 +196,8 @@ write-only never looking.
 ## Apply
 
 ```bash
-terraform -chdir=05-secrets/openbao/managed plan
-terraform -chdir=05-secrets/openbao/managed apply
+terraform -chdir=11-secrets/openbao/managed plan
+terraform -chdir=11-secrets/openbao/managed apply
 ```
 
 > Never `terraform apply`/`destroy` here without explicit approval — this

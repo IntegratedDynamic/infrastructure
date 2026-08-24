@@ -1,4 +1,4 @@
-# 05-secrets/openbao — OpenBao, managed by Terraform
+# 11-secrets/openbao — OpenBao, managed by Terraform
 
 Two roots, split by who/how they're applied:
 
@@ -47,7 +47,7 @@ The loop only needs closing by hand once per environment. If it ever breaks
 the same manual sequence again: port-forward, apply by hand, let ESO
 re-propagate.
 
-This isn't OpenBao-specific — any future `05-secrets/<service>/managed` root
+This isn't OpenBao-specific — any future `11-secrets/<service>/managed` root
 that CI is meant to run needs the same loop: a human bootstraps it once
 through a direct connection, and whatever credential CI needs to run it going
 forward gets fed back out to CI through ESO, sourced from the secret manager

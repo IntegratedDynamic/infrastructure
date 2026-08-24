@@ -44,7 +44,7 @@ terraform {
 }
 
 # role_id/secret_id for the `terraform` AppRole — read straight from
-# 05-secrets/openbao/bootstrap's own state instead of a hand-copied variable.
+# 11-secrets/openbao/bootstrap's own state instead of a hand-copied variable.
 # Safe to reference from the provider block below: this data source has no
 # dependency on the vault provider itself (it's a plain S3 backend read), so
 # there's no ordering cycle — same category of pattern as
@@ -58,7 +58,7 @@ data "terraform_remote_state" "openbao_bootstrap" {
   })
 }
 
-# Authenticates as the `terraform` AppRole from 05-secrets/openbao/bootstrap —
+# Authenticates as the `terraform` AppRole from 11-secrets/openbao/bootstrap —
 # this root is the machine identity that role exists for. Address hardcoded,
 # not read from VAULT_ADDR: OpenBao's own CLI populates BAO_ADDR/BAO_TOKEN,
 # not Vault's VAULT_ADDR/VAULT_TOKEN, so relying on the env var is a trap (see

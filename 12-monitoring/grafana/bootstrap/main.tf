@@ -1,7 +1,7 @@
 # Trust anchor for future Terraform-managed Grafana configuration: a service
 # account scoped to *creating further Grafana resources* (dashboards, other
 # service accounts, OIDC config, ...), not any one specific integration.
-# Mirrors 05-secrets/openbao/bootstrap's AppRole role exactly — same
+# Mirrors 11-secrets/openbao/bootstrap's AppRole role exactly — same
 # "admin mints the one identity everything else authenticates as" pattern.
 #
 # role = "Admin": Grafana's service-account roles are coarse (Viewer/Editor/

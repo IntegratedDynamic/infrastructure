@@ -39,14 +39,14 @@ terraform {
   }
 }
 
-# 05-secrets/openbao/managed's own state — read directly instead of a
+# 11-secrets/openbao/managed's own state — read directly instead of a
 # hand-copied local.auto.tfvars value, same convention as every other
 # cross-root credential in this repo (see that root's outputs.tf,
 # grafana_admin_password). Plain S3 backend read, no provider needed for
-# this data source. Workspace is "05-secrets-openbao-secrets" — that root's
-# own actual workspace (confirmed via `terraform workspace show`), distinct
-# from 05-secrets/openbao/bootstrap's "05-secrets-openbao" — don't assume
-# the two roots under openbao/ share one workspace name.
+# this data source. Workspace is "11-secrets-openbao-managed-dev" — that
+# root's own actual workspace, distinct from
+# 11-secrets/openbao/bootstrap's "11-secrets-openbao-bootstrap-dev" — don't
+# assume the two roots under openbao/ share one workspace name.
 # Credentials for the cross-root Scaleway state read below. Two execution
 # contexts apply this root: an admin's machine (scw CLI configured) and
 # the gitops repo's Argo Workflows terraform-apply CronWorkflow, which
@@ -57,7 +57,7 @@ terraform {
 # cross-root state read below with a confusing "No valid credential
 # sources found" error instead of failing at the actual source. Env vars
 # now win when set; falling back to `scw config get` keeps the admin path
-# exactly as it was. Same fix as 05-secrets/openbao/managed/main.tf's
+# exactly as it was. Same fix as 11-secrets/openbao/managed/main.tf's
 # identical comment.
 data "external" "scw_credentials" {
   program = ["sh", "-c", <<-EOT
@@ -98,7 +98,7 @@ data "terraform_remote_state" "openbao_managed" {
 }
 
 # Authenticates as Grafana's own admin via basic auth — the same admin
-# credential 05-secrets/openbao/managed already generates and owns
+# credential 11-secrets/openbao/managed already generates and owns
 # (kv/apps/grafana/admin). No chicken-and-egg like OpenBao's own bootstrap
 # root_token: Grafana's admin password is already Terraform state elsewhere,
 # so this root needs zero manually-supplied secrets. Defaults to the public

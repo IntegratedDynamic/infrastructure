@@ -1,4 +1,4 @@
-# Backward-compatible names — 05-secrets/openbao/managed's
+# Backward-compatible names — 11-secrets/openbao/managed's
 # terraform_remote_state reads these two specifically for the external-dns
 # identity. Don't repoint them at a different identity if you add one; use
 # the generic maps below for new identities instead.

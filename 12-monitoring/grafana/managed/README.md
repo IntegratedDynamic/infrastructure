@@ -1,10 +1,10 @@
-# 06-monitoring/grafana/managed — Grafana configuration, as code
+# 12-monitoring/grafana/managed — Grafana configuration, as code
 
 Grafana's actual declarative configuration, reconciled via the `terraform`
-service account `06-monitoring/grafana/bootstrap` mints. Today that's just
+service account `12-monitoring/grafana/bootstrap` mints. Today that's just
 one thing (the MCP server's own service account) — this is where future
 Grafana-as-code lives: dashboards, folders, alerting, OIDC config, etc.,
-same role `05-secrets/openbao/managed` plays for OpenBao.
+same role `11-secrets/openbao/managed` plays for OpenBao.
 
 ## What it creates
 
@@ -21,7 +21,7 @@ same role `05-secrets/openbao/managed` plays for OpenBao.
   `kv/apps/monitoring/grafana-mcp-token`. **Not** synced into the cluster by
   anything (no ESO ExternalSecret reads this) — the only consumer is a
   human (fetching it directly to configure the MCP server locally), same
-  rationale as `05-secrets/openbao/managed`'s `apps/wireguard/confs`. ESO
+  rationale as `11-secrets/openbao/managed`'s `apps/wireguard/confs`. ESO
   wouldn't help here anyway: its job is syncing into Kubernetes Secrets, and
   the actual consumer is a local `claude mcp` process, not a cluster
   workload.
@@ -41,10 +41,10 @@ grows beyond one personal-use token.
 ## Credentials
 
 - **`grafana` provider**: authenticates as the `terraform` service account
-  from `06-monitoring/grafana/bootstrap`, read via
+  from `12-monitoring/grafana/bootstrap`, read via
   `data.terraform_remote_state` — see `version.tf`.
 - **`vault` provider**: reuses the same `terraform` AppRole
-  `05-secrets/openbao/managed` itself authenticates as (its policy already
+  `11-secrets/openbao/managed` itself authenticates as (its policy already
   grants `kv/data|metadata/apps/*` broadly, so writing a new path here needs
   no OpenBao-side policy change) — see that root's `version.tf` for the
   address/split-DNS rationale.
@@ -54,10 +54,10 @@ grows beyond one personal-use token.
 ## Apply
 
 ```bash
-terraform -chdir=06-monitoring/grafana/managed init
-terraform -chdir=06-monitoring/grafana/managed workspace select -or-create 06-monitoring-grafana
-terraform -chdir=06-monitoring/grafana/managed plan  -var-file=env/06-monitoring-grafana.tfvars
-terraform -chdir=06-monitoring/grafana/managed apply -var-file=env/06-monitoring-grafana.tfvars
+terraform -chdir=12-monitoring/grafana/managed init
+terraform -chdir=12-monitoring/grafana/managed workspace select -or-create 12-monitoring-grafana-managed-dev
+terraform -chdir=12-monitoring/grafana/managed plan  -var-file=env/12-monitoring-grafana-managed-dev.tfvars
+terraform -chdir=12-monitoring/grafana/managed apply -var-file=env/12-monitoring-grafana-managed-dev.tfvars
 ```
 
 > Never `terraform apply`/`destroy` here without explicit approval.
@@ -80,7 +80,7 @@ claude mcp add-json "grafana" '{"command":"uvx","args":["mcp-grafana"],"env":{"G
 - **Token** — force early rotation with:
 
   ```bash
-  terraform -chdir=06-monitoring/grafana/managed apply -replace=grafana_service_account_token.mcp_claude_code -var-file=env/06-monitoring-grafana.tfvars
+  terraform -chdir=12-monitoring/grafana/managed apply -replace=grafana_service_account_token.mcp_claude_code -var-file=env/12-monitoring-grafana-managed-dev.tfvars
   ```
 
   Bumps `data_json_wo_version` isn't needed here since the resource itself

@@ -31,7 +31,7 @@ variable "backup_scaleway_state_bucket" {
 variable "backup_scaleway_state_key" {
   description = "Object key for 03-storage/scaleway's state within backup_scaleway_state_bucket."
   type        = string
-  default     = "backup/scaleway/03-backup-dev-bucket/terraform.tfstate"
+  default     = "03-storage/scaleway/03-storage-scaleway-dev/terraform.tfstate"
 }
 
 variable "openbao_unseal_aws_state_bucket" {
@@ -43,6 +43,6 @@ variable "openbao_unseal_aws_state_bucket" {
 variable "openbao_unseal_aws_state_key" {
   description = "Object key for 02-encryption/aws's state within openbao_unseal_aws_state_bucket."
   type        = string
-  default     = "openbao-unseal/aws/03-backup-dev-bucket/terraform.tfstate"
+  default     = "02-encryption/aws/02-encryption-aws-dev/terraform.tfstate"
 }
 

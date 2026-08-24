@@ -4,13 +4,13 @@ output "server_public_key" {
 }
 
 output "server_private_key" {
-  description = "WireGuard server private key — sensitive. Read directly by 05-secrets/openbao/managed via terraform_remote_state (kv/apps/wireguard/server-key). Never committed here."
+  description = "WireGuard server private key — sensitive. Read directly by 11-secrets/openbao/managed via terraform_remote_state (kv/apps/wireguard/server-key). Never committed here."
   value       = wireguard_asymmetric_key.server.private_key
   sensitive   = true
 }
 
 output "peer_public_keys" {
-  description = "peer name -> public key. Non-secret. Read (with peer_addresses) by 05-secrets/openbao/managed via terraform_remote_state into kv/apps/wireguard/peers, which the gitops repo's services/platform/wireguard/init syncs down — nothing hardcodes these."
+  description = "peer name -> public key. Non-secret. Read (with peer_addresses) by 11-secrets/openbao/managed via terraform_remote_state into kv/apps/wireguard/peers, which the gitops repo's services/platform/wireguard/init syncs down — nothing hardcodes these."
   value       = { for name, key in wireguard_asymmetric_key.peer : name => key.public_key }
 }
 
@@ -20,7 +20,7 @@ output "peer_addresses" {
 }
 
 output "peer_private_keys" {
-  description = "peer name -> private key. Sensitive. ci-github-actions is read directly by 05-secrets/openbao/managed via terraform_remote_state; every other entry stays local — see peer_confs — never committed, never round-tripped through OpenBao."
+  description = "peer name -> private key. Sensitive. ci-github-actions is read directly by 11-secrets/openbao/managed via terraform_remote_state; every other entry stays local — see peer_confs — never committed, never round-tripped through OpenBao."
   value       = { for name, key in wireguard_asymmetric_key.peer : name => key.private_key }
   sensitive   = true
 }

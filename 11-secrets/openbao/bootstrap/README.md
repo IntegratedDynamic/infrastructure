@@ -1,7 +1,7 @@
-# 05-secrets/openbao/bootstrap — Terraform identity for OpenBao
+# 11-secrets/openbao/bootstrap — Terraform identity for OpenBao
 
 A standalone Terraform root that provisions the **AppRole identity
-`05-secrets/openbao/managed` (and any later root) uses to manage OpenBao's
+`11-secrets/openbao/managed` (and any later root) uses to manage OpenBao's
 internal configuration** declaratively (auth methods, mounts, ACL policies),
 instead of the `bao` CLI one-off commands this cluster's config relied on
 originally (see the gitops repo's `openbao-claude.md` for that history).
@@ -15,18 +15,19 @@ implements — read it before changing anything here.
 (AWS, Scaleway) so CI/humans can authenticate to them — none of
 those depend on the cluster existing. OpenBao only exists *because*
 `10-cluster/` stood it up first, so managing it declaratively has a strictly
-later lifecycle than the cluster domain — a real exception to the "number
-roughly encodes apply order" convention (see `CLAUDE.md`), since `10-cluster/`
-was moved to a higher number than `05-secrets/` later in this repo's history
-for unrelated reasons (freeing up low numbers), without this domain's
-dependency on it changing. Hence its own domain regardless: `05-secrets/`
-reconciles OpenBao's structure, `01-iam/` doesn't touch anything
-cluster-dependent.
+later lifecycle than the cluster domain. Domain number matches that now:
+this root moved from `05-secrets/` to `11-secrets/` in the 2026-08-24
+workspace-naming refacto specifically to fix the "number roughly encodes
+apply order" convention (see `CLAUDE.md`) being backwards here — `05` used
+to sit *before* `10-cluster/` despite this root only being applyable once the
+cluster (and gitops-deployed OpenBao) already exist. Still its own domain
+regardless of number, though: `11-secrets/` reconciles OpenBao's structure,
+`01-iam/` doesn't touch anything cluster-dependent.
 
 `bootstrap/` (not `ci-managed/`) because creating this AppRole itself needs a
 human admin credential (OIDC admin token, or the root token) — the same
 human/admin-applied trust-anchor pattern as `00-foundation/aws` and
-`01-iam/bootstrap/scaleway`. A later `05-secrets/ci-managed/*` root could
+`01-iam/bootstrap/scaleway`. A later `11-secrets/ci-managed/*` root could
 consume this AppRole if declarative OpenBao management ever moves into CI.
 
 ## Why AppRole and not OIDC
@@ -75,19 +76,19 @@ authenticating without a human in the loop.
 ## Apply
 
 ```bash
-terraform -chdir=05-secrets/openbao/bootstrap init
-terraform -chdir=05-secrets/openbao/bootstrap workspace select -or-create 05-secrets-openbao
-terraform -chdir=05-secrets/openbao/bootstrap plan  -var-file=env/05-secrets-openbao.tfvars    # review first
-terraform -chdir=05-secrets/openbao/bootstrap apply -var-file=env/05-secrets-openbao.tfvars    # mounts approle/, creates policy+role+secret_id
+terraform -chdir=11-secrets/openbao/bootstrap init
+terraform -chdir=11-secrets/openbao/bootstrap workspace select -or-create 11-secrets-openbao-bootstrap-dev
+terraform -chdir=11-secrets/openbao/bootstrap plan  -var-file=env/11-secrets-openbao-bootstrap-dev.tfvars    # review first
+terraform -chdir=11-secrets/openbao/bootstrap apply -var-file=env/11-secrets-openbao-bootstrap-dev.tfvars    # mounts approle/, creates policy+role+secret_id
 ```
 
 > Never `terraform apply`/`destroy` here without explicit approval.
 
-## Consuming the AppRole (05-secrets/openbao/managed onward)
+## Consuming the AppRole (11-secrets/openbao/managed onward)
 
 ```bash
-terraform -chdir=05-secrets/openbao/bootstrap output -raw role_id
-terraform -chdir=05-secrets/openbao/bootstrap output -raw secret_id   # sensitive — don't paste into shell history
+terraform -chdir=11-secrets/openbao/bootstrap output -raw role_id
+terraform -chdir=11-secrets/openbao/bootstrap output -raw secret_id   # sensitive — don't paste into shell history
 ```
 
 The consuming root's `local.auto.tfvars` (per-developer, gitignored — same
@@ -104,7 +105,7 @@ token.
   stops being usable after that window. Force early rotation with:
 
   ```bash
-  terraform -chdir=05-secrets/openbao/bootstrap apply -replace=vault_approle_auth_backend_role_secret_id.terraform -var-file=env/05-secrets-openbao.tfvars
+  terraform -chdir=11-secrets/openbao/bootstrap apply -replace=vault_approle_auth_backend_role_secret_id.terraform -var-file=env/11-secrets-openbao-bootstrap-dev.tfvars
   ```
 
   Re-run the "Consuming the AppRole" step afterward — the old `secret_id`
