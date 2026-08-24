@@ -4,12 +4,17 @@ terraform {
   backend "s3" {
     bucket = "id-terraform-state-01-iam-workload-scaleway"
     region = "fr-par"
-    # Prefix kept as "dns/scaleway" (≠ this root's path 01-iam/workload/scaleway/,
-    # moved here from 04-dns/scaleway/ since this root owns no DNS resource — it
-    # only provisions the external-dns workload identity) on purpose: the state
-    # key is decoupled from the directory, so the move was a pure git mv with
-    # zero state migration.
-    workspace_key_prefix        = "dns/scaleway"
+    # Prefix + workspace name now mirror this root's own path (2026-08-24
+    # workspace-naming refacto) — used to be "dns/scaleway", a leftover from
+    # this root's old location 04-dns/scaleway/ (moved here since this root
+    # owns no DNS resource, only the workload identities below). NOTE: the
+    # workspace name feeds real Scaleway IAM application/policy names below
+    # (${each.key}-${terraform.workspace}) — renaming it renames those live
+    # resources in place (Scaleway API keys are tied to application_id, not
+    # name, so this is not expected to rotate any credential — verified via
+    # `terraform plan` before apply). Old state object left in place under
+    # the old prefix/workspace, orphaned on purpose (never deleted).
+    workspace_key_prefix        = "01-iam/workload/scaleway"
     key                         = "terraform.tfstate"
     encrypt                     = true
     use_lockfile                = true
