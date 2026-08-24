@@ -581,8 +581,13 @@ resource "kubernetes_job_v1" "wait_platform_apps_healthy" {
   spec {
     # Overall budget for all four Applications combined — generous for the
     # same "cluster boot, not steady-state" reason bootstrap's own
-    # syncPolicy.retry.limit comment gives.
-    active_deadline_seconds = 900
+    # syncPolicy.retry.limit comment gives. Bumped 900 -> 1800 (2026-08-25):
+    # confirmed live on a from-scratch cluster boot that a healthy run can
+    # itself take 7+ minutes once ArgoCD/DNS warm-up variance is factored
+    # in, and the first-ever timing run hit the original 900s budget
+    # outright -- 1800s is a deliberately generous placeholder until this
+    # is measured more precisely across a few more boots.
+    active_deadline_seconds = 1800
     backoff_limit           = 0
 
     template {
@@ -640,8 +645,12 @@ resource "kubernetes_job_v1" "wait_platform_apps_healthy" {
 
   wait_for_completion = true
 
+  # Must stay above active_deadline_seconds above (30m) -- this is
+  # Terraform's own wait on the Job resource itself, so a shorter value
+  # here would make Terraform give up before the Job's own budget even
+  # runs out.
   timeouts {
-    create = "16m"
+    create = "35m"
   }
 
   depends_on = [
