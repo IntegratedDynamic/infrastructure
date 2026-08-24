@@ -2,9 +2,12 @@ terraform {
   # Migrated to the dedicated Scaleway state bucket (00-foundation/scaleway,
   # state_buckets["iam_bootstrap_aws"]) — independent of the real AWS
   # credentials `provider "aws"` below uses to manage actual AWS resources.
-  # Migrated to the dedicated Scaleway state bucket (00-foundation/scaleway,
-  # state_buckets["iam_bootstrap_aws"]) — independent of the real AWS
-  # credentials `provider "aws"` below uses to manage actual AWS resources.
+  #
+  # workspace_key_prefix already matched this root's own path; the workspace
+  # name (env/01-iam-bootstrap-aws-dev.tfvars) is what the 2026-08-24
+  # workspace-naming refacto fixed — suffixed -dev to reflect the actual
+  # (dev, not prod) environment. Old state object left in place, orphaned on
+  # purpose (never deleted).
   backend "s3" {
     bucket                      = "id-terraform-state-01-iam-bootstrap-aws"
     region                      = "fr-par"

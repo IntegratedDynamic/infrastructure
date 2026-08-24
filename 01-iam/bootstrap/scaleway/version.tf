@@ -4,10 +4,12 @@ terraform {
   backend "s3" {
     bucket = "id-terraform-state-01-iam-bootstrap-scaleway"
     region = "fr-par"
-    # Prefix kept as "github-ci" (≠ this root's path 01-iam/bootstrap/scaleway/)
-    # on purpose: the state key is decoupled from the directory, so the repo
-    # restructure was a pure move with zero state migration.
-    workspace_key_prefix        = "github-ci"
+    # Prefix + workspace name now mirror this root's own path (2026-08-24
+    # workspace-naming refacto) — used to be "github-ci" from before this
+    # root existed under its current directory. Old state object left in
+    # place under the old prefix/workspace, orphaned on purpose (never
+    # deleted).
+    workspace_key_prefix        = "01-iam/bootstrap/scaleway"
     key                         = "terraform.tfstate"
     encrypt                     = true
     use_lockfile                = true
