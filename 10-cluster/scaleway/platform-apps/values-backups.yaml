@@ -1,0 +1,15 @@
+# Velero — extracted from gitops repo's bootstrap/values.yaml wave 4
+# (infra#84). velero-scaleway-credentials is no longer an
+# ExternalSecret-materialized chart (gitops repo's former
+# velero/secret — deleted) — this repo's main.tf now writes that
+# Kubernetes Secret directly (still also written to OpenBao KV by
+# 11-secrets/openbao/managed, which stays the audited source of truth for
+# the credential value itself), since Terraform already owns the bucket +
+# IAM identity it comes from (03-storage/scaleway).
+#
+# Single-app domain, no intra-domain ordering needed — kept as a wave-0
+# list (rather than a bare Application) for the same reason gitops repo's
+# bootstrap chart never special-cases single-wave domains: consistent shape
+# across secrets-apps/monitoring-apps/backups-apps, cheap to extend later.
+apps:
+  - {name: velero, namespace: velero, chartPath: services/platform/velero/chart, valueFile: values-scaleway.yaml, wave: "0", syncWaveLabelPaths: ['velero.podLabels.scalepack\.fr/sync-wave']}

@@ -39,6 +39,16 @@ variable "gitops_revision" {
   default = "main"
 }
 
+# Revision of THIS repo (infrastructure) ArgoCD's secrets-apps/monitoring-apps/
+# backups-apps Applications pull platform-apps/ from — see argocd.tf's
+# argocd_platform_apps helm_release. Same "override on your own branch to
+# test end-to-end, never merge that change" DevX trick as gitops_revision
+# above; MUST stay "main" on origin/main.
+variable "infra_revision" {
+  type    = string
+  default = "main"
+}
+
 variable "update_kubeconfig" {
   type        = bool
   default     = false

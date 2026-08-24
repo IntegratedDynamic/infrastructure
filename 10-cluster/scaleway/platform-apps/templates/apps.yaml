@@ -1,0 +1,70 @@
+# Same rendering trick gitops repo's bootstrap/templates/scaleway.yaml uses
+# for the exact same reason (see that file's own header comment and
+# bootstrap/README.md's "Why sync-wave on one Application's own resources,
+# not an ApplicationSet"): every Application in .Values.apps is rendered
+# directly as a managed resource of THIS chart's own Application sync (one
+# of secrets-apps/monitoring-apps/backups-apps, see argocd.tf's
+# argocd_platform_apps helm_release) — never an ApplicationSet, since
+# ArgoCD's Progressive Syncs (RollingSync) doesn't gate first-ever creation,
+# only staged updates to an already-existing fleet (confirmed live
+# 2026-08-11 on the gitops repo's own bootstrap chart before it dropped
+# ApplicationSet). Plain sync-wave on one parent's own resources is the
+# mechanism that's actually proven to work for bootstrap ordering.
+{{- range $app := .Values.apps }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: {{ .name }}
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: {{ .wave | quote }}
+spec:
+  project: default
+
+  source:
+    repoURL: {{ $.Values.repoURL }}
+    targetRevision: {{ $.Values.revision }}
+    path: {{ .chartPath }}
+    helm:
+      valueFiles:
+        - {{ .valueFile }}
+      {{- if .skipCrds }}
+      # See gitops repo's bootstrap/templates/scaleway.yaml — same
+      # skipCrds/dedicated-CRDs-Application split for kube-prometheus-stack.
+      skipCrds: true
+      {{- end }}
+      {{- if .syncWaveLabelPaths }}
+      # Same anti-affinity wave-label injection as
+      # gitops repo's bootstrap/templates/scaleway.yaml — see that file's
+      # comment for the full "why" (forceString avoids a bare digit
+      # rendering as an unquoted YAML integer label value).
+      parameters:
+        {{- range .syncWaveLabelPaths }}
+        - name: {{ . }}
+          value: {{ $app.wave | quote }}
+          forceString: true
+        {{- end }}
+      {{- end }}
+
+  # Same webhook caBundle exception as gitops repo's
+  # bootstrap/templates/scaleway.yaml — see that file's comment for why this
+  # is unconditional rather than opt-in per app.
+  ignoreDifferences:
+    - group: admissionregistration.k8s.io
+      kind: MutatingWebhookConfiguration
+      jqPathExpressions:
+        - '.webhooks[]?.clientConfig.caBundle'
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: {{ .namespace }}
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+{{- end }}
