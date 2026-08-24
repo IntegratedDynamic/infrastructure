@@ -287,11 +287,15 @@ Two-step, one-time bootstrap:
 
 Same bootstrap pattern as `local/`, but with the Kapsule cluster + node pool (`DEV1-M`, min=0/max=3) instead.
 
-**Secrets/monitoring/backups (infra#84, 2026-08-24):** OpenBao+ESO, monitoring
+**Secrets/monitoring/backups/networking (infra#84, 2026-08-24 + scope
+addition 2026-08-25):** OpenBao+ESO, monitoring
 (kube-prometheus-stack/loki/tempo/alloy/otel-collector, NOT Grafana — that
-stays in `gitops`), and Velero were extracted from `gitops` repo's
-`bootstrap` app-of-apps into this root's own `platform-apps/` chart —
-three ArgoCD Applications (`secrets-apps`/`monitoring-apps`/`backups-apps`,
+stays in `gitops`), Velero, and cluster networking (envoy-gateway,
+cert-manager + its Scaleway DNS01 webhook, external-dns, gateway-config —
+NOT the per-product `*-gateway` HTTPRoute charts like `dex-gateway`, which
+stay in `gitops`) were extracted from `gitops` repo's `bootstrap`
+app-of-apps into this root's own `platform-apps/` chart — four ArgoCD
+Applications (`secrets-apps`/`monitoring-apps`/`backups-apps`/`networking-apps`,
 created via `argocd.tf`'s `argocd_platform_apps` helm_release, same
 `argocd-apps` chart mechanism `bootstrap` itself uses) that start in
 parallel with each other and must reach Healthy before `bootstrap`'s own
@@ -309,7 +313,18 @@ access keys, from `03-storage/scaleway`) are now written directly as
 OpenBao+ESO's `ExternalSecret` round-trip — OpenBao (`11-secrets/openbao/managed`)
 still gets the same values written to it independently, staying the
 audited source of truth, but ESO is no longer in the delivery path for
-these four. `monitoring`/`velero` namespaces are Terraform-managed
+these four. `networking-apps`' own two secrets
+(`cert-manager-webhook-secret`/`external-dns-secret`, the Scaleway
+Domains/DNS API credential) deliberately keep the OpenBao+ESO
+`ExternalSecret` path unchanged instead — Terraform doesn't originate that
+credential the way it does the four Object Storage ones, so there's nothing
+to gain by bypassing ESO there (self-heals against `secrets-apps` the same
+way every other `*-secret` chart in `gitops`'s `bootstrap` already
+tolerates). `gateway-config`'s own dependency on Velero (its cert-restore
+PreSync hook) is left ungated for the same "already self-contained,
+fails open" reason documented in `platform-apps/README.md` — no
+Terraform-level wait between `networking-apps` and `backups-apps`.
+`monitoring`/`velero` namespaces are Terraform-managed
 (`kubernetes_namespace`, same pattern `openbao`'s namespace already used)
 purely because these Secrets must exist before ArgoCD's own
 `CreateNamespace=true` would otherwise create them — every other extracted

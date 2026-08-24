@@ -342,8 +342,8 @@ resource "helm_release" "argocd_apps" {
 
   # wait_platform_apps_healthy (below) is the real Terraform-enforced
   # prerequisite: bootstrap's Application must not even be created until
-  # secrets-apps/monitoring-apps/backups-apps are Healthy — see
-  # platform-apps/README.md.
+  # secrets-apps/monitoring-apps/backups-apps/networking-apps are Healthy —
+  # see platform-apps/README.md.
   depends_on = [helm_release.argocd, null_resource.wait_platform_apps_healthy]
 
   values = [<<EOF
@@ -380,16 +380,17 @@ EOF
   ]
 }
 
-# ── Secrets/monitoring/backups, extracted from gitops repo (infra#84) ───────
+# ── Secrets/monitoring/backups/networking, extracted from gitops repo (infra#84) ───
 #
-# Three parent Applications (secrets-apps/monitoring-apps/backups-apps),
-# each pointing at this repo's own platform-apps/ chart (not gitops) for
-# their OWN list of child Applications — see that chart's README.md for the
-# full "why" (ArgoCD sync-wave only orders resources within one parent
-# Application's own sync, so three separate parents is what actually lets
-# these domains start in parallel with each other while keeping each
-# domain's own real intra-domain ordering, e.g. kube-prometheus-stack-crds
-# before kube-prometheus-stack). The child Applications' own charts
+# Four parent Applications (secrets-apps/monitoring-apps/backups-apps/
+# networking-apps), each pointing at this repo's own platform-apps/ chart
+# (not gitops) for their OWN list of child Applications — see that chart's
+# README.md for the full "why" (ArgoCD sync-wave only orders resources
+# within one parent Application's own sync, so separate parents is what
+# actually lets these domains start in parallel with each other while
+# keeping each domain's own real intra-domain ordering, e.g.
+# kube-prometheus-stack-crds before kube-prometheus-stack, or
+# envoy-gateway/cert-manager before gateway-config). The child Applications' own charts
 # (services/platform/openbao/chart, monitoring/chart, ...) are untouched,
 # still pulled from the gitops repo, same as before this split — only which
 # parent Application claims them as managed resources changed.
@@ -485,6 +486,31 @@ applications:
         selfHeal: true
       syncOptions:
         - CreateNamespace=true
+
+  networking-apps:
+    namespace: argocd
+    project: default
+    source:
+      repoURL: https://github.com/IntegratedDynamic/infrastructure.git
+      targetRevision: ${var.infra_revision}
+      path: 10-cluster/scaleway/platform-apps
+      helm:
+        valueFiles:
+          - values-networking.yaml
+        parameters:
+          - name: revision
+            value: ${var.gitops_revision}
+    destination:
+      server: https://kubernetes.default.svc
+      namespace: argocd
+    syncPolicy:
+      retry:
+        limit: 10
+      automated:
+        prune: true
+        selfHeal: true
+      syncOptions:
+        - CreateNamespace=true
 EOF
   ]
 }
@@ -520,8 +546,9 @@ resource "local_sensitive_file" "platform_apps_wait_kubeconfig" {
 }
 
 # The Terraform-enforced prerequisite itself: secrets-apps/monitoring-apps/
-# backups-apps must all reach Healthy before bootstrap's own Application
-# resource is even created (see that resource's depends_on above) — ArgoCD
+# backups-apps/networking-apps must all reach Healthy before bootstrap's own
+# Application resource is even created (see that resource's depends_on
+# above) — ArgoCD
 # has no native way to express "wait for these independent top-level
 # Applications" (sync-wave doesn't cross Application boundaries), so this is
 # enforced as a real Terraform apply-order dependency instead. Polls rather
@@ -540,7 +567,7 @@ resource "null_resource" "wait_platform_apps_healthy" {
     command = <<-EOT
       set -eu
       export KUBECONFIG=${local_sensitive_file.platform_apps_wait_kubeconfig.filename}
-      for app in secrets-apps monitoring-apps backups-apps; do
+      for app in secrets-apps monitoring-apps backups-apps networking-apps; do
         echo "Waiting for Application/$app to become Healthy..."
         deadline=$(($(date +%s) + 600))
         while true; do
