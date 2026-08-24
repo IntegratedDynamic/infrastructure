@@ -101,20 +101,31 @@ data "terraform_remote_state" "openbao_managed" {
 # credential 11-secrets/openbao/managed already generates and owns
 # (kv/apps/grafana/admin). No chicken-and-egg like OpenBao's own bootstrap
 # root_token: Grafana's admin password is already Terraform state elsewhere,
-# so this root needs zero manually-supplied secrets. Defaults to the public
-# route: Grafana's basic-auth API path isn't gated behind the shared
-# sso-guard edge policy (gitops repo's services/platform/monitoring/
-# grafana-gateway deliberately bypasses it, same reasoning the OpenBao
-# vault provider's own comment gives for its public route), so no
-# WireGuard tunnel is needed for the admin path.
+# so this root needs zero manually-supplied secrets.
 #
-# Overridden via -var for the Argo Workflows CronWorkflow: confirmed live,
-# the public route consistently times out ("context deadline exceeded")
-# from inside the cluster -- pods reaching the cluster's own public
-# ingress from behind it is a common hairpin-NAT gap, not something this
-# root can fix. -var grafana_url=http://grafana.monitoring.svc:80/
-# (matches gitops repo's services/platform/monitoring/grafana-gateway's
-# backend Service) avoids the public route entirely for that context.
+# Defaults to Grafana's internal Service address (matches gitops repo's
+# services/platform/monitoring's Grafana Service, namespace monitoring, port
+# 80) — since infrastructure#81, reachable here through the WireGuard
+# tunnel's internal-cluster DNS + proxy-dynamic sidecar (04-vpn/wireguard-
+# site-to-site/README.md's "Internal cluster DNS" section), same pattern as the
+# vault provider's own default in 11-secrets/openbao/{bootstrap,managed}.
+# Bring the tunnel up first (`wg-quick up <peer_conf_paths output>`).
+#
+# Grafana's basic-auth API path specifically isn't gated behind the shared
+# sso-guard edge policy (gitops repo's services/platform/monitoring/
+# grafana-gateway deliberately bypasses it), so the public route
+# (https://grafana.scalepack.fr/) still works fine too if the tunnel isn't
+# up — just isn't the default anymore, for consistency with the vault
+# provider's own address.
+#
+# Overridden via -var for the Argo Workflows CronWorkflow (gitops repo
+# services/platform/argo-workflows) — passes this same address directly,
+# redundant with the default now, kept explicit in that chart's values
+# since it's the whole reason the override exists: confirmed live, the
+# public route consistently times out ("context deadline exceeded") from
+# inside the cluster (a pod reaching the cluster's own public ingress from
+# behind it is a common hairpin-NAT gap), so it can't depend on this
+# default ever changing back.
 provider "grafana" {
   url  = var.grafana_url
   auth = "admin:${data.terraform_remote_state.openbao_managed.outputs.grafana_admin_password}"

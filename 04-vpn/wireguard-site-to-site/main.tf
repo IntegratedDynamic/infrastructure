@@ -33,8 +33,9 @@ data "wireguard_config_document" "peer" {
   # peer reaches any internal address using its real Service hostname,
   # scoped to exactly this interface's lifetime (nothing to revert when the
   # tunnel goes down, unlike an /etc/hosts edit). Resolving the name only
-  # gets a peer to the tunnel pod — that chart's proxyTargets is what
-  # actually forwards the traffic on to the real Service (infrastructure#81).
+  # gets a peer to the tunnel pod — that chart's proxy-dynamic sidecar is
+  # what actually forwards the traffic on to the real Service, resolved
+  # live from the request's own Host header/SNI (infrastructure#81).
   dns = [split("/", var.server_address)[0]]
 
   peer {

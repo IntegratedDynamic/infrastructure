@@ -42,7 +42,9 @@ grows beyond one personal-use token.
 
 - **`grafana` provider**: authenticates as the `terraform` service account
   from `12-monitoring/grafana/bootstrap`, read via
-  `data.terraform_remote_state` — see `version.tf`.
+  `data.terraform_remote_state` — see `version.tf`. Defaults to Grafana's
+  internal Service address, same address/tunnel rationale as that root's
+  own `version.tf` (infrastructure#81).
 - **`vault` provider**: reuses the same `terraform` AppRole
   `11-secrets/openbao/managed` itself authenticates as (its policy already
   grants `kv/data|metadata/apps/*` broadly, so writing a new path here needs

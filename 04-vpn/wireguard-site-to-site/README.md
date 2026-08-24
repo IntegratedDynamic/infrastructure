@@ -102,15 +102,34 @@ Kapsule's kubelet doesn't allowlist that sysctl, and Scaleway's
 version at all. Even where available, that's a cluster-wide relaxation for
 one workload's benefit — worth avoiding regardless.
 
-The gitops chart instead terminates the tunnel and proxies to each target
-at the application layer (`proxyTargets`, one `socat` sidecar per entry,
-resolving its target — e.g. `openbao.openbao.svc.cluster.local` — via
-ordinary in-cluster DNS) — no kernel routing, no sysctls, no dependency on
-any `ClusterIP` being stable across a cluster rebuild. This is also why DNS
-resolution alone (see "Internal cluster DNS" below) doesn't make an
-*arbitrary* internal address reachable: a peer's traffic still needs a
-listener on the tunnel pod for the specific target port, so a new address
-means adding a `proxyTargets` entry, not just a DNS answer.
+The gitops chart instead terminates the tunnel and proxies at the
+application layer: no kernel routing, no sysctls, no dependency on any
+`ClusterIP` being stable across a cluster rebuild. A first pass at this
+(infrastructure#81's initial PR, 2026-08-24) used one `socat` sidecar per
+named target (`proxyTargets: {name: {port, target}}`) — simple, but meant
+listing every internal Service by hand, one PR per addition. Replaced the
+same day with `proxy-dynamic` (gitops repo's `services/platform/
+wireguard-site-to-site/config`, `dynamicProxy`): a single `nginx` sidecar
+that resolves the *actual* backend live from what the peer's own request
+names — the plain-HTTP request's `Host` header (`dynamicProxy.httpPorts`)
+or the TLS ClientHello's SNI (`dynamicProxy.tlsPorts`, passthrough via
+`ssl_preread`, no certificate needed) — against this cluster's own CoreDNS,
+instead of a hardcoded target. Any internal Service on an already-listened
+port is reachable the moment DNS resolves its name (see "Internal cluster
+DNS" below); nothing to add to the gitops chart when a new one shows up.
+
+A TCP listener still has to be bound per **port** ahead of time (a socket
+can't cover every port at once) — that's the one thing not fully dynamic.
+`dynamicProxy.httpPorts` covers OpenBao's plain-HTTP API (`8200`) and
+Grafana (`80`) today; add a port there (not a target) the day some other
+internal service needs one neither already covers.
+
+**Verified live 2026-08-24** (a debug pod running the exact rendered
+`nginx.conf`, `nginx -t` plus a real request): `curl` with `Host:
+openbao.openbao.svc.cluster.local:8200` returns OpenBao's real
+`/v1/sys/health`, and `Host: grafana.monitoring.svc.cluster.local` against
+port `80` returns Grafana's normal 302 — both driven purely by the Host
+header, no target hardcoded anywhere in the proxy.
 
 ## Internal cluster DNS
 
@@ -127,12 +146,11 @@ passthrough to Envoy Gateway, for OIDC-gated web UIs) were removed
 reaching an internal API, not human OIDC/UI login, which stays on the
 public route untouched.
 
-With the tunnel up, `dig openbao.openbao.svc.cluster.local` should resolve
-to the tunnel's own address and `curl
-http://openbao.openbao.svc.cluster.local:8200/v1/sys/health` should reach
-OpenBao through the full chain (tunnel → gitops's `proxy-openbao` sidecar →
-OpenBao's Service) — the same address `11-secrets/openbao/{bootstrap,managed}`
-now default to (see their `version.tf`/`variables.tf`).
+`11-secrets/openbao/{bootstrap,managed}` default to
+`http://openbao.openbao.svc:8200/` and `12-monitoring/grafana/
+{bootstrap,managed}` to `http://grafana.monitoring.svc:80/` — both reach
+their target through `proxy-dynamic` above once the tunnel is up (see each
+root's own `version.tf`/`variables.tf`).
 
 ## Why its own domain, and why it's temporary
 
