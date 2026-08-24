@@ -37,7 +37,7 @@ identities = {
   # (confirmed live — a longer purpose string here hit exactly that error
   # on apply).
   argo-workflows-state = {
-    purpose            = "reads/writes Scaleway state buckets for the terraform-apply CronWorkflows (05-secrets/openbao, 06-monitoring/grafana)"
+    purpose            = "reads/writes Scaleway state buckets for the terraform-apply CronWorkflows (11-secrets/openbao, 12-monitoring/grafana)"
     policy_description = "Object Storage read/write, project-scoped (Scaleway IAM has no bucket-level rule field)."
     rules = [
       {
