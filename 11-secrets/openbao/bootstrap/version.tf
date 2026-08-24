@@ -1,10 +1,19 @@
 terraform {
   # Migrated to the dedicated Scaleway state bucket (00-foundation/scaleway,
   # state_buckets["secrets_openbao_bootstrap"]).
+  #
+  # Prefix + workspace name now mirror this root's own path (2026-08-24
+  # workspace-naming refacto, which also moved this domain from 05-secrets
+  # to 11-secrets — postdating 10-cluster) — used to be
+  # "secrets/bootstrap/openbao" / "05-secrets-openbao" (segment order didn't
+  # even match the directory path). No terraform.workspace naming coupling
+  # in this root, so this is a plain state relocation, zero resource impact.
+  # Old state object left in place under the old prefix/workspace, orphaned
+  # on purpose (never deleted).
   backend "s3" {
     bucket                      = "id-terraform-state-05-secrets-openbao-bootstrap"
     region                      = "fr-par"
-    workspace_key_prefix        = "secrets/bootstrap/openbao"
+    workspace_key_prefix        = "11-secrets/openbao/bootstrap"
     key                         = "terraform.tfstate"
     encrypt                     = true
     use_lockfile                = true
