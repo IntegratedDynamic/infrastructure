@@ -252,6 +252,63 @@ resource "kubernetes_namespace" "velero" {
   depends_on = [scaleway_k8s_pool.default]
 }
 
+# Confirmed live (2026-08-25, reproduced twice): destroying this namespace
+# hangs indefinitely (~5min, then `terraform destroy` errors "context
+# deadline exceeded") on Velero's own Restore custom resources (created by
+# gitops repo's cert-restore/grafana-restore PreSync hooks), which carry
+# `restores.velero.io/external-resources-finalizer` -- a finalizer only
+# Velero's own controller ever removes, by reconciling it. Kubernetes gives
+# no ordering guarantee that a namespace's contained custom resources get
+# their finalizers processed before the controller that owns those
+# finalizers is itself torn down as part of the SAME cascading namespace
+# delete -- a genuine race, not just slowness (a longer timeout doesn't
+# reliably fix it, since the controller can lose the race regardless of
+# how long we wait). Since a `terraform destroy` tears down the whole
+# cluster anyway, there's no external state left to protect by waiting for
+# Velero's own cleanup -- this proactively strips finalizers from every
+# velero.io-group object in the namespace right before the namespace
+# itself is destroyed, instead of hoping the race goes the other way.
+#
+# Connection details are captured in `triggers` (not referenced directly
+# in the provisioner) because a destroy-time provisioner may only
+# reference `self` or input variables, never other resources -- Terraform
+# can't guarantee those resources' state still exists during a partial
+# destroy. Stashing them here at create time, read back via `self.triggers`
+# at destroy time, is the standard workaround.
+resource "null_resource" "velero_namespace_predelete_cleanup" {
+  depends_on = [kubernetes_namespace.velero]
+
+  triggers = {
+    host      = scaleway_k8s_cluster.this.kubeconfig[0].host
+    token     = scaleway_k8s_cluster.this.kubeconfig[0].token
+    namespace = kubernetes_namespace.velero.metadata[0].name
+  }
+
+  provisioner "local-exec" {
+    when       = destroy
+    on_failure = continue
+
+    # No kubeconfig file: plain --server/--token flags avoid nesting a
+    # bash heredoc inside this HCL heredoc (indentation-stripping rules
+    # differ between the two -- Terraform's `<<-` strips based on the
+    # closing marker's own column, bash's `<<-` only strips literal tabs
+    # -- fragile to get both right at once). --insecure-skip-tls-verify is
+    # an acceptable tradeoff here: this cluster is mid-destroy, and the
+    # token already came straight out of Terraform state on the same
+    # machine, so skipping CA validation adds no meaningful exposure.
+    command = <<-EOT
+      set -eu
+      kc="kubectl --server=${self.triggers.host} --token=${self.triggers.token} --insecure-skip-tls-verify=true"
+      for kind in $($kc api-resources --api-group=velero.io --namespaced -o name 2>/dev/null); do
+        for obj in $($kc get "$kind" -n "${self.triggers.namespace}" -o name 2>/dev/null); do
+          echo "Stripping finalizers from $obj before namespace delete..."
+          $kc patch "$obj" -n "${self.triggers.namespace}" --type=merge -p '{"metadata":{"finalizers":[]}}' 2>/dev/null || true
+        done
+      done
+    EOT
+  }
+}
+
 # thanos-objstore-config / loki-s3-credentials / tempo-s3-credentials /
 # velero-scaleway-credentials: written directly here instead of via
 # OpenBao+ESO's ExternalSecret round-trip (gitops repo's former
