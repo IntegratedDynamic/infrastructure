@@ -433,8 +433,21 @@ resource "helm_release" "argocd_platform_apps" {
   # minutes and made this resource's own destroy time out.
   timeout = 1800
 
+  # scaleway_s3_credentials/openbao_unseal_aws included here too (not just
+  # the four secrets this split introduced): without them, nothing ordered
+  # kubernetes_namespace.openbao's destroy after this release's own --
+  # confirmed live (2026-08-25) that ArgoCD's openbao Application (with
+  # selfHeal: true, and now resources-finalizer.argocd.argoproj.io) was
+  # still actively retrying "create content in namespace openbao" while
+  # Terraform was independently, concurrently deleting that same namespace
+  # directly -- every retry failing with "namespace is being terminated",
+  # forever, since nothing told ArgoCD's own graceful teardown to finish
+  # first. monitoring/velero's namespaces never had this problem only by
+  # accident, via their own four secrets already being listed here.
   depends_on = [
     helm_release.argocd,
+    kubernetes_secret.scaleway_s3_credentials,
+    kubernetes_secret.openbao_unseal_aws,
     kubernetes_secret.thanos_objstore_config,
     kubernetes_secret.loki_s3_credentials,
     kubernetes_secret.tempo_s3_credentials,
