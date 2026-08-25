@@ -64,7 +64,11 @@ variable "update_kubeconfig" {
 variable "argocd_admin_password_hash" {
   description = "Pre-computed bcrypt hash of the ArgoCD admin password. When set, Infisical is not consulted."
   type        = string
-  # default     = ""
+  # Dead as of the switch to OIDC-via-Dex login (argocd.tf sets admin.enabled:
+  # "false" and comments out the Infisical fetch) -- nothing consumes this value
+  # anymore. Default restored so a plain `-var-file` apply (CI included) doesn't
+  # fail on "no value for required variable" for a variable no resource reads.
+  default = ""
 }
 
 # ── Cross-root state reads (Scaleway state buckets, see 00-foundation/scaleway) ──
