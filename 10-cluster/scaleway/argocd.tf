@@ -556,7 +556,23 @@ EOF
 # local-exec provisioner: no dependency on a local `kubectl` binary or a
 # self-generated kubeconfig, works identically whether this root is applied
 # from an admin's machine or CI.
+
+# Confirmed live (2026-08-25): without an explicit depends_on, nothing
+# ordered these after anything more than scaleway_k8s_cluster.this itself
+# (the only hard dependency the kubernetes/helm provider configs create) --
+# Terraform fired both RBAC resources ~6s after the cluster control plane
+# finished, in parallel with scaleway_k8s_pool.default (which took several
+# more minutes), and hit DNS resolution failures on the cluster's own API
+# hostname twice in a row at exactly this point. Every kubernetes_namespace
+# resource elsewhere in this file already depends_on the pool for the same
+# reason; these two need it too -- and since they create objects INSIDE the
+# `argocd` namespace, which helm_release.argocd itself creates
+# (create_namespace = true), depending on that release directly covers
+# both "pool is ready" (it has its own depends_on) and "the namespace these
+# actually need exists" in one dependency.
 resource "kubernetes_service_account" "wait_platform_apps" {
+  depends_on = [helm_release.argocd]
+
   metadata {
     name      = "wait-platform-apps-healthy"
     namespace = "argocd"
@@ -564,6 +580,8 @@ resource "kubernetes_service_account" "wait_platform_apps" {
 }
 
 resource "kubernetes_role" "wait_platform_apps" {
+  depends_on = [helm_release.argocd]
+
   metadata {
     name      = "wait-platform-apps-healthy"
     namespace = "argocd"
