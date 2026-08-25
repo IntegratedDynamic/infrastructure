@@ -65,7 +65,17 @@ permissions:
 jobs:
   terraform:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # A from-scratch apply legitimately needs more than the 20m this started
+    # at -- confirmed live 2026-08-25: module.wait_networking_healthy alone
+    # took 11m30s, almost all of it cert-manager's Application (wave 0 of
+    # networking-apps) retrying a failed sync ("waiting for healthy state of
+    # apps/Deployment/cert-manager-webhook" -> clusterissuers.cert-manager.io
+    # CRD transiently "not established", most likely API-server contention
+    # from ~30 Applications bootstrapping at once) before selfHeal finally
+    # got it to Synced -- which blocks wave 1 (gateway-config/external-dns)
+    # the whole time. 45m gives real margin without masking a genuine hang;
+    # revisit with more data if it's still not enough.
+    timeout-minutes: 45
     # Fed by the environment input above -- carries SCW_ACCESS_KEY /
     # SCW_SECRET_KEY (and satisfies zizmor's secrets-in-environment audit).
     environment: ${{ inputs.environment }}
