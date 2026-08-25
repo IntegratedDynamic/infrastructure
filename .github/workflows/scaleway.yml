@@ -39,9 +39,13 @@ on:
   workflow_dispatch:
     inputs:
       command:
-        description: 'Terraform command (apply = up, destroy = down).'
+        description: >
+          Terraform command (apply = up, destroy = down, hard-destroy = fast
+          down -- strips helm_release/kubernetes_* from state first, so
+          destroy only has the Scaleway cluster left to delete; skips
+          graceful in-cluster teardown, fine for this disposable cluster).
         type: choice
-        options: [plan, apply, destroy]
+        options: [plan, apply, destroy, hard-destroy]
         default: plan
       environment:
         description: >
@@ -67,14 +71,19 @@ jobs:
     runs-on: ubuntu-latest
     # A from-scratch apply legitimately needs more than the 20m this started
     # at -- confirmed live 2026-08-25: module.wait_networking_healthy alone
-    # took 11m30s, almost all of it cert-manager's Application (wave 0 of
-    # networking-apps) retrying a failed sync ("waiting for healthy state of
-    # apps/Deployment/cert-manager-webhook" -> clusterissuers.cert-manager.io
-    # CRD transiently "not established", most likely API-server contention
-    # from ~30 Applications bootstrapping at once) before selfHeal finally
-    # got it to Synced -- which blocks wave 1 (gateway-config/external-dns)
-    # the whole time. 45m gives real margin without masking a genuine hang;
-    # revisit with more data if it's still not enough.
+    # took 11m30s. cert-manager's own Application (networking-apps wave 0)
+    # was actually Synced+Healthy within 2 minutes (one retry) -- the real
+    # gap was the networking-apps wrapper itself taking 6+ more minutes to
+    # notice that and let wave 1 (gateway-config/external-dns) start,
+    # despite dozens of its own reconcile passes in between. Best working
+    # theory: the argocd-application-controller's own queue backlog under
+    # the initial full-tree burst (~30 Applications at once) -- it's CPU-
+    # limited to 3 cores with no controller.status/operation.processors
+    # tuning, and this repo already hit an analogous OOM on the same burst
+    # before (see argocd.tf's GOMEMLIMIT comment) -- not proven, no CPU
+    # metrics captured for that exact window. 45m gives real margin without
+    # masking a genuine hang either way; revisit with more data, or use
+    # hard-destroy below to iterate faster while investigating.
     timeout-minutes: 45
     # Fed by the environment input above -- carries SCW_ACCESS_KEY /
     # SCW_SECRET_KEY (and satisfies zizmor's secrets-in-environment audit).
