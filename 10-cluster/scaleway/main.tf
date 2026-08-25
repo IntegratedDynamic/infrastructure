@@ -289,8 +289,21 @@ resource "kubernetes_namespace" "velero" {
 # can't guarantee those resources' state still exists during a partial
 # destroy. Stashing them here at create time, read back via `self.triggers`
 # at destroy time, is the standard workaround.
+#
+# depends_on BOTH the namespace AND argocd.tf's helm_release.argocd_platform_apps
+# -- confirmed live (2026-08-25) that depending on the namespace alone was
+# not enough: the namespace's OWN destroy is itself gated behind that
+# release finishing its cascade-delete first (same secret-chain ordering
+# fix as kubernetes_namespace.openbao above), which can take many minutes.
+# With only the namespace as a dependency, Terraform was free to run this
+# cleanup as early as possible in the whole destroy -- long before the
+# namespace destroy was actually attempted -- leaving a real window where
+# Velero, still running, recreates the exact Restore objects this had
+# already stripped. Depending on both makes this run immediately adjacent
+# to the namespace destroy it exists to unblock, not whenever Terraform
+# happens to schedule it.
 resource "null_resource" "velero_namespace_predelete_cleanup" {
-  depends_on = [kubernetes_namespace.velero]
+  depends_on = [kubernetes_namespace.velero, helm_release.argocd_platform_apps]
 
   triggers = {
     host      = scaleway_k8s_cluster.this.kubeconfig[0].host
