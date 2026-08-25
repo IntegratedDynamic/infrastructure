@@ -698,14 +698,24 @@ resource "kubernetes_job_v1" "wait_platform_apps_healthy" {
             while true; do
               all_healthy=true
               for app in $apps; do
-                status=$(kubectl get application "$app" -n argocd -o jsonpath='{.status.health.status}' 2>/dev/null || true)
-                if [ "$status" != "Healthy" ]; then
+                sync=$(kubectl get application "$app" -n argocd -o jsonpath='{.status.sync.status}' 2>/dev/null || true)
+                health=$(kubectl get application "$app" -n argocd -o jsonpath='{.status.health.status}' 2>/dev/null || true)
+                # health.status alone isn't enough: a brand-new Application
+                # with zero resources synced yet trivially reports Healthy
+                # (nothing exists yet to BE unhealthy) well before its own
+                # first sync even starts. Confirmed live (2026-08-25): this
+                # Job completed in 17s claiming all four domains healthy,
+                # while backups-apps' own child (velero) hadn't even been
+                # created yet -- checking sync=Synced too is what
+                # wait_bootstrap_healthy already got right below; this Job
+                # just needed the same fix.
+                if [ "$sync" != "Synced" ] || [ "$health" != "Healthy" ]; then
                   all_healthy=false
-                  echo "Application/$app: $${status:-<none yet>}"
+                  echo "Application/$app: sync=$${sync:-<none yet>} health=$${health:-<none yet>}"
                 fi
               done
               if [ "$all_healthy" = "true" ]; then
-                echo "All platform apps are Healthy."
+                echo "All platform apps are Synced and Healthy."
                 exit 0
               fi
               sleep 5
