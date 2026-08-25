@@ -47,7 +47,15 @@ inputs:
       Workspace name is derived by stripping the .tfvars extension.
     required: true
   command:
-    description: 'Terraform command to run: plan | apply | destroy.'
+    description: >
+      Terraform command to run: plan | apply | destroy | hard-destroy.
+      hard-destroy strips every helm_release/kubernetes_* resource (plus the
+      velero-namespace finalizer workaround) from state before destroying,
+      so the only thing left for `terraform destroy` to actually do is
+      delete the underlying cluster -- skips all graceful in-cluster
+      teardown, only safe for a disposable cluster where
+      delete_additional_resources = true already covers cleanup of what the
+      workloads provisioned outside Terraform (e.g. LoadBalancers).
     required: false
     default: plan
   state-backend:
@@ -148,6 +156,36 @@ runs:
           terraform -chdir="$ROOT" workspace select "$ws"
         fi
 
+    # hard-destroy only: drop every resource whose deletion normally goes
+    # through the Kubernetes API from state *before* destroy runs, so
+    # `terraform destroy` only has the cloud-provider resources left to
+    # actually delete (deleting the cluster itself takes everything inside
+    # it with it -- 100x faster than a graceful Helm-uninstall-by-
+    # Helm-uninstall teardown). `state rm` only touches Terraform's
+    # bookkeeping, never the live resources -- nothing here calls the
+    # Kubernetes API. Confirmed live 2026-08-25: delete_additional_resources
+    # = true on scaleway_k8s_cluster.this already covers the LoadBalancer
+    # envoy-gateway's Gateway resource creates outside Terraform, so nothing
+    # gets orphaned by skipping the graceful path.
+    - name: Strip in-cluster resources from state (hard-destroy)
+      if: inputs.command == 'hard-destroy'
+      shell: bash
+      env:
+        ROOT: ${{ inputs.root }}
+      run: |
+        set -euo pipefail
+        addrs=$(terraform -chdir="$ROOT" state list | awk -F. '
+          { n = NF; type = $(n-1); name = $n
+            if (type == "helm_release" || type ~ /^kubernetes_/ \
+                || (type == "null_resource" && name == "velero_namespace_predelete_cleanup")) print }
+        ')
+        if [ -z "$addrs" ]; then
+          echo "Nothing to strip -- already gone or never created."
+        else
+          echo "$addrs"
+          echo "$addrs" | xargs terraform -chdir="$ROOT" state rm
+        fi
+
     - name: Terraform ${{ inputs.command }}
       shell: bash
       env:
@@ -160,8 +198,8 @@ runs:
       run: |
         set -euo pipefail
         case "$COMMAND" in
-          plan)    terraform -chdir="$ROOT" plan    -input=false -var-file="env/${TFVARS}" ;;
-          apply)   terraform -chdir="$ROOT" apply   -input=false -auto-approve -var-file="env/${TFVARS}" ;;
-          destroy) terraform -chdir="$ROOT" destroy -input=false -auto-approve -var-file="env/${TFVARS}" ;;
-          *) echo "::error::unknown command '$COMMAND' (expected plan|apply|destroy)"; exit 1 ;;
+          plan)                 terraform -chdir="$ROOT" plan    -input=false -var-file="env/${TFVARS}" ;;
+          apply)                terraform -chdir="$ROOT" apply   -input=false -auto-approve -var-file="env/${TFVARS}" ;;
+          destroy|hard-destroy) terraform -chdir="$ROOT" destroy -input=false -auto-approve -var-file="env/${TFVARS}" ;;
+          *) echo "::error::unknown command '$COMMAND' (expected plan|apply|destroy|hard-destroy)"; exit 1 ;;
         esac
