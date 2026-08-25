@@ -1,0 +1,16 @@
+# terraform-apply (the CronWorkflows that run this repo's own `terraform
+# apply` against grafana-bootstrap/grafana-managed and friends) --
+# extracted from gitops repo's bootstrap/values.yaml (infra#84 follow-up).
+# Its own PostSync hook (initial-run-workflow) submits grafana-bootstrap
+# then grafana-managed immediately on sync, and grafana-managed's preflight
+# calls Grafana's live HTTP API directly -- a hard, non-self-healing
+# dependency on grafana being actually Healthy (not just Synced), same
+# class as argo-workflows' eager Dex dial. It also reads
+# argo-workflows-scaleway-state-credentials + per-root extraSecretName
+# Secrets from eso-data-apps (via argo-workflows-secret) and needs the
+# argo-workflows/chart's CRDs + WorkflowTemplate already installed. This
+# domain therefore depends on a health wait on BOTH argo-workflows-apps AND
+# grafana-apps (argocd.tf's wait_argo_workflows_and_grafana_healthy gate).
+apps:
+  # ── wave 0 ──────────────────────────────────────────────────────────────
+  - {name: terraform-apply, namespace: argo-workflows, chartPath: services/platform/argo-workflows/terraform-apply, valueFile: values-scaleway.yaml, wave: "0"}

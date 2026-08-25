@@ -1,0 +1,15 @@
+# ArgoCD's own OIDC config + exposure -- extracted from gitops repo's
+# bootstrap/values.yaml (infra#84 follow-up). argocd-config-secret (the
+# ExternalSecret this used to bundle) lives in eso-data-apps now (argocd.tf's
+# helm_release.eso_data_apps) -- this domain's `argocd-config` just consumes
+# the Secret it materializes (via its PostSync restart-hook) and
+# argocd-config-gateway exposes argocd-server itself via HTTPRoute, same
+# hard dependency on networking-apps' Gateway API CRDs as every other
+# *-gateway domain -- see platform-apps/README.md's wait_networking_healthy
+# gate.
+apps:
+  # ── wave 0 ──────────────────────────────────────────────────────────────
+  - {name: argocd-config, namespace: argocd, chartPath: services/platform/argocd-config/config, valueFile: values.yaml, wave: "0"}
+
+  # ── wave 1 ──────────────────────────────────────────────────────────────
+  - {name: argocd-config-gateway, namespace: argocd, chartPath: services/platform/argocd-config/gateway, valueFile: values-scaleway.yaml, wave: "1"}

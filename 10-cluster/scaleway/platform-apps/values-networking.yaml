@@ -5,23 +5,24 @@
 # explicit choice). envoy-gateway, cert-manager (+ its Scaleway DNS01
 # webhook), external-dns, and gateway-config (the shared
 # GatewayClass/Gateway/ClusterIssuers every product's own *-gateway
-# HTTPRoute chart attaches to). Every product-specific *-gateway chart
-# (dex-gateway, grafana-gateway, argocd-config-gateway, openbao-gateway,
-# argo-workflows-gateway) stays in gitops repo's bootstrap — those are
-# per-product exposure, not shared routing infrastructure, and their own
-# prerequisite (this domain's Gateway) is now ready even earlier than
-# before.
+# HTTPRoute chart attaches to). openbao-gateway also lives here (added in
+# the infra#84 follow-up that finished migrating the rest of `bootstrap` —
+# it's a bare HTTPRoute with no other dependency, and this domain already
+# owns the Gateway API CRDs it needs). Every OTHER product-specific
+# *-gateway chart (dex-gateway, grafana-gateway, argocd-config-gateway,
+# argo-workflows-gateway) got its own dedicated domain instead (see
+# platform-apps/README.md's DAG) — each has a real hard dependency
+# (Dex/Grafana/etc. being Healthy) that would otherwise force this domain's
+# own, unrelated apps to wait on it.
 #
-# Unlike secrets-apps/monitoring-apps/backups-apps, this domain keeps using
-# OpenBao+ESO for its own secrets (cert-manager-webhook-secret,
-# external-dns-secret) rather than direct Terraform provisioning — these
-# aren't credentials Terraform itself originates (unlike thanos/loki/tempo/
-# velero's Object Storage keys), so there's nothing to gain by bypassing
-# ESO here. Moved together with their consumers (same reasoning as
-# secrets-apps' openbao+openbao-init) since bootstrap no longer runs after
-# this domain — a secret left behind in bootstrap's own wave 1 would apply
-# AFTER its consumer here already tried to start, inverting the ordering
-# these charts depend on.
+# cert-manager-webhook-secret/external-dns-secret used to live directly in
+# this domain — moved to eso-data-apps (argocd.tf's helm_release.eso_data_apps)
+# in the same follow-up, alongside every other domain's ExternalSecret, so
+# the ESO-controller-finalizer-race fix is one rule applied uniformly
+# instead of a per-domain special case. envoy-gateway/cert-manager/
+# external-dns still consume those Secrets at runtime from wherever they
+# live now — unaffected, same "brief race, self-heals" tolerance every
+# other ESO consumer here already accepts.
 #
 # gateway-config's PreSync hook restores its TLS Secret from a Velero
 # backup (services/platform/gateway/config/README.md) — deliberately NOT
@@ -34,25 +35,16 @@
 # Terraform-level wait needed between this domain and backups-apps.
 apps:
   # ── wave 0 ──────────────────────────────────────────────────────────────
-  # cert-manager-webhook-secret / external-dns-secret: still ESO
-  # ExternalSecrets (see header comment above) — self-heal if OpenBao/ESO
-  # (secrets-apps domain) isn't quite ready yet at this domain's own start,
-  # same "brief race, self-heals" tolerance every other *-secret chart in
-  # gitops repo's bootstrap already accepts.
-  - {name: cert-manager-webhook-secret, namespace: cert-manager, chartPath: services/platform/cert-manager/webhook-secret, valueFile: values.yaml, wave: "0"}
-  - {name: external-dns-secret, namespace: external-dns, chartPath: services/platform/external-dns/secret, valueFile: values.yaml, wave: "0"}
-
-  # ── wave 1 ──────────────────────────────────────────────────────────────
   # envoy-gateway + cert-manager (+ its Scaleway DNS01 ACME webhook): don't
   # depend on each other — what actually needs both is gateway-config
-  # (wave 2): envoy-gateway for the Gateway API CRDs, cert-manager for the
+  # (wave 1): envoy-gateway for the Gateway API CRDs, cert-manager for the
   # cert-manager.io CRDs its ClusterIssuers need.
-  - {name: envoy-gateway, namespace: envoy-gateway-system, chartPath: services/platform/gateway/chart, valueFile: values-scaleway.yaml, wave: "1", syncWaveLabelPaths: ['gateway-helm.deployment.pod.labels.scalepack\.fr/sync-wave']}
-  - {name: cert-manager, namespace: cert-manager, chartPath: services/platform/cert-manager/chart, valueFile: values-scaleway.yaml, wave: "1", syncWaveLabelPaths: ['cert-manager.podLabels.scalepack\.fr/sync-wave', 'cert-manager.webhook.podLabels.scalepack\.fr/sync-wave', 'cert-manager.cainjector.podLabels.scalepack\.fr/sync-wave']}
-  - {name: cert-manager-webhook-scaleway, namespace: cert-manager, chartPath: services/platform/cert-manager/webhook-chart, valueFile: values-scaleway.yaml, wave: "1", syncWaveLabelPaths: ['scaleway-certmanager-webhook.podLabels.scalepack\.fr/sync-wave']}
+  - {name: envoy-gateway, namespace: envoy-gateway-system, chartPath: services/platform/gateway/chart, valueFile: values-scaleway.yaml, wave: "0", syncWaveLabelPaths: ['gateway-helm.deployment.pod.labels.scalepack\.fr/sync-wave']}
+  - {name: cert-manager, namespace: cert-manager, chartPath: services/platform/cert-manager/chart, valueFile: values-scaleway.yaml, wave: "0", syncWaveLabelPaths: ['cert-manager.podLabels.scalepack\.fr/sync-wave', 'cert-manager.webhook.podLabels.scalepack\.fr/sync-wave', 'cert-manager.cainjector.podLabels.scalepack\.fr/sync-wave']}
+  - {name: cert-manager-webhook-scaleway, namespace: cert-manager, chartPath: services/platform/cert-manager/webhook-chart, valueFile: values-scaleway.yaml, wave: "0", syncWaveLabelPaths: ['scaleway-certmanager-webhook.podLabels.scalepack\.fr/sync-wave']}
 
-  # ── wave 2 ──────────────────────────────────────────────────────────────
-  # gateway-config needs BOTH wave 1's envoy-gateway (Gateway API CRDs) AND
+  # ── wave 1 ──────────────────────────────────────────────────────────────
+  # gateway-config needs BOTH wave 0's envoy-gateway (Gateway API CRDs) AND
   # cert-manager (cert-manager.io CRDs) to have actually finished
   # installing, not just exist — a genuinely hard dependency (its
   # ClusterIssuer objects are cert-manager.io-typed; ArgoCD's sync fails
@@ -61,5 +53,13 @@ apps:
   # consistent DNS reconciliation, no observed race) but shares this wave
   # rather than getting its own — same "rides along, wave reuse is free"
   # reasoning gitops repo's bootstrap/README.md uses throughout.
-  - {name: gateway-config, namespace: gateway, chartPath: services/platform/gateway/config, valueFile: values-scaleway.yaml, wave: "2"}
-  - {name: external-dns, namespace: external-dns, chartPath: services/platform/external-dns/chart, valueFile: values-scaleway.yaml, wave: "2", syncWaveLabelPaths: ['external-dns.podLabels.scalepack\.fr/sync-wave']}
+  - {name: gateway-config, namespace: gateway, chartPath: services/platform/gateway/config, valueFile: values-scaleway.yaml, wave: "1"}
+  - {name: external-dns, namespace: external-dns, chartPath: services/platform/external-dns/chart, valueFile: values-scaleway.yaml, wave: "1", syncWaveLabelPaths: ['external-dns.podLabels.scalepack\.fr/sync-wave']}
+
+  # ── wave 2 ──────────────────────────────────────────────────────────────
+  # openbao-gateway: bare HTTPRoute onto openbao's Service (secrets-apps
+  # domain) — same "rides along, no dependency between siblings" reasoning
+  # as external-dns above, one wave later purely so it doesn't share a wave
+  # with gateway-config's own hard CRD dependency (not required to be this
+  # late, just avoids growing wave 1's already-load-bearing comment).
+  - {name: openbao-gateway, namespace: openbao, chartPath: services/platform/openbao/gateway, valueFile: values-scaleway.yaml, wave: "2"}

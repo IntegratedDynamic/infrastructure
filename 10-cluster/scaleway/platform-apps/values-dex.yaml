@@ -1,0 +1,19 @@
+# Dex (shared OIDC provider) -- extracted from gitops repo's
+# bootstrap/values.yaml (infra#84 follow-up). dex-secret itself lives in
+# eso-data-apps now (argocd.tf's helm_release.eso_data_apps) -- this domain
+# just consumes the Secret it materializes. dex-gateway's HTTPRoute is a
+# Gateway API CRD type, same hard non-self-healing dependency class as
+# gateway-config's ClusterIssuer (see platform-apps/README.md) -- this
+# domain depends on a health wait on networking-apps (argocd.tf's
+# wait_networking_healthy gate), not just on eso-data-apps.
+#
+# Kept as its OWN domain rather than bundled with argocd-config/grafana
+# (which share the identical secrets-apps+networking-apps dependency
+# profile): argo-workflows-apps' own wait-gate needs to check specifically
+# "is Dex ready", not a bundle diluted by unrelated apps' health.
+apps:
+  # ── wave 0 ──────────────────────────────────────────────────────────────
+  - {name: dex, namespace: gateway, chartPath: services/platform/dex/chart, valueFile: values-scaleway.yaml, wave: "0", syncWaveLabelPaths: ['dex.podLabels.scalepack\.fr/sync-wave']}
+
+  # ── wave 1 ──────────────────────────────────────────────────────────────
+  - {name: dex-gateway, namespace: gateway, chartPath: services/platform/dex/gateway, valueFile: values.yaml, wave: "1"}

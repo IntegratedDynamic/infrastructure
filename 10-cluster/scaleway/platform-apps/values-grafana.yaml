@@ -1,0 +1,22 @@
+# Grafana -- extracted from gitops repo's bootstrap/values.yaml (infra#84
+# follow-up). Kept out of monitoring-apps deliberately: folding it in would
+# force kube-prometheus-stack/loki/tempo/alloy/otel-collector (currently
+# genuinely independent of networking-apps) to also wait on networking's
+# Gateway API CRDs just because grafana-gateway needs them.
+#
+# grafana-secret lives in eso-data-apps now (argocd.tf's
+# helm_release.eso_data_apps) -- grafana just consumes the Secrets it
+# materializes. grafana-gateway's HTTPRoute needs networking-apps' Gateway
+# API CRDs (wait_networking_healthy gate, same as every other *-gateway
+# domain). grafana's own Velero-restore PreSync hook is deliberately left
+# ungated against backups-apps -- confirmed self-contained/fail-open
+# (queries the velero namespace's Backup/Restore objects directly and
+# proceeds with a fresh state if none shows up within its own budget), same
+# reasoning as gateway-config's identical Velero dependency -- see
+# platform-apps/README.md.
+apps:
+  # ── wave 0 ──────────────────────────────────────────────────────────────
+  - {name: grafana, namespace: monitoring, chartPath: services/platform/monitoring/grafana-chart, valueFile: values-scaleway.yaml, wave: "0"}
+
+  # ── wave 1 ──────────────────────────────────────────────────────────────
+  - {name: grafana-gateway, namespace: monitoring, chartPath: services/platform/monitoring/grafana-gateway, valueFile: values-scaleway.yaml, wave: "1"}

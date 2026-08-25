@@ -139,3 +139,111 @@ Object Storage keys, which come straight from this same repo's
 credential Terraform has no more direct a line to than ESO already does, so
 this domain deliberately keeps the existing mechanism rather than applying
 the direct-`kubernetes_secret` pattern uniformly.
+
+## Finishing the migration + generalizing the finalizer-race fix (infra#84 follow-up, 2026-08-25)
+
+The four domains above left one known bug: `networking-apps`' own
+`cert-manager-webhook-secret`/`external-dns-secret` are ESO
+`ExternalSecret`s, carrying a `externalsecrets.external-secrets.io/externalsecret-cleanup`
+finalizer that only ESO's own controller (`secrets-apps` domain) ever
+removes. Since `secrets-apps` and `networking-apps` were two keys of the
+*same* `helm_release.argocd_platform_apps`, Helm tore both down in parallel
+on `destroy` with no ordering between them — ESO's pod could die before it
+ever processed this finalizer removal, stranding the object (confirmed live
+2026-08-25, previously required a manual `kubectl patch`).
+
+This follow-up did two things at once: finished migrating every remaining
+`gitops` repo `bootstrap` app into this same Terraform-managed pattern (so
+only `demo` is left there), and fixed the finalizer race structurally in a
+way that covers every domain this added, not just `networking-apps`.
+
+**Every domain is now its own `helm_release`**, not a shared one. This is
+the mechanical prerequisite for everything below: Helm gives no ordering
+guarantee across sibling resources of one release (which is exactly what
+let `secrets-apps`/`networking-apps` race each other's teardown), but
+Terraform's own `depends_on` between separate `helm_release` resources is a
+real graph edge — "A depends_on B" means A is created after B and destroyed
+before B, so a domain listed in a `depends_on` is *guaranteed* to still be
+alive throughout everything that depends on it.
+
+**Every `ExternalSecret` across every domain now lives in one dedicated
+`eso-data-apps` domain**, instead of being bundled into each product's own
+domain — `dex-secret`, `grafana-secret`, `wireguard-secret`,
+`argo-workflows-secret`, `argocd-config-secret` (split out of
+`services/platform/argocd-config/config`, gitops repo, same "mixed chart
+split in two" treatment `bootstrap/README.md` documents for `dex`/`grafana`),
+and the two that used to live directly in `networking-apps`
+(`cert-manager-webhook-secret`/`external-dns-secret`). `eso_data_apps`
+`depends_on = [helm_release.secrets_apps]` — the ONE edge that fixes the
+finalizer race for every consumer at once: this release (and every
+`ExternalSecret` it owns) is guaranteed to finish destroying before
+`secrets-apps` — and therefore ESO's own controller — even starts tearing
+down. Every product domain that consumes one of these secrets just
+`depends_on = [helm_release.eso_data_apps]` instead of reasoning about ESO's
+own lifecycle directly.
+
+**The two ordering mechanisms are deliberately different, and shouldn't be
+conflated:**
+1. Raw `depends_on` between `helm_release` resources (used by `eso-data-apps`
+   → `secrets-apps`, and by every product domain → `eso-data-apps`) only
+   fixes *destroy* ordering — Helm apply itself is fast, so this doesn't
+   slow down startup, and ESO's own `refreshInterval` self-heals if a
+   consumer briefly starts before its secret exists (the same tolerance
+   every ESO consumer already accepted before this split).
+2. `kubernetes_job_v1` health-wait gates (the `wait_platform_apps_healthy`
+   pattern this repo already had, now factored into the
+   `modules/wait-argocd-apps-healthy` module — see that module's own
+   comment) are used only where a real hard, non-self-healing dependency
+   exists: CRD registration, an eager OIDC dial at pod startup, a live HTTP
+   API call. These genuinely delay creation of the dependent domain until
+   the upstream one reports `Synced` + `Healthy`.
+
+**The resulting DAG**, tier by tier:
+
+- **Tier 0** (parallel, unchanged): `secrets-apps`, `monitoring-apps`,
+  `backups-apps`. `eso-data-apps` sits right after `secrets-apps`
+  (`depends_on` only, not a health-wait — see mechanism 1 above).
+- **Tier 1** (`depends_on = [eso_data_apps]`; additionally
+  `depends_on = [module.wait_networking_healthy]` if the domain owns an
+  `HTTPRoute`, since every `HTTPRoute` is a Gateway API CRD type — the same
+  hard, non-self-healing "CRD not registered yet" sync-failure class as
+  `gateway-config`'s `ClusterIssuer`, documented below): `networking-apps`
+  (now also gains its own eso-data-apps dependency, even though it no
+  longer owns an ExternalSecret itself — kept for create-order tidiness,
+  not a correctness requirement anymore), `wireguard-apps` (no `HTTPRoute`,
+  so no networking wait), `dex-apps`, `argocd-config-apps`, `grafana-apps`.
+  `dex-apps` stayed its own domain rather than bundled with
+  `argocd-config-apps`/`grafana-apps` (which share its exact dependency
+  profile) specifically so Tier 2's wait-gate on "is Dex ready" isn't
+  diluted by unrelated apps' health. `grafana-apps` stayed out of
+  `monitoring-apps` for the mirror-image reason: folding it in would force
+  `kube-prometheus-stack`/`loki`/`tempo` (genuinely independent of
+  `networking-apps`) to also wait on networking's CRDs. `grafana`'s own
+  Velero-restore PreSync hook is deliberately left ungated against
+  `backups-apps` — confirmed self-contained/fail-open, same reasoning as
+  `gateway-config`'s identical Velero dependency (see that section above).
+- **Tier 2** (`depends_on = [module.wait_dex_healthy]`): `argo-workflows-apps`
+  — `argo-workflows/chart` eager-dials Dex's OIDC issuer at pod startup and
+  crash-loops if Dex isn't reachable, a real hard dependency unlike ESO's
+  self-heal tolerance. Its own `HTTPRoute`'s networking-apps dependency is
+  covered transitively via `dex-apps`' own wait-gate — no separate direct
+  edge needed.
+- **Tier 3** (`depends_on = [module.wait_argo_workflows_and_grafana_healthy]`):
+  `terraform-apply-apps` — its `grafana-managed` root's preflight calls
+  Grafana's live HTTP API directly, and its PostSync
+  `initial-run-workflow` hook needs `argo-workflows`' own
+  `WorkflowTemplate`/CRDs already installed.
+- **Final gate**: `module.wait_all_domains_healthy` (renamed from
+  `wait_platform_apps_healthy` — same resource in spirit, just checking
+  every domain now, not the original four) still gates `bootstrap`'s own
+  Application creation, same as before this follow-up — `bootstrap` now
+  only manages `demo`.
+
+`openbao-gateway` moved into `networking-apps` itself (not its own domain):
+it's a bare `HTTPRoute` with no `ExternalSecret` and no other dependency,
+and `networking-apps` already owns the Gateway API CRDs it needs — no
+reason to pay for a whole extra domain (release + wait-gate) for one
+HTTPRoute. `argocd-config-monitoring` (a `PrometheusRule`) moved into
+`monitoring-apps` itself for the identical reason — its only real
+dependency is that domain's own `kube-prometheus-stack-crds`, nothing
+`argocd-config`-related despite the name it inherited from its `chartPath`.
