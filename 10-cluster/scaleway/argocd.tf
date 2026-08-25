@@ -350,6 +350,19 @@ resource "helm_release" "argocd_apps" {
 applications:
   bootstrap:
     namespace: argocd
+    # Cascade-deletes this Application's own managed resources (its child
+    # Applications' Application CRs, one level of the app-of-apps tree)
+    # before removing this object itself, instead of the default "just
+    # forget about it, leave whatever it deployed running" behavior.
+    # Confirmed live (2026-08-25): without this, a `terraform destroy`
+    # tears down helm_release.argocd_apps/argocd_platform_apps/argocd in
+    # ~13s combined -- nowhere near enough for anything to gracefully
+    # shut down -- leaving e.g. Velero's own pod orphaned right before
+    # kubernetes_namespace.velero's cascade delete races its controller's
+    # own teardown for the Restore CRs' finalizers (see that resource's
+    # own comment in main.tf). https://argo-cd.readthedocs.io/en/stable/user-guide/app_deletion/#about-the-deletion-finalizer
+    finalizers:
+      - resources-finalizer.argocd.argoproj.io
     project: default
 
     source:
@@ -414,6 +427,11 @@ resource "helm_release" "argocd_platform_apps" {
 applications:
   secrets-apps:
     namespace: argocd
+    # Cascade-deletes this domain's own child Applications (openbao,
+    # external-secrets, ...) before removing this object -- see
+    # `bootstrap`'s own finalizers comment above for the full "why".
+    finalizers:
+      - resources-finalizer.argocd.argoproj.io
     project: default
     source:
       repoURL: https://github.com/IntegratedDynamic/infrastructure.git
@@ -439,6 +457,11 @@ applications:
 
   monitoring-apps:
     namespace: argocd
+    # Cascade-deletes this domain's own child Applications
+    # (kube-prometheus-stack, loki, tempo, ...) before removing this
+    # object -- see `bootstrap`'s own finalizers comment above.
+    finalizers:
+      - resources-finalizer.argocd.argoproj.io
     project: default
     source:
       repoURL: https://github.com/IntegratedDynamic/infrastructure.git
@@ -464,6 +487,13 @@ applications:
 
   backups-apps:
     namespace: argocd
+    # Cascade-deletes this domain's own child Application (velero) before
+    # removing this object -- the specific fix for the finalizer race:
+    # gives Velero's own pod a real, ArgoCD-orchestrated shutdown instead
+    # of being torn down by helm_release.argocd's uninstall with no
+    # coordination -- see `bootstrap`'s own finalizers comment above.
+    finalizers:
+      - resources-finalizer.argocd.argoproj.io
     project: default
     source:
       repoURL: https://github.com/IntegratedDynamic/infrastructure.git
@@ -489,6 +519,11 @@ applications:
 
   networking-apps:
     namespace: argocd
+    # Cascade-deletes this domain's own child Applications (envoy-gateway,
+    # cert-manager, gateway-config, ...) before removing this object --
+    # see `bootstrap`'s own finalizers comment above.
+    finalizers:
+      - resources-finalizer.argocd.argoproj.io
     project: default
     source:
       repoURL: https://github.com/IntegratedDynamic/infrastructure.git

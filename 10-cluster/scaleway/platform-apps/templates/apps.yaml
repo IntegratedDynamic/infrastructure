@@ -19,6 +19,19 @@ metadata:
   namespace: argocd
   annotations:
     argocd.argoproj.io/sync-wave: {{ .wave | quote }}
+  # Cascade-deletes this app's own managed resources (its actual Deployment/
+  # Service/etc.) before removing the Application object itself, instead of
+  # the default "just forget about it, leave whatever it deployed running"
+  # behavior. Unconditional, not opt-in per app, same reasoning as
+  # ignoreDifferences below — confirmed live (2026-08-25): without this, a
+  # `terraform destroy` tears down every parent Application in this chart's
+  # tree within seconds, nowhere near enough for anything to gracefully shut
+  # down, e.g. leaving Velero's own pod orphaned right before
+  # kubernetes_namespace.velero's cascade delete races its controller's own
+  # teardown for the Restore CRs' external-resources-finalizer (see that
+  # resource's own comment in 10-cluster/scaleway/main.tf).
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
 spec:
   project: default
 
