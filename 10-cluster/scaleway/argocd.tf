@@ -742,3 +742,86 @@ resource "kubernetes_job_v1" "wait_platform_apps_healthy" {
     kubernetes_role_binding.wait_platform_apps,
   ]
 }
+
+# Confirmed live (2026-08-25): without this, `terraform apply` reports
+# success the moment helm_release.argocd_apps creates the bootstrap
+# Application *object* — Helm's own --wait readiness checks understand
+# built-in Kubernetes kinds (Deployment/StatefulSet/PVC/...), not ArgoCD's
+# Application CRD health semantics, so it doesn't actually wait for
+# bootstrap's own sync to finish. That's misleading on its own (an apply
+# reported "done" while the cluster is still converging its entire
+# gitops-repo tree underneath it), and it directly caused real confusion
+# mid-session: a `terraform destroy` issued right after such an apply hit
+# bootstrap still mid-forward-sync (waiting on its own wave 2), and only
+# started actually cascade-deleting once that finished — several extra
+# minutes of "why is this still creating things during a destroy" that a
+# genuine wait here would have avoided by making `apply` block until
+# bootstrap is truly done converging. Reuses the same RBAC as
+# wait_platform_apps_healthy above (same permissions: read Applications
+# in argocd) — no reason for a second ServiceAccount/Role pair.
+resource "kubernetes_job_v1" "wait_bootstrap_healthy" {
+  metadata {
+    name      = "wait-bootstrap-healthy"
+    namespace = "argocd"
+  }
+
+  spec {
+    # bootstrap's own tree is at least as deep as the four platform-apps
+    # domains combined (dex, grafana, wireguard, argo-workflows, demo, every
+    # remaining *-gateway chart) — same budget as
+    # wait_platform_apps_healthy, no evidence yet it needs to differ.
+    active_deadline_seconds = 1800
+    backoff_limit           = 0
+
+    template {
+      metadata {
+        labels = {
+          "app.kubernetes.io/name" = "wait-bootstrap-healthy"
+        }
+      }
+
+      spec {
+        service_account_name = kubernetes_service_account.wait_platform_apps.metadata[0].name
+        restart_policy       = "Never"
+
+        container {
+          name  = "wait"
+          image = "alpine/kubectl:1.35.3"
+
+          command = ["sh", "-c", <<-EOT
+            set -eu
+            while true; do
+              sync=$(kubectl get application bootstrap -n argocd -o jsonpath='{.status.sync.status}' 2>/dev/null || true)
+              health=$(kubectl get application bootstrap -n argocd -o jsonpath='{.status.health.status}' 2>/dev/null || true)
+              if [ "$sync" = "Synced" ] && [ "$health" = "Healthy" ]; then
+                echo "Application/bootstrap is Synced and Healthy."
+                exit 0
+              fi
+              echo "Application/bootstrap: sync=$${sync:-<none yet>} health=$${health:-<none yet>}"
+              sleep 5
+            done
+          EOT
+          ]
+
+          # Same "force a fresh Job on redeploy" trick as
+          # wait_platform_apps_healthy's own env var above.
+          env {
+            name  = "BOOTSTRAP_REVISION"
+            value = helm_release.argocd_apps.metadata.revision
+          }
+        }
+      }
+    }
+  }
+
+  wait_for_completion = true
+
+  timeouts {
+    create = "35m"
+  }
+
+  depends_on = [
+    helm_release.argocd_apps,
+    kubernetes_role_binding.wait_platform_apps,
+  ]
+}
