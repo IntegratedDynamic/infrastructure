@@ -265,9 +265,23 @@ resource "kubernetes_namespace" "velero" {
 # reliably fix it, since the controller can lose the race regardless of
 # how long we wait). Since a `terraform destroy` tears down the whole
 # cluster anyway, there's no external state left to protect by waiting for
-# Velero's own cleanup -- this proactively strips finalizers from every
-# velero.io-group object in the namespace right before the namespace
-# itself is destroyed, instead of hoping the race goes the other way.
+# Velero's own cleanup -- this proactively strips finalizers from the
+# known Restore objects right before the namespace itself is destroyed,
+# instead of hoping the race goes the other way.
+#
+# Deliberately curl-based, not kubectl-based: this root's execution
+# environment (an admin's machine, or CI, per this repo's own convention)
+# is not guaranteed to have kubectl installed, only whatever the
+# provisioner itself can assume -- curl ships on essentially every base
+# OS/CI image already, kubectl does not. Named restore objects, not a
+# discovery loop (`kubectl api-resources`/`get` equivalent), for the same
+# reason -- there is no portable curl-only way to enumerate a CRD's
+# instances without a JSON-parsing tool (jq etc.) that's just as
+# unguaranteed as kubectl itself. Add to this list if a future gitops-repo
+# PreSync restore hook creates another named Restore
+# (services/platform/gateway/config's cert-restore and
+# services/platform/monitoring/grafana-chart's grafana-restore are the
+# only two today).
 #
 # Connection details are captured in `triggers` (not referenced directly
 # in the provisioner) because a destroy-time provisioner may only
@@ -288,22 +302,23 @@ resource "null_resource" "velero_namespace_predelete_cleanup" {
     when       = destroy
     on_failure = continue
 
-    # No kubeconfig file: plain --server/--token flags avoid nesting a
-    # bash heredoc inside this HCL heredoc (indentation-stripping rules
-    # differ between the two -- Terraform's `<<-` strips based on the
-    # closing marker's own column, bash's `<<-` only strips literal tabs
-    # -- fragile to get both right at once). --insecure-skip-tls-verify is
-    # an acceptable tradeoff here: this cluster is mid-destroy, and the
-    # token already came straight out of Terraform state on the same
-    # machine, so skipping CA validation adds no meaningful exposure.
+    # curl -k (skip TLS verify): acceptable here -- this cluster is
+    # mid-destroy, and the token already came straight out of Terraform
+    # state on the same machine, so skipping CA validation adds no
+    # meaningful exposure. `|| true` per call: a 404 (object never
+    # existed, e.g. a fresh cluster with no restore history yet) is a
+    # normal outcome, not a failure.
     command = <<-EOT
       set -eu
-      kc="kubectl --server=${self.triggers.host} --token=${self.triggers.token} --insecure-skip-tls-verify=true"
-      for kind in $($kc api-resources --api-group=velero.io --namespaced -o name 2>/dev/null); do
-        for obj in $($kc get "$kind" -n "${self.triggers.namespace}" -o name 2>/dev/null); do
-          echo "Stripping finalizers from $obj before namespace delete..."
-          $kc patch "$obj" -n "${self.triggers.namespace}" --type=merge -p '{"metadata":{"finalizers":[]}}' 2>/dev/null || true
-        done
+      for name in cert-secrets-restore grafana-pvc-restore; do
+        echo "Stripping finalizers from restores.velero.io/$name (if present) before namespace delete..."
+        curl -sS -k -o /dev/null \
+          -X PATCH \
+          -H "Authorization: Bearer ${self.triggers.token}" \
+          -H "Content-Type: application/merge-patch+json" \
+          -d '{"metadata":{"finalizers":[]}}' \
+          "${self.triggers.host}/apis/velero.io/v1/namespaces/${self.triggers.namespace}/restores/$name" \
+          || true
       done
     EOT
   }
