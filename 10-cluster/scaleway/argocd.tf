@@ -340,6 +340,15 @@ resource "helm_release" "argocd_apps" {
   chart      = "argocd-apps"
   version    = "2.0.4"
 
+  # Applies to both install AND uninstall (the provider uses the same
+  # timeout for whichever Helm operation this resource is currently
+  # performing) -- default (300s) isn't enough for uninstall since
+  # bootstrap's own resources-finalizer.argocd.argoproj.io (see values
+  # below) now makes its deletion wait for ArgoCD to cascade-delete its
+  # entire child-Application tree first, confirmed live (2026-08-25) to
+  # exceed 5 minutes.
+  timeout = 1800
+
   # wait_platform_apps_healthy (below) is the real Terraform-enforced
   # prerequisite: bootstrap's Application must not even be created until
   # secrets-apps/monitoring-apps/backups-apps/networking-apps are Healthy —
@@ -414,6 +423,15 @@ resource "helm_release" "argocd_platform_apps" {
   repository = "https://argoproj.github.io/argo-helm"
   chart      = "argocd-apps"
   version    = "2.0.4"
+
+  # Applies to both install AND uninstall -- default (300s) isn't enough
+  # for uninstall, since each domain's own resources-finalizer.argocd.argoproj.io
+  # (see values below) now makes deleting these four Applications wait for
+  # ArgoCD to cascade-delete their entire child-Application trees first.
+  # Same timeout as kubernetes_job_v1.wait_platform_apps_healthy's own
+  # budget (below) -- confirmed live (2026-08-25) that this exceeded 5
+  # minutes and made this resource's own destroy time out.
+  timeout = 1800
 
   depends_on = [
     helm_release.argocd,
