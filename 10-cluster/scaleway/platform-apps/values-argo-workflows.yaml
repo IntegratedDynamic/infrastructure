@@ -1,0 +1,19 @@
+# Argo Workflows (controller + server) -- extracted from gitops repo's
+# bootstrap/values.yaml (infra#84 follow-up). argo-workflows-secret lives in
+# eso-data-apps now (argocd.tf's helm_release.eso_data_apps) -- this domain
+# just consumes the Secrets it materializes.
+#
+# argo-workflows/chart eager-dials Dex's OIDC issuer at pod startup
+# (server.sso.issuer, http://dex.gateway.svc:5556) and crash-loops if Dex
+# isn't reachable yet -- a real hard dependency, unlike ESO's
+# self-heals-via-refreshInterval tolerance. This domain therefore depends on
+# a health wait on dex-apps (argocd.tf's wait_dex_healthy gate), not just a
+# raw depends_on. argo-workflows-gateway's HTTPRoute transitively covers the
+# networking-apps CRD dependency too, via dex-apps' own
+# wait_networking_healthy gate -- no separate direct edge needed.
+apps:
+  # ── wave 0 ──────────────────────────────────────────────────────────────
+  - {name: argo-workflows, namespace: argo-workflows, chartPath: services/platform/argo-workflows/chart, valueFile: values-scaleway.yaml, wave: "0", syncWaveLabelPaths: ['argo-workflows.controller.podLabels.scalepack\.fr/sync-wave']}
+
+  # ── wave 1 ──────────────────────────────────────────────────────────────
+  - {name: argo-workflows-gateway, namespace: argo-workflows, chartPath: services/platform/argo-workflows/gateway, valueFile: values.yaml, wave: "1"}
