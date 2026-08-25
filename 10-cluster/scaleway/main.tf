@@ -290,20 +290,39 @@ resource "kubernetes_namespace" "velero" {
 # destroy. Stashing them here at create time, read back via `self.triggers`
 # at destroy time, is the standard workaround.
 #
-# depends_on BOTH the namespace AND argocd.tf's helm_release.argocd_platform_apps
-# -- confirmed live (2026-08-25) that depending on the namespace alone was
-# not enough: the namespace's OWN destroy is itself gated behind that
-# release finishing its cascade-delete first (same secret-chain ordering
-# fix as kubernetes_namespace.openbao above), which can take many minutes.
-# With only the namespace as a dependency, Terraform was free to run this
+# Two attempts to get this ordering right, both confirmed live
+# (2026-08-25):
+#
+# 1st attempt: depends_on = [kubernetes_namespace.velero] alone. Wrong --
+# the namespace's OWN destroy is gated behind helm_release.argocd_platform_apps
+# finishing its cascade-delete first (same secret-chain ordering fix as
+# kubernetes_namespace.openbao above), which can take many minutes. With
+# only the namespace as a dependency, Terraform was free to run this
 # cleanup as early as possible in the whole destroy -- long before the
-# namespace destroy was actually attempted -- leaving a real window where
-# Velero, still running, recreates the exact Restore objects this had
-# already stripped. Depending on both makes this run immediately adjacent
-# to the namespace destroy it exists to unblock, not whenever Terraform
-# happens to schedule it.
+# namespace destroy was actually attempted.
+#
+# 2nd attempt: depends_on = [kubernetes_namespace.velero,
+# helm_release.argocd_platform_apps]. ALSO wrong, in the opposite
+# direction -- Terraform's actual rule is "A depends_on B" means A is
+# destroyed BEFORE B, not after. Adding that release here made this
+# cleanup run BEFORE argocd_platform_apps even starts destroying, not
+# after it finishes -- earlier still than the 1st attempt. Confirmed live:
+# the same 2 Restore objects got stuck again, because Velero's controller
+# was still fully alive when the strip ran and simply re-added the
+# finalizer on its own next reconcile (correct, expected behavior for a
+# well-behaved operator watching a resource that isn't actually being
+# deleted yet -- not a bug in Velero).
+#
+# The actual fix: this resource only needs `depends_on` the namespace (so
+# it destroys immediately before it, same as ever). The ordering relative
+# to argocd_platform_apps is enforced from the OTHER side instead --
+# argocd.tf's helm_release.argocd_platform_apps now depends_on THIS
+# resource, which (by the same rule, applied correctly this time) makes
+# that release destroy BEFORE this cleanup, i.e. this cleanup runs AFTER
+# that release's entire cascade-delete has already completed and Velero's
+# pod is confirmed gone -- no controller left alive to re-add anything.
 resource "null_resource" "velero_namespace_predelete_cleanup" {
-  depends_on = [kubernetes_namespace.velero, helm_release.argocd_platform_apps]
+  depends_on = [kubernetes_namespace.velero]
 
   triggers = {
     host      = scaleway_k8s_cluster.this.kubeconfig[0].host

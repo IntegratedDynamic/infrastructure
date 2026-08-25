@@ -444,6 +444,13 @@ resource "helm_release" "argocd_platform_apps" {
   # forever, since nothing told ArgoCD's own graceful teardown to finish
   # first. monitoring/velero's namespaces never had this problem only by
   # accident, via their own four secrets already being listed here.
+  #
+  # null_resource.velero_namespace_predelete_cleanup (main.tf) is included
+  # here too, for the DESTROY direction specifically: "A depends_on B"
+  # means A destroys before B, so listing that null_resource here makes
+  # THIS release destroy (and therefore Velero's controller die) BEFORE
+  # that cleanup's local-exec runs -- see that resource's own comment in
+  # main.tf for the two earlier, wrong attempts at this ordering.
   depends_on = [
     helm_release.argocd,
     kubernetes_secret.scaleway_s3_credentials,
@@ -452,6 +459,7 @@ resource "helm_release" "argocd_platform_apps" {
     kubernetes_secret.loki_s3_credentials,
     kubernetes_secret.tempo_s3_credentials,
     kubernetes_secret.velero_scaleway_credentials,
+    null_resource.velero_namespace_predelete_cleanup,
   ]
 
   values = [<<EOF
