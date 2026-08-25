@@ -6,8 +6,12 @@ name: Terraform — Scaleway cluster
 # original human-readable title -- just the command inserted, and the
 # GitHub environment the secrets/permissions actually come from (the
 # `environment` input below, fed straight into the job's own `environment:`
-# -- one literal, not duplicated).
-run-name: "Terraform ${{ inputs.command }} — Scaleway cluster (env: ${{ inputs.environment }})"
+# -- one literal, not duplicated). Also the branch dispatched against --
+# this workflow gets tested on feature branches all the time, and the
+# checkout step only ever surfaces a commit hash, not a branch name; only
+# the run list's own branch column shows it otherwise, easy to miss once
+# you're inside a run looking at its logs.
+run-name: "Terraform ${{ inputs.command }} — Scaleway cluster (env: ${{ inputs.environment }}) @ ${{ github.ref_name }}"
 
 # Drives 10-cluster/scaleway through the .github/actions/terraform composite action.
 #
