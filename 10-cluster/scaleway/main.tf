@@ -193,6 +193,17 @@ data "terraform_remote_state" "openbao_unseal_aws" {
   })
 }
 
+# Scaleway Domains/DNS credentials — source: 01-iam/workload/scaleway's
+# external-dns identity (DomainsDNSFullAccess). Same remote state key
+# 11-secrets/openbao/managed reads as its own `dns_scaleway` data source.
+data "terraform_remote_state" "dns_scaleway" {
+  backend = "s3"
+  config = merge(local.scaleway_state_backend, {
+    bucket = var.dns_scaleway_state_bucket
+    key    = var.dns_scaleway_state_key
+  })
+}
+
 resource "kubernetes_namespace" "openbao" {
   metadata {
     name = "openbao"
@@ -431,5 +442,76 @@ resource "kubernetes_secret" "velero_scaleway_credentials" {
       aws_access_key_id=${data.terraform_remote_state.backup_scaleway.outputs.velero_workload_access_key}
       aws_secret_access_key=${data.terraform_remote_state.backup_scaleway.outputs.velero_workload_secret_key}
     EOT
+  }
+}
+
+# scaleway-dns-credentials / external-dns-scaleway-credentials: unlike the
+# four above, this DOESN'T remove ESO from the picture -- gitops repo's
+# services/platform/cert-manager/webhook-secret and services/platform/
+# external-dns/secret ExternalSecrets are still deployed (platform-apps/
+# values-eso-data.yaml), just switched from creationPolicy: Owner to Merge
+# (2026-08-25), so they self-heal these Secrets' keys against OpenBao
+# instead of owning/creating them outright. This root bootstraps the
+# Secrets directly so cert-manager-webhook-scaleway/external-dns's pods
+# aren't blocked on ESO's first sync during cluster bring-up -- confirmed
+# live: cert-manager-webhook-scaleway's pod stuck on `secret
+# "scaleway-dns-credentials" not found` while ESO was still catching up,
+# contributing to module.wait_networking_healthy's slow convergence. Same
+# Scaleway Domains/DNS credential (01-iam/workload/scaleway's external-dns
+# identity) materialized into both namespaces, matching the two consumers'
+# existing key names 1:1 so the ESO Merge above is a no-op once it runs.
+resource "kubernetes_namespace" "cert_manager" {
+  metadata {
+    name = "cert-manager"
+  }
+  depends_on = [scaleway_k8s_pool.default]
+}
+
+resource "kubernetes_namespace" "external_dns" {
+  metadata {
+    name = "external-dns"
+  }
+  depends_on = [scaleway_k8s_pool.default]
+}
+
+resource "kubernetes_secret" "scaleway_dns_credentials" {
+  metadata {
+    name      = "scaleway-dns-credentials"
+    namespace = kubernetes_namespace.cert_manager.metadata[0].name
+  }
+
+  data = {
+    SCW_ACCESS_KEY = data.terraform_remote_state.dns_scaleway.outputs.workload_access_key
+    SCW_SECRET_KEY = data.terraform_remote_state.dns_scaleway.outputs.workload_secret_key
+  }
+
+  # Unlike thanos/loki/tempo/velero's Secrets above, ESO's own ExternalSecret
+  # (creationPolicy: Merge) keeps reconciling this exact object too -- it
+  # adds its own tracking annotations/labels (argocd.argoproj.io/*,
+  # reconcile.external-secrets.io/*) on every refresh. Without this,
+  # `kubernetes_secret`'s full-metadata management would strip those on
+  # every `terraform apply`, only for ESO to re-add them within its next
+  # refreshInterval -- a slow, pointless fight over fields Terraform never
+  # needs to own.
+  lifecycle {
+    ignore_changes = [metadata[0].annotations, metadata[0].labels]
+  }
+}
+
+resource "kubernetes_secret" "external_dns_scaleway_credentials" {
+  metadata {
+    name      = "external-dns-scaleway-credentials"
+    namespace = kubernetes_namespace.external_dns.metadata[0].name
+  }
+
+  data = {
+    SCW_ACCESS_KEY = data.terraform_remote_state.dns_scaleway.outputs.workload_access_key
+    SCW_SECRET_KEY = data.terraform_remote_state.dns_scaleway.outputs.workload_secret_key
+  }
+
+  # See kubernetes_secret.scaleway_dns_credentials above -- same ESO Merge
+  # coexistence.
+  lifecycle {
+    ignore_changes = [metadata[0].annotations, metadata[0].labels]
   }
 }
