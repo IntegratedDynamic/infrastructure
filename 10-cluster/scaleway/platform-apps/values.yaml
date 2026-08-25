@@ -6,12 +6,21 @@
 repoURL: https://github.com/IntegratedDynamic/gitops.git
 revision: main
 
+# THIS repo's (infrastructure) own revision, i.e. var.infra_revision --
+# distinct from `revision` above (that one's the gitops repo's ref).
+# Consumed by apps whose `gitRefParam: true` (see templates/apps.yaml) --
+# today just terraform-apply, which needs it to override its chart's own
+# `gitRef` value (infra#76: was hardcoded to "main" independent of
+# infra_revision, so a paired infra/gitops feature branch pair silently
+# read infra's main instead of the branch under test).
+infraRevision: main
+
 # Populated per-domain by values-secrets.yaml / values-monitoring.yaml /
-# values-backups.yaml. Each entry: {name, namespace, chartPath, valueFile,
-# wave, skipCrds?, syncWaveLabelPaths?} — same shape as gitops repo's
-# bootstrap/values.yaml scalewayApps list (this chart's templates/apps.yaml
-# renders it the same way). wave here is domain-local (parallel across
-# secrets/monitoring/backups, ordered only within one domain) — NOT the
-# same numbering the gitops repo's bootstrap chart uses for its own
-# remaining apps.
+# values-backups.yaml / values-terraform-apply.yaml. Each entry: {name,
+# namespace, chartPath, valueFile, wave, skipCrds?, syncWaveLabelPaths?,
+# gitRefParam?} — same shape as gitops repo's bootstrap/values.yaml
+# scalewayApps list (this chart's templates/apps.yaml renders it the same
+# way). wave here is domain-local (parallel across secrets/monitoring/
+# backups, ordered only within one domain) — NOT the same numbering the
+# gitops repo's bootstrap chart uses for its own remaining apps.
 apps: []

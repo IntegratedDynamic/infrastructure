@@ -13,4 +13,8 @@
 # grafana-apps (argocd.tf's wait_argo_workflows_and_grafana_healthy gate).
 apps:
   # ── wave 0 ──────────────────────────────────────────────────────────────
-  - {name: terraform-apply, namespace: argo-workflows, chartPath: services/platform/argo-workflows/terraform-apply, valueFile: values-scaleway.yaml, wave: "0"}
+  # gitRefParam: true (infra#76) -- overrides this chart's own hardcoded
+  # `gitRef: main` (values-scaleway.yaml) with var.infra_revision, so the
+  # in-cluster CronWorkflows git-clone the infra branch actually under
+  # test instead of always infra's main.
+  - {name: terraform-apply, namespace: argo-workflows, chartPath: services/platform/argo-workflows/terraform-apply, valueFile: values-scaleway.yaml, wave: "0", gitRefParam: true}

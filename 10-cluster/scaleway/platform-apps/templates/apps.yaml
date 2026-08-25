@@ -47,16 +47,26 @@ spec:
       # skipCrds/dedicated-CRDs-Application split for kube-prometheus-stack.
       skipCrds: true
       {{- end }}
-      {{- if .syncWaveLabelPaths }}
-      # Same anti-affinity wave-label injection as
-      # gitops repo's bootstrap/templates/scaleway.yaml — see that file's
-      # comment for the full "why" (forceString avoids a bare digit
-      # rendering as an unquoted YAML integer label value).
+      {{- if or .syncWaveLabelPaths .gitRefParam }}
       parameters:
+        {{- if .syncWaveLabelPaths }}
+        # Same anti-affinity wave-label injection as
+        # gitops repo's bootstrap/templates/scaleway.yaml — see that file's
+        # comment for the full "why" (forceString avoids a bare digit
+        # rendering as an unquoted YAML integer label value).
         {{- range .syncWaveLabelPaths }}
         - name: {{ . }}
           value: {{ $app.wave | quote }}
           forceString: true
+        {{- end }}
+        {{- end }}
+        {{- if .gitRefParam }}
+        # infra#76: overrides this app's chart's own `gitRef` default (a
+        # static "main" in its values file) with THIS repo's own revision,
+        # so a paired infra/gitops feature-branch test actually reads the
+        # infra branch under test instead of always reading infra's main.
+        - name: gitRef
+          value: {{ $.Values.infraRevision | quote }}
         {{- end }}
       {{- end }}
 
