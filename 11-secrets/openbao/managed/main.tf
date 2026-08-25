@@ -214,6 +214,48 @@ data "terraform_remote_state" "wireguard" {
 # 04-vpn/wireguard-exit's own state — the second, unrelated WireGuard
 # deployment (consumer-style exit node, not the site-to-site tunnel above).
 # Same read-directly-via-remote-state pattern.
+# 01-iam/bootstrap/scaleway's own state -- read for the github-ci identity's
+# access_key/secret_key outputs (the CI application's own Scaleway API key,
+# NOT a workload identity's). First cross-root read of this specific root
+# from another root (no prior example) -- needed because
+# secrets_sync_github_infrastructure_scaleway below was, until 2026-08-25,
+# silently sourcing SCW_ACCESS_KEY/SCW_SECRET_KEY from
+# data.terraform_remote_state.dns_scaleway's workload_access_key/
+# workload_secret_key instead (01-iam/workload/scaleway's external-dns
+# identity -- DNS-only permissions). That bug was invisible as long as
+# scaleway's own secrets-sync push stayed disabled (targets: [] in the
+# gitops repo's values-scaleway.yaml); enabling it live-overwrote the
+# `scaleway` GitHub environment's real SCW_ACCESS_KEY/SCW_SECRET_KEY with
+# external-dns's DNS-only credentials, confirmed live 2026-08-25 (CI runs
+# started failing with "insufficient permissions: read
+# compute_private_networks" and Object Storage 403s -- external-dns can
+# authenticate but can do neither).
+data "terraform_remote_state" "iam_bootstrap_scaleway" {
+  backend = "s3"
+  config = merge(local.scaleway_state_backend, {
+    bucket = var.iam_bootstrap_scaleway_state_bucket
+    key    = var.iam_bootstrap_scaleway_state_key
+  })
+}
+
+# 00-foundation/scaleway's own state -- read for its access_keys/secret_keys
+# outputs, the per-state-bucket dedicated identities (see that root's README,
+# "Per-bucket identities"). Needed here specifically for
+# access_keys["cluster_scaleway"]/secret_keys["cluster_scaleway"]: the
+# identity scoped to CRUD on 10-cluster/scaleway's own state bucket, the
+# correct credential for that root's CI backend auth -- unlike the general
+# github-ci identity (01-iam/bootstrap/scaleway), which can read/write
+# objects project-wide but was never granted delete, so it can create a lock
+# but not release it (confirmed live 2026-08-25: DeleteObject 403 on lock
+# release, plan/apply otherwise succeed).
+data "terraform_remote_state" "foundation_scaleway" {
+  backend = "s3"
+  config = merge(local.scaleway_state_backend, {
+    bucket = var.foundation_scaleway_state_bucket
+    key    = var.foundation_scaleway_state_key
+  })
+}
+
 data "terraform_remote_state" "wireguard_exit" {
   backend = "s3"
   config = merge(local.scaleway_state_backend, {
@@ -369,14 +411,25 @@ resource "vault_kv_secret_v2" "secrets_sync_github_infrastructure_scaleway" {
   data_json = jsonencode(merge(
     var.secrets_sync_github.repos["infrastructure"].environments["scaleway"],
     {
-      SCW_ACCESS_KEY = data.terraform_remote_state.dns_scaleway.outputs.workload_access_key
-      SCW_SECRET_KEY = data.terraform_remote_state.dns_scaleway.outputs.workload_secret_key
+      # github-ci's own key (01-iam/bootstrap/scaleway) -- NOT
+      # dns_scaleway.outputs.workload_access_key/secret_key, which is
+      # 01-iam/workload/scaleway's external-dns identity (DNS-only). See the
+      # data.terraform_remote_state.iam_bootstrap_scaleway comment above.
+      SCW_ACCESS_KEY = data.terraform_remote_state.iam_bootstrap_scaleway.outputs.access_key
+      SCW_SECRET_KEY = data.terraform_remote_state.iam_bootstrap_scaleway.outputs.secret_key
       # CI's own WireGuard peer key — brings up the tunnel to OpenBao
       # before CI's own `terraform plan/apply` on
       # 11-secrets/openbao/{bootstrap,managed}. Read straight from
       # 04-vpn/wireguard's state, no local.auto.tfvars copy-paste — same
       # as SCW_ACCESS_KEY/SCW_SECRET_KEY above.
       WG_CI_PRIVATE_KEY = data.terraform_remote_state.wireguard.outputs.peer_private_keys["ci-github-actions"]
+
+      # 10-cluster/scaleway's CI backend auth (state R/W + lock release) --
+      # the state bucket's own dedicated identity, not github-ci. See the
+      # data.terraform_remote_state.foundation_scaleway comment above for why
+      # github-ci's key doesn't work here.
+      SCALEWAY_STATE_ACCESS_KEY = data.terraform_remote_state.foundation_scaleway.outputs.access_keys["cluster_scaleway"]
+      SCALEWAY_STATE_SECRET_KEY = data.terraform_remote_state.foundation_scaleway.outputs.secret_keys["cluster_scaleway"]
     }
   ))
 }

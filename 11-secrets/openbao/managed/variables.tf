@@ -110,3 +110,21 @@ variable "openbao_bootstrap_state_key" {
   description = "Object key for 11-secrets/openbao/bootstrap's state within openbao_bootstrap_state_bucket."
   type        = string
 }
+
+variable "iam_bootstrap_scaleway_state_bucket" {
+  description = "Scaleway bucket holding 01-iam/bootstrap/scaleway's remote state."
+  type        = string
+}
+variable "iam_bootstrap_scaleway_state_key" {
+  description = "Object key for 01-iam/bootstrap/scaleway's state within iam_bootstrap_scaleway_state_bucket."
+  type        = string
+}
+
+variable "foundation_scaleway_state_bucket" {
+  description = "Scaleway bucket holding 00-foundation/scaleway's own remote state (read for its access_keys/secret_keys outputs -- the per-state-bucket dedicated identities)."
+  type        = string
+}
+variable "foundation_scaleway_state_key" {
+  description = "Object key for 00-foundation/scaleway's state within foundation_scaleway_state_bucket."
+  type        = string
+}

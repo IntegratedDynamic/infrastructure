@@ -1,9 +1,9 @@
 # GitHub Actions CI identity for the IntegratedDynamic/infrastructure repo.
 # Two policies on one application: cluster-management (Kubernetes/VPC/
-# PrivateNetwork, to create/destroy the Kapsule cluster) and backup-management
-# (Object Storage + IAM application/policy management, so the CI can also
-# provision the storage domain's buckets and their scoped workload
-# identities).
+# PrivateNetwork/Instances, to create/destroy the Kapsule cluster) and
+# backup-management (Object Storage + IAM application/policy management, so
+# the CI can also provision the storage domain's buckets and their scoped
+# workload identities).
 module "ci_identity" {
   source = "../../../modules/scaleway-machine-identity"
 
@@ -13,11 +13,17 @@ module "ci_identity" {
   policies = {
     cluster_management = {
       name        = "github-ci-cluster-management"
-      description = "Kubernetes/VPC/PrivateNetwork management for the GitHub Actions CI application, project-scoped."
+      description = "Kubernetes/VPC/PrivateNetwork/Instances management for the GitHub Actions CI application, project-scoped."
       rules = [
         {
-          project_ids           = [var.project_id]
-          permission_set_names  = ["VPCFullAccess", "KubernetesFullAccess", "PrivateNetworksFullAccess", "IPAMReadOnly"]
+          project_ids = [var.project_id]
+          # InstancesFullAccess added 2026-08-25: 10-cluster/scaleway's
+          # scaleway_instance_security_group.cluster_nodes needs it (Instance
+          # API, not covered by VPC/Kubernetes/PrivateNetworks) -- confirmed
+          # live, "insufficient permissions: read compute_security_groups" on
+          # a plan/apply against an already-existing cluster. Never surfaced
+          # before because CI had never successfully gotten this far.
+          permission_set_names = ["VPCFullAccess", "KubernetesFullAccess", "PrivateNetworksFullAccess", "IPAMReadOnly", "InstancesFullAccess"]
         }
       ]
     }
@@ -52,7 +58,7 @@ module "ci_identity" {
     }
   }
 
-  project_id             = var.project_id
-  api_key_description    = "Consumed from GitHub Actions secrets (SCW_ACCESS_KEY / SCW_SECRET_KEY)."
-  api_key_rotation_days  = var.api_key_rotation_days
+  project_id            = var.project_id
+  api_key_description   = "Consumed from GitHub Actions secrets (SCW_ACCESS_KEY / SCW_SECRET_KEY)."
+  api_key_rotation_days = var.api_key_rotation_days
 }

@@ -1,13 +1,39 @@
 name: Terraform
 description: >
-  Run Terraform for a workspace-driven root: set up Terraform, mint an Infisical
-  OIDC token, assume an AWS role via OIDC (for remote state access) and retrieve Scaleway Machine Identity credentials, then init → workspace select →
-  plan/apply/destroy. The repository must already be checked out.
+  Run Terraform for a workspace-driven root: set up Terraform, optionally mint an
+  Infisical OIDC token, authenticate the S3-compatible state backend, then init →
+  workspace select → plan/apply/destroy. The repository must already be checked out.
+
+  Backend auth has two modes (`state-backend` input), because this repo's roots
+  are split across two remote-state homes (see 00-foundation/scaleway/README.md):
+    - "aws"      (default): assume an AWS IAM role via OIDC (`aws-role-arn`).
+                 For a root whose state still lives in the 00-foundation/aws
+                 bucket, or that also carries a real `provider "aws"` block for
+                 its own resources.
+    - "scaleway": no role assumed — SCALEWAY_STATE_ACCESS_KEY/SCALEWAY_STATE_SECRET_KEY
+                 (already in the job env below) are exported as
+                 AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY just for the backend,
+                 since Terraform's s3 backend only ever reads those two literal
+                 env var names. Deliberately NOT the same pair as the
+                 `provider "scaleway" {}` credentials (SCW_ACCESS_KEY/
+                 SCW_SECRET_KEY, a general-purpose CI identity) — that identity
+                 can read/write state objects but was never granted delete, so
+                 it can create the S3 native lock but not release it
+                 (confirmed live 2026-08-25: DeleteObject 403 on lock release).
+                 SCALEWAY_STATE_ACCESS_KEY/_SECRET_KEY is the state bucket's own
+                 dedicated identity instead (00-foundation/scaleway's
+                 per-bucket identities — full CRUD on just that one bucket),
+                 fed to GitHub via OpenBao+ESO (see 11-secrets/openbao/managed's
+                 secrets_sync_github_infrastructure_scaleway and the gitops
+                 repo's services/platform/secrets-sync). Only safe for a root
+                 with no real `provider "aws"` block of its own (otherwise the
+                 two collide) — e.g. 10-cluster/scaleway.
 
   This action takes NO secret inputs. Provider credentials are read from the
   calling job's environment (set them there — the reusable terraform.yml workflow
   does, sourcing SCW_ACCESS_KEY/SCW_SECRET_KEY from its `secrets:` block):
-    - SCW_ACCESS_KEY / SCW_SECRET_KEY          (Scaleway API key)
+    - SCW_ACCESS_KEY / SCW_SECRET_KEY          (Scaleway API key, provider auth)
+    - SCALEWAY_STATE_ACCESS_KEY / _SECRET_KEY  (state-backend: scaleway only)
     - SCW_DEFAULT_ORGANIZATION_ID / _PROJECT_ID
     - INFISICAL_MACHINE_IDENTITY_ID            (for the minted INFISICAL_AUTH_JWT)
 
@@ -24,9 +50,19 @@ inputs:
     description: 'Terraform command to run: plan | apply | destroy.'
     required: false
     default: plan
+  state-backend:
+    description: >
+      Where this root's remote state lives: "aws" (assume aws-role-arn via OIDC)
+      or "scaleway" (reuse SCW_ACCESS_KEY/SCW_SECRET_KEY from the job env as the
+      backend's AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY, no role assumed). See
+      the top-of-file description for which mode fits which root.
+    required: false
+    default: aws
   aws-role-arn:
-    description: ARN of the IAM role to assume via OIDC (Terraform-state R/W).
-    required: true
+    description: >
+      ARN of the IAM role to assume via OIDC (Terraform-state R/W). Required
+      when state-backend is "aws"; ignored when "scaleway".
+    required: false
   aws-region:
     description: AWS region for the assumed role.
     required: false
@@ -60,7 +96,15 @@ runs:
           const jwt = await core.getIDToken(process.env.AUDIENCE)
           core.exportVariable('INFISICAL_AUTH_JWT', jwt)
 
+    - name: Validate state-backend inputs
+      if: inputs.state-backend == 'aws' && inputs.aws-role-arn == ''
+      shell: bash
+      run: |
+        echo "::error::state-backend is 'aws' but aws-role-arn was not provided."
+        exit 1
+
     - name: Assume AWS role via OIDC
+      if: inputs.state-backend == 'aws'
       uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
       with:
         role-to-assume: ${{ inputs.aws-role-arn }}
@@ -72,9 +116,19 @@ runs:
         ROOT: ${{ inputs.root }}
         TFVARS: ${{ inputs.tfvars-file }}
         COMMAND: ${{ inputs.command }}
+        STATE_BACKEND: ${{ inputs.state-backend }}
         # SCW_* and INFISICAL_MACHINE_IDENTITY_ID are inherited from the job env.
       run: |
         set -euo pipefail
+        # Terraform's s3 backend only ever reads these two literal env var names,
+        # regardless of which S3-compatible endpoint the backend block points at
+        # (see 00-foundation/scaleway/README.md's "Cross-root reads need no
+        # manual credential setup" section for why a backend block can't just
+        # read a data source or variable instead).
+        if [ "$STATE_BACKEND" = "scaleway" ]; then
+          export AWS_ACCESS_KEY_ID="$SCALEWAY_STATE_ACCESS_KEY"
+          export AWS_SECRET_ACCESS_KEY="$SCALEWAY_STATE_SECRET_KEY"
+        fi
         ws="${TFVARS%.tfvars}"
         terraform -chdir="$ROOT" init -input=false
         # apply may target a brand-new env whose workspace doesn't exist yet;

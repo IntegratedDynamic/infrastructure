@@ -1,34 +1,41 @@
+
 name: Terraform — Scaleway cluster
 
-# Drives 10-cluster/scaleway through the .github/actions/terraform composite action:
-#   - pull_request          → plan
-#   - push to main          → apply
-#   - schedule (daily 18h)  → destroy   (cost-control teardown of the homelab)
-#   - workflow_dispatch     → up/down on demand (plan | apply | destroy)
+# Makes the run list self-explanatory (default would be the workflow name
+# for every run, indistinguishable at a glance) while staying close to the
+# original human-readable title -- just the command inserted, and the
+# GitHub environment the secrets/permissions actually come from (the
+# `environment` input below, fed straight into the job's own `environment:`
+# -- one literal, not duplicated).
+run-name: "Terraform ${{ inputs.command }} — Scaleway cluster (env: ${{ inputs.environment }})"
+
+# Drives 10-cluster/scaleway through the .github/actions/terraform composite action.
 #
-# State R/W + lock uses the org's single Terraform AWS role
-# (vars.AWS_TERRAFORM_ROLE_ARN — S3 list/get/put/delete on the state bucket
-# only, see 00-foundation/aws/ci-role.tf). Scaleway cluster lifecycle uses
-# the CI API key from the `scaleway` environment (Kubernetes/VPC/
-# PrivateNetwork FullAccess, see 01-iam/bootstrap/scaleway). Provider creds are set as job env (read by the
-# action) — never passed as plain action inputs. No static AWS keys.
+# Iteration 1 (2026-08-25): workflow_dispatch only, mirroring a local
+# `terraform plan|apply|destroy` 1:1 (apply = up, destroy = down). This root's
+# state backend auth (state-backend: scaleway below) had never actually been
+# exercised in CI before this — it was previously wired to assume a real AWS
+# IAM role for a bucket that has lived on Scaleway since the 2026-08-19 state
+# migration, which 403s (see 00-foundation/scaleway/README.md's "Known
+# follow-up"). pull_request(plan)/push(apply)/schedule(destroy) triggers are
+# deliberately not wired back in yet — no point automating (a PR-driven plan,
+# an unattended merge-apply, a daily unattended destroy) a path that hasn't
+# been proven end to end by hand first. Re-add once a manual plan → apply →
+# destroy cycle has gone green.
+#
+# Scaleway cluster lifecycle uses the CI API key from the dispatched-to
+# GitHub environment (`scaleway` by default -- Kubernetes/VPC/PrivateNetwork/
+# Instances FullAccess, see 01-iam/bootstrap/scaleway).
+# State backend auth (state-backend: scaleway) uses a DIFFERENT key pair --
+# SCALEWAY_STATE_ACCESS_KEY/_SECRET_KEY, the state bucket's own dedicated
+# identity (00-foundation/scaleway's per-bucket identities), fed to GitHub via
+# OpenBao+ESO. The general CI identity above can't do this job: it can
+# read/write state objects but was never granted delete, so it creates the S3
+# native lock fine but can't release it (confirmed live 2026-08-25). Provider
+# creds are set as job env (read by the action) -- never passed as plain
+# action inputs.
 
 on:
-  pull_request:
-    paths:
-      - '10-cluster/scaleway/**'
-      - '.github/actions/terraform/**'
-      - '.github/workflows/scaleway.yml'
-  push:
-    branches: [main]
-    paths:
-      - '10-cluster/scaleway/**'
-      - '.github/actions/terraform/**'
-      - '.github/workflows/scaleway.yml'
-  schedule:
-    # 16:00 UTC = 18:00 Europe/Paris in summer (CEST). GitHub cron is UTC and does
-    # NOT follow DST, so in winter (CET) this fires at 17:00 Paris.
-    - cron: '0 16 * * *'
   workflow_dispatch:
     inputs:
       command:
@@ -36,12 +43,21 @@ on:
         type: choice
         options: [plan, apply, destroy]
         default: plan
+      environment:
+        description: >
+          GitHub environment to run against -- gates which secrets/protection
+          rules apply (job's environment: below). A free-text string, not a
+          dropdown: this only ever targets 10-cluster/scaleway today, but
+          future environments (more clusters, ephemeral ones) won't all be
+          enumerable ahead of time.
+        type: string
+        default: scaleway
 
 concurrency:
-  # Serialize everything that writes this root's state (apply/destroy never cancel
-  # mid-flight); only cancel superseded PR plans. schedule/push share ref=main.
+  # Serialize everything that writes this root's state (apply/destroy never
+  # cancel mid-flight) -- guards against two manual dispatches racing.
   group: scaleway-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -50,46 +66,23 @@ jobs:
   terraform:
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    # The `scaleway` environment carries SCW_ACCESS_KEY / SCW_SECRET_KEY (and
-    # satisfies zizmor's secrets-in-environment audit). It currently has no
-    # protection rule, so the daily scheduled destroy runs unattended — keep it
-    # that way (a required-reviewer rule would block the cron).
-    environment: scaleway
+    # Fed by the environment input above -- carries SCW_ACCESS_KEY /
+    # SCW_SECRET_KEY (and satisfies zizmor's secrets-in-environment audit).
+    environment: ${{ inputs.environment }}
     permissions:
-      id-token: write # mint OIDC tokens for AWS + Infisical
       contents: read
     # Provider creds exposed to the composite action via the job env (not inputs).
     env:
       SCW_ACCESS_KEY: ${{ secrets.SCW_ACCESS_KEY }}
       SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
+      # State bucket's own dedicated identity (not the general CI identity
+      # above) -- see action.yml's header comment for why. Fed to GitHub via
+      # OpenBao+ESO, not gh secret set.
+      SCALEWAY_STATE_ACCESS_KEY: ${{ secrets.SCALEWAY_STATE_ACCESS_KEY }}
+      SCALEWAY_STATE_SECRET_KEY: ${{ secrets.SCALEWAY_STATE_SECRET_KEY }}
       SCW_DEFAULT_ORGANIZATION_ID: ${{ vars.SCW_DEFAULT_ORGANIZATION_ID }}
       SCW_DEFAULT_PROJECT_ID: ${{ vars.SCW_DEFAULT_PROJECT_ID }}
-      INFISICAL_MACHINE_IDENTITY_ID: ${{ vars.INFISICAL_MACHINE_IDENTITY_ID }}
     steps:
-      - name: Assert state role ARN is present
-        env:
-          ROLE_ARN: ${{ vars.AWS_TERRAFORM_ROLE_ARN }}
-        run: |
-          if [ -z "$ROLE_ARN" ]; then
-            echo "::error::vars.AWS_TERRAFORM_ROLE_ARN is not set (provisioned by 00-foundation/aws)."
-            exit 1
-          fi
-
-      - name: Resolve terraform command
-        id: cmd
-        env:
-          EVENT: ${{ github.event_name }}
-          DISPATCH_CMD: ${{ github.event.inputs.command }}
-        run: |
-          case "$EVENT" in
-            schedule)          cmd=destroy ;;
-            push)              cmd=apply ;;
-            workflow_dispatch) cmd="${DISPATCH_CMD:-plan}" ;;
-            *)                 cmd=plan ;;
-          esac
-          echo "command=$cmd" >> "$GITHUB_OUTPUT"
-          echo "Resolved terraform command: $cmd (event: $EVENT)"
-
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
@@ -99,5 +92,6 @@ jobs:
         with:
           root: 10-cluster/scaleway
           tfvars-file: 10-cluster-scaleway-dev.tfvars
-          command: ${{ steps.cmd.outputs.command }}
-          aws-role-arn: ${{ vars.AWS_TERRAFORM_ROLE_ARN }}
+          command: ${{ github.event.inputs.command }}
+          state-backend: scaleway
+          infisical-oidc-audience: '' # this root doesn't consume Infisical
