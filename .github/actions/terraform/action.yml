@@ -110,7 +110,14 @@ runs:
         role-to-assume: ${{ inputs.aws-role-arn }}
         aws-region: ${{ inputs.aws-region }}
 
-    - name: Terraform ${{ inputs.command }}
+    # Split from the actual plan/apply/destroy step below so GitHub's own
+    # per-step timing shows how long the command itself took, separate from
+    # init/workspace-select -- a single combined step only ever showed their
+    # sum. AWS_ACCESS_KEY_ID/_SECRET_ACCESS_KEY (state-backend: scaleway
+    # only) are written to $GITHUB_ENV, not just exported locally, so they
+    # carry over to the next step -- each composite-action step is its own
+    # shell invocation.
+    - name: Terraform init
       shell: bash
       env:
         ROOT: ${{ inputs.root }}
@@ -126,6 +133,8 @@ runs:
         # manual credential setup" section for why a backend block can't just
         # read a data source or variable instead).
         if [ "$STATE_BACKEND" = "scaleway" ]; then
+          echo "AWS_ACCESS_KEY_ID=$SCALEWAY_STATE_ACCESS_KEY" >> "$GITHUB_ENV"
+          echo "AWS_SECRET_ACCESS_KEY=$SCALEWAY_STATE_SECRET_KEY" >> "$GITHUB_ENV"
           export AWS_ACCESS_KEY_ID="$SCALEWAY_STATE_ACCESS_KEY"
           export AWS_SECRET_ACCESS_KEY="$SCALEWAY_STATE_SECRET_KEY"
         fi
@@ -138,6 +147,18 @@ runs:
         else
           terraform -chdir="$ROOT" workspace select "$ws"
         fi
+
+    - name: Terraform ${{ inputs.command }}
+      shell: bash
+      env:
+        ROOT: ${{ inputs.root }}
+        TFVARS: ${{ inputs.tfvars-file }}
+        COMMAND: ${{ inputs.command }}
+        # AWS_ACCESS_KEY_ID/_SECRET_ACCESS_KEY (state-backend: scaleway) or
+        # the assumed role's creds (state-backend: aws) are already in the
+        # job env by this point -- see the previous step.
+      run: |
+        set -euo pipefail
         case "$COMMAND" in
           plan)    terraform -chdir="$ROOT" plan    -input=false -var-file="env/${TFVARS}" ;;
           apply)   terraform -chdir="$ROOT" apply   -input=false -auto-approve -var-file="env/${TFVARS}" ;;
