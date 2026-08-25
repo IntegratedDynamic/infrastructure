@@ -34,6 +34,13 @@ variable "cluster_name" {
   default     = "scaleway-homelab"
 }
 
+# Branch of the gitops repo ArgoCD's `bootstrap` (and every platform
+# domain's own child Applications) pull from. "Override on your own branch,
+# test end-to-end, never merge that change" DevX trick -- if the named
+# branch doesn't actually exist on gitops (never pushed, or merged and
+# deleted since), argocd.tf's effective_gitops_revision local falls back to
+# "main" itself at apply time, since ArgoCD has no such fallback of its
+# own (an unresolvable targetRevision just sits in ComparisonError).
 variable "gitops_revision" {
   type    = string
   default = "main"
@@ -43,7 +50,8 @@ variable "gitops_revision" {
 # backups-apps Applications pull platform-apps/ from — see argocd.tf's
 # argocd_platform_apps helm_release. Same "override on your own branch to
 # test end-to-end, never merge that change" DevX trick as gitops_revision
-# above; MUST stay "main" on origin/main.
+# above (same apply-time fallback-to-main too, see argocd.tf's
+# effective_infra_revision); MUST stay "main" on origin/main.
 variable "infra_revision" {
   type    = string
   default = "main"

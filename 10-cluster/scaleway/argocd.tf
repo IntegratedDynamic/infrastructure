@@ -23,6 +23,65 @@ locals {
   # at once.
   argocd_controller_memory_limit_mib = 1500
   argocd_controller_gomemlimit_mib   = floor(local.argocd_controller_memory_limit_mib * 0.85)
+
+  # Both ArgoCD Applications' own `targetRevision` (evaluated by ArgoCD's
+  # repo-server) and the plain `git clone --branch` step inside
+  # terraform-apply's WorkflowTemplate (infra#76's gitRef) assume the
+  # branch named by var.gitops_revision/var.infra_revision actually exists
+  # on its repo -- true for the "override on your own branch, test
+  # end-to-end, never merge that change" DevX trick IF you remember to
+  # reset it before merging, but ArgoCD has NO built-in fallback: an
+  # unresolvable targetRevision just sits in ComparisonError forever, no
+  # automatic revert to a previous/default revision. Resolved here instead,
+  # at apply time (before ArgoCD ever sees a revision) -- see the
+  # data.external "*_revision_exists" pair + effective_*_revision locals
+  # below.
+  gitops_source_repo = "https://github.com/IntegratedDynamic/gitops.git"
+}
+
+# `--heads`-only existence probe per repo/revision -- always exits 0 and
+# reports {"exists": "true"|"false"} in its own JSON, never a hard
+# data-source failure on a missing branch (unlike e.g. `data "http"` against
+# GitHub's API, which errors the whole apply on a 404). Only run when the
+# var isn't already "main" (count) -- the common case makes zero network
+# calls; effective_*_revision below treats a skipped check as "exists" so
+# the result still resolves to "main" either way when count = 0.
+data "external" "gitops_revision_exists" {
+  count = var.gitops_revision != "main" ? 1 : 0
+
+  program = ["sh", "-c", <<-EOT
+    if git ls-remote --exit-code --heads ${local.gitops_source_repo} "${var.gitops_revision}" >/dev/null 2>&1; then
+      echo '{"exists": "true"}'
+    else
+      echo '{"exists": "false"}'
+    fi
+  EOT
+  ]
+}
+
+data "external" "infra_revision_exists" {
+  count = var.infra_revision != "main" ? 1 : 0
+
+  program = ["sh", "-c", <<-EOT
+    if git ls-remote --exit-code --heads ${local.platform_apps_source_repo} "${var.infra_revision}" >/dev/null 2>&1; then
+      echo '{"exists": "true"}'
+    else
+      echo '{"exists": "false"}'
+    fi
+  EOT
+  ]
+}
+
+locals {
+  # The revision every targetRevision/gitRef below actually uses -- var.
+  # gitops_revision/var.infra_revision verbatim when that branch exists
+  # upstream (or when it's already "main", never probed), "main" otherwise.
+  # `--heads` only checks branches, matching these vars' documented
+  # "override on your own branch" purpose -- a tag or bare commit SHA would
+  # (incorrectly) fall back to "main" too, but neither is a supported value
+  # for either variable today.
+  effective_gitops_revision = try(data.external.gitops_revision_exists[0].result.exists, "true") == "true" ? var.gitops_revision : "main"
+  effective_infra_revision  = try(data.external.infra_revision_exists[0].result.exists, "true") == "true" ? var.infra_revision : "main"
 }
 
 resource "helm_release" "argocd" {
@@ -376,14 +435,14 @@ applications:
 
     source:
       repoURL: https://github.com/IntegratedDynamic/gitops.git
-      targetRevision: ${var.gitops_revision}
+      targetRevision: ${local.effective_gitops_revision}
       path: bootstrap
       helm:
         parameters:
           - name: env
             value: scaleway
           - name: revision
-            value: ${var.gitops_revision}
+            value: ${local.effective_gitops_revision}
 
     destination:
       server: https://kubernetes.default.svc
@@ -470,14 +529,14 @@ applications:
     project: default
     source:
       repoURL: ${local.platform_apps_source_repo}
-      targetRevision: ${var.infra_revision}
+      targetRevision: ${local.effective_infra_revision}
       path: 10-cluster/scaleway/platform-apps
       helm:
         valueFiles:
           - values-secrets.yaml
         parameters:
           - name: revision
-            value: ${var.gitops_revision}
+            value: ${local.effective_gitops_revision}
     destination:
       server: https://kubernetes.default.svc
       namespace: argocd
@@ -540,14 +599,14 @@ applications:
     project: default
     source:
       repoURL: ${local.platform_apps_source_repo}
-      targetRevision: ${var.infra_revision}
+      targetRevision: ${local.effective_infra_revision}
       path: 10-cluster/scaleway/platform-apps
       helm:
         valueFiles:
           - values-eso-data.yaml
         parameters:
           - name: revision
-            value: ${var.gitops_revision}
+            value: ${local.effective_gitops_revision}
     destination:
       server: https://kubernetes.default.svc
       namespace: argocd
@@ -596,14 +655,14 @@ applications:
     project: default
     source:
       repoURL: ${local.platform_apps_source_repo}
-      targetRevision: ${var.infra_revision}
+      targetRevision: ${local.effective_infra_revision}
       path: 10-cluster/scaleway/platform-apps
       helm:
         valueFiles:
           - values-monitoring.yaml
         parameters:
           - name: revision
-            value: ${var.gitops_revision}
+            value: ${local.effective_gitops_revision}
     destination:
       server: https://kubernetes.default.svc
       namespace: argocd
@@ -656,14 +715,14 @@ applications:
     project: default
     source:
       repoURL: ${local.platform_apps_source_repo}
-      targetRevision: ${var.infra_revision}
+      targetRevision: ${local.effective_infra_revision}
       path: 10-cluster/scaleway/platform-apps
       helm:
         valueFiles:
           - values-backups.yaml
         parameters:
           - name: revision
-            value: ${var.gitops_revision}
+            value: ${local.effective_gitops_revision}
     destination:
       server: https://kubernetes.default.svc
       namespace: argocd
@@ -715,14 +774,14 @@ applications:
     project: default
     source:
       repoURL: ${local.platform_apps_source_repo}
-      targetRevision: ${var.infra_revision}
+      targetRevision: ${local.effective_infra_revision}
       path: 10-cluster/scaleway/platform-apps
       helm:
         valueFiles:
           - values-networking.yaml
         parameters:
           - name: revision
-            value: ${var.gitops_revision}
+            value: ${local.effective_gitops_revision}
     destination:
       server: https://kubernetes.default.svc
       namespace: argocd
@@ -767,14 +826,14 @@ applications:
     project: default
     source:
       repoURL: ${local.platform_apps_source_repo}
-      targetRevision: ${var.infra_revision}
+      targetRevision: ${local.effective_infra_revision}
       path: 10-cluster/scaleway/platform-apps
       helm:
         valueFiles:
           - values-wireguard.yaml
         parameters:
           - name: revision
-            value: ${var.gitops_revision}
+            value: ${local.effective_gitops_revision}
     destination:
       server: https://kubernetes.default.svc
       namespace: argocd
@@ -901,14 +960,14 @@ applications:
     project: default
     source:
       repoURL: ${local.platform_apps_source_repo}
-      targetRevision: ${var.infra_revision}
+      targetRevision: ${local.effective_infra_revision}
       path: 10-cluster/scaleway/platform-apps
       helm:
         valueFiles:
           - values-dex.yaml
         parameters:
           - name: revision
-            value: ${var.gitops_revision}
+            value: ${local.effective_gitops_revision}
     destination:
       server: https://kubernetes.default.svc
       namespace: argocd
@@ -949,14 +1008,14 @@ applications:
     project: default
     source:
       repoURL: ${local.platform_apps_source_repo}
-      targetRevision: ${var.infra_revision}
+      targetRevision: ${local.effective_infra_revision}
       path: 10-cluster/scaleway/platform-apps
       helm:
         valueFiles:
           - values-argocd-config.yaml
         parameters:
           - name: revision
-            value: ${var.gitops_revision}
+            value: ${local.effective_gitops_revision}
     destination:
       server: https://kubernetes.default.svc
       namespace: argocd
@@ -997,14 +1056,14 @@ applications:
     project: default
     source:
       repoURL: ${local.platform_apps_source_repo}
-      targetRevision: ${var.infra_revision}
+      targetRevision: ${local.effective_infra_revision}
       path: 10-cluster/scaleway/platform-apps
       helm:
         valueFiles:
           - values-grafana.yaml
         parameters:
           - name: revision
-            value: ${var.gitops_revision}
+            value: ${local.effective_gitops_revision}
     destination:
       server: https://kubernetes.default.svc
       namespace: argocd
@@ -1066,14 +1125,14 @@ applications:
     project: default
     source:
       repoURL: ${local.platform_apps_source_repo}
-      targetRevision: ${var.infra_revision}
+      targetRevision: ${local.effective_infra_revision}
       path: 10-cluster/scaleway/platform-apps
       helm:
         valueFiles:
           - values-argo-workflows.yaml
         parameters:
           - name: revision
-            value: ${var.gitops_revision}
+            value: ${local.effective_gitops_revision}
     destination:
       server: https://kubernetes.default.svc
       namespace: argocd
@@ -1139,14 +1198,19 @@ applications:
     project: default
     source:
       repoURL: ${local.platform_apps_source_repo}
-      targetRevision: ${var.infra_revision}
+      targetRevision: ${local.effective_infra_revision}
       path: 10-cluster/scaleway/platform-apps
       helm:
         valueFiles:
           - values-terraform-apply.yaml
         parameters:
           - name: revision
-            value: ${var.gitops_revision}
+            value: ${local.effective_gitops_revision}
+          # infra#76: threads THIS repo's own revision through so the
+          # terraform-apply app's gitRefParam (values-terraform-apply.yaml)
+          # can override its chart's hardcoded `gitRef: main` default.
+          - name: infraRevision
+            value: ${local.effective_infra_revision}
     destination:
       server: https://kubernetes.default.svc
       namespace: argocd
