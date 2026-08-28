@@ -1,22 +1,32 @@
 # Grafana -- extracted from gitops repo's bootstrap/values.yaml (infra#84
 # follow-up). Kept out of monitoring-apps deliberately: folding it in would
-# force kube-prometheus-stack/loki/tempo/alloy/otel-collector (currently
-# genuinely independent of networking-apps) to also wait on networking's
-# Gateway API CRDs just because grafana-gateway needs them.
+# force kube-prometheus-stack/loki/tempo/alloy/otel-collector (genuinely
+# independent of networking-apps) to also wait on networking's Gateway API
+# CRDs just because grafana-gateway needs them.
 #
-# grafana-secret lives in eso-data-apps now (argocd.tf's
-# helm_release.eso_data_apps) -- grafana just consumes the Secrets it
-# materializes. grafana-gateway's HTTPRoute needs networking-apps' Gateway
-# API CRDs (wait_networking_healthy gate, same as every other *-gateway
-# domain). grafana's own Velero-restore PreSync hook is deliberately left
-# ungated against backups-apps -- confirmed self-contained/fail-open
-# (queries the velero namespace's Backup/Restore objects directly and
-# proceeds with a fresh state if none shows up within its own budget), same
-# reasoning as gateway-config's identical Velero dependency -- see
-# platform-apps/README.md.
+# grafana-secret lives in secrets-apps' wave 2 now (values-secrets.yaml;
+# argocd.tf's helm_release.grafana_apps depends_on helm_release.secrets_apps)
+# -- grafana just consumes the Secrets it materializes. grafana-gateway's
+# HTTPRoute moved OUT to networking-resources-apps' wave 1
+# (values-networking-resources.yaml -- was the separate `gateways-apps`
+# domain, merged in 2026-08-27) -- grafana
+# itself has no Gateway API dependency (terraform-apply's own preflight
+# hits it in-cluster, http://grafana.monitoring.svc:80/, never through the
+# public route), so bundling grafana-gateway in here used to force this
+# WHOLE domain's health to wait on networking-apps' CRDs for no reason --
+# same "product doesn't need what only its *-gateway sibling needs"
+# reasoning as values-dex.yaml, see platform-apps/README.md's "Decoupling
+# gateway routes from wait_networking_healthy" section. grafana's own PVC
+# restore from a Velero backup (services/platform/monitoring/grafana-restore)
+# lives in backups-apps' wave 1 now (values-backups.yaml -- was the
+# separate restore-apps domain, merged in 2026-08-27) -- this domain has a
+# real Terraform-enforced dependency on it (argocd.tf's
+# helm_release.grafana_apps depends_on module.wait_backups_healthy),
+# replacing the old "PreSync hook on this chart, fails open" design. See
+# that chart's own README.md for the full history.
+# extraValueFileParam (var.letsencrypt_staging, argocd.tf) -- Grafana does
+# real server-side OIDC calls to https://auth.scalepack.fr (auth_url/
+# token_url/api_url in its own values-scaleway.yaml), so it needs to trust
+# the staging CA when that flag flips.
 apps:
-  # ── wave 0 ──────────────────────────────────────────────────────────────
-  - {name: grafana, namespace: monitoring, chartPath: services/platform/monitoring/grafana-chart, valueFile: values-scaleway.yaml, wave: "0"}
-
-  # ── wave 1 ──────────────────────────────────────────────────────────────
-  - {name: grafana-gateway, namespace: monitoring, chartPath: services/platform/monitoring/grafana-gateway, valueFile: values-scaleway.yaml, wave: "1"}
+  - {name: grafana, namespace: monitoring, chartPath: services/platform/monitoring/grafana-chart, valueFile: values-scaleway.yaml, wave: "0", extraValueFileParam: values-letsencrypt-staging-ca.yaml}

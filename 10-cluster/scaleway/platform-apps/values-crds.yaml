@@ -1,0 +1,43 @@
+# Every CRD-only chart across the whole platform, consolidated into ONE
+# domain (2026-08-26, generalized further 2026-08-26/27) -- generalizes a
+# pattern that used to live scattered, one per consumer:
+# `kube-prometheus-stack-crds` inside monitoring-apps (existed since
+# 2026-08-13, moved here unchanged) and `gateway-api-crds` inside
+# networking-apps (extracted the same day this file was created, see that
+# investigation's own history in platform-apps/README.md's "One CRDs domain
+# for the whole platform" section).
+#
+# Extended past the original two CRD sets (infra#100 stopped there,
+# deliberately scoped to only the CRDs that had already raced live) to
+# `cert-manager-crds` too: a vendored, `helm template`-rendered copy of
+# that controller chart's own CRD templates (gitops repo's
+# services/platform/cert-manager/crds -- see that chart's own Chart.yaml
+# for the exact vendoring method). That chart's own competing copy stays
+# disabled (`crds.enabled: false` in gitops repo's own values-scaleway.yaml)
+# -- see platform-apps/README.md's "One CRDs domain for the whole platform"
+# section for the full rationale and the one deliberate exception
+# (argo-workflows' CRDs, installed via a Helm hook Job rather than a plain
+# template or native crds/ folder -- no active cross-release race to fix,
+# documented on that chart's own Chart.yaml instead of extracted here).
+#
+# external-secrets/velero were extracted here too on 2026-08-26/27, then
+# REVERTED 2026-08-27 (after live-testing the letsencrypt_staging flag
+# surfaced how much the shared crds-apps gate's own convergence time
+# (confirmed live: ~8.5min for wait-crds-healthy) was costing secrets-apps/
+# backups-apps, neither of which shares a CRD-installation race with any
+# OTHER domain the way envoy-gateway/cert-manager did) -- both charts
+# manage their own CRDs again (external-secrets' installCRDs back to its
+# chart default, velero's skipCrds: true dropped from its own app entry in
+# values-backups.yaml), and secrets-apps/backups-apps no longer wait on
+# crds-apps at all (argocd.tf), so they start in parallel with it again.
+# values-secrets.yaml's own external-secrets/secrets-sync wave split is the
+# accepted trade-off: ordering within that one domain, not a platform-wide
+# guarantee, same class of risk this generalization originally set out to
+# close for the CRDs that WERE genuinely racing across domains.
+#
+# All one wave: no CRD set here depends on another.
+apps:
+  # ── wave 0 ──────────────────────────────────────────────────────────────
+  - {name: kube-prometheus-stack-crds, namespace: monitoring, chartPath: services/platform/monitoring/crds, valueFile: values-scaleway.yaml, wave: "0"}
+  - {name: gateway-api-crds, namespace: envoy-gateway-system, chartPath: services/platform/gateway/crds, valueFile: values-scaleway.yaml, wave: "0"}
+  - {name: cert-manager-crds, namespace: cert-manager, chartPath: services/platform/cert-manager/crds, valueFile: values-scaleway.yaml, wave: "0"}

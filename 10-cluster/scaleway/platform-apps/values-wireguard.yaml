@@ -1,12 +1,15 @@
 # WireGuard site-to-site tunnel -- extracted from gitops repo's
 # bootstrap/values.yaml (infra#84 follow-up: finishing the platform-apps
 # extraction so only `demo` remains in bootstrap). wireguard-secret itself
-# lives in eso-data-apps now (every ExternalSecret across every domain does
-# -- see argocd.tf's helm_release.eso_data_apps for why); this domain just
+# lives in secrets-apps' wave 2 now (every ExternalSecret across every
+# domain does -- see values-secrets.yaml for why); this domain just
 # consumes the Secret it materializes. No HTTPRoute here either (no Gateway
-# API dependency), so this domain only needs eso-data-apps
-# (argocd.tf's helm_release.wireguard_apps depends_on
-# helm_release.eso_data_apps), not a health wait on networking-apps.
+# API dependency), so this domain only needs a soft dependency on
+# secrets-apps (argocd.tf's helm_release.wireguard_apps depends_on
+# helm_release.secrets_apps), not a health wait on any CRD -- confirmed
+# during the 2026-08-26/27 CRD-graph generalization (infra#100) that this
+# was the ONE unnecessary wait_crds_healthy left over from Tier-0's old
+# "uniform" gating, since dropped from argocd.tf.
 apps:
   # ── wave 0 ──────────────────────────────────────────────────────────────
   - {name: wireguard-config, namespace: wireguard, chartPath: services/platform/wireguard-site-to-site/config, valueFile: values-scaleway.yaml, wave: "0", syncWaveLabelPaths: ['syncWave']}

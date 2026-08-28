@@ -1,15 +1,18 @@
 # ArgoCD's own OIDC config + exposure -- extracted from gitops repo's
 # bootstrap/values.yaml (infra#84 follow-up). argocd-config-secret (the
-# ExternalSecret this used to bundle) lives in eso-data-apps now (argocd.tf's
-# helm_release.eso_data_apps) -- this domain's `argocd-config` just consumes
-# the Secret it materializes (via its PostSync restart-hook) and
-# argocd-config-gateway exposes argocd-server itself via HTTPRoute, same
-# hard dependency on networking-apps' Gateway API CRDs as every other
-# *-gateway domain -- see platform-apps/README.md's wait_networking_healthy
-# gate.
+# ExternalSecret this used to bundle) lives in secrets-apps' wave 2 now
+# (values-secrets.yaml; argocd.tf's helm_release.argocd_config_apps
+# depends_on helm_release.secrets_apps) -- this domain's `argocd-config`
+# just consumes the Secret it materializes (via its PostSync restart-hook).
+#
+# argocd-config-gateway (exposes argocd-server via HTTPRoute) moved OUT to
+# networking-resources-apps' wave 1 (values-networking-resources.yaml --
+# was the separate `gateways-apps` domain, merged in 2026-08-27) --
+# `argocd-config` itself (RBAC + a restart-hook Job hitting ArgoCD's own
+# in-cluster API) has no Gateway API dependency, so bundling the gateway
+# chart in here used to force this WHOLE domain's health to wait on
+# networking-apps' CRDs for no reason -- same reasoning as
+# values-dex.yaml/values-grafana.yaml, see platform-apps/README.md's
+# "Decoupling gateway routes from wait_networking_healthy" section.
 apps:
-  # ── wave 0 ──────────────────────────────────────────────────────────────
   - {name: argocd-config, namespace: argocd, chartPath: services/platform/argocd-config/config, valueFile: values.yaml, wave: "0"}
-
-  # ── wave 1 ──────────────────────────────────────────────────────────────
-  - {name: argocd-config-gateway, namespace: argocd, chartPath: services/platform/argocd-config/gateway, valueFile: values-scaleway.yaml, wave: "1"}

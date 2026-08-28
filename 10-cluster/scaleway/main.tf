@@ -28,6 +28,49 @@ resource "scaleway_k8s_cluster" "this" {
     maintenance_window_start_hour = 2
     maintenance_window_day        = "any"
   }
+
+  # scale_down_delay_after_add raised from Scaleway's own 10m default
+  # (confirmed live 2026-08-26, three separate fresh-boot cycles with
+  # var.node_count = 2): this is the window during which Cluster Autoscaler
+  # won't evaluate scale-down AT ALL after the last scale-up -- exactly the
+  # class of "just booted" protection this needs, since on a fresh cluster
+  # BOTH nodes are scale-up events (the initial pool creation itself), so
+  # this delay alone covers the whole "still converging" window without
+  # touching scale_down_unneeded_time (left at its 10m default, deliberately
+  # -- that knob governs ongoing/steady-state scale-down responsiveness for
+  # the cluster's entire later life, not just this boot window, and
+  # widening it would be a much broader change than the actual problem
+  # calls for). Confirmed live: a 10m delay let the second node get marked
+  # unneeded and removed mid-convergence (observed at 6m30s and 13m into
+  # separate runs, both while the initial ~30-Application ArgoCD tree sync
+  # was still active), measurably slowing several wait-gates
+  # (module.wait_networking_healthy: 5m21s-5m30s baseline vs 9-11+ minutes
+  # on the runs this hit). A run where scale-down happened to land after
+  # wait_networking_healthy finished (~15 min in) showed zero impact -- 20m
+  # targets comfortably past every observed convergence window today.
+  #
+  # Every OTHER field pinned explicitly to Scaleway's own current defaults
+  # (confirmed live via `terraform plan`'s own refreshed state and the
+  # scaleway provider's schema, 2026-08-26) rather than left unset --
+  # `autoscaler_config`'s attributes are plain optional, none computed, so
+  # an unset field is sent to the API as Go's zero value (empty string,
+  # false, 0), not "leave Scaleway's default alone". Leaving e.g.
+  # scale_down_unneeded_time unset here would have silently sent "" (an
+  # invalid duration) instead of preserving its actual "10m" default.
+  autoscaler_config {
+    scale_down_delay_after_add       = "20m"
+    balance_similar_node_groups      = false
+    disable_scale_down               = false
+    estimator                        = "binpacking"
+    expander                         = "random"
+    expendable_pods_priority_cutoff  = 0
+    ignore_daemonsets_utilization    = false
+    max_graceful_termination_sec     = 0
+    scale_down_unneeded_time         = "10m"
+    scale_down_utilization_threshold = 0.5
+    skip_nodes_with_local_storage    = false
+  }
+
   cni                = "cilium"
   type               = "kapsule"
   private_network_id = scaleway_vpc_private_network.cluster.id
@@ -449,7 +492,7 @@ resource "kubernetes_secret" "velero_scaleway_credentials" {
 # four above, this DOESN'T remove ESO from the picture -- gitops repo's
 # services/platform/cert-manager/webhook-secret and services/platform/
 # external-dns/secret ExternalSecrets are still deployed (platform-apps/
-# values-eso-data.yaml), just switched from creationPolicy: Owner to Merge
+# values-secrets.yaml wave 2), just switched from creationPolicy: Owner to Merge
 # (2026-08-25), so they self-heal these Secrets' keys against OpenBao
 # instead of owning/creating them outright. This root bootstraps the
 # Secrets directly so cert-manager-webhook-scaleway/external-dns's pods
@@ -513,5 +556,54 @@ resource "kubernetes_secret" "external_dns_scaleway_credentials" {
   # coexistence.
   lifecycle {
     ignore_changes = [metadata[0].annotations, metadata[0].labels]
+  }
+}
+
+# ── Let's Encrypt staging CA trust (var.letsencrypt_staging, see that
+# variable's own comment for the full "why") ─────────────────────────────
+#
+# Grafana ONLY: its own `tls_client_ca` OIDC setting (grafana-chart's
+# values-letsencrypt-staging-ca.yaml) needs the cert mounted as a file, so a
+# ConfigMap is unavoidable there. ArgoCD (argocd.tf's oidc.config.rootCA)
+# and OpenBao (11-secrets/openbao/managed's vault_jwt_auth_backend.oidc
+# oidc_discovery_ca_pem) both have a native per-provider inline-PEM CA
+# override instead -- no ConfigMap, no volume, no init container, no pod
+# change at all. An earlier version of this design used the same
+# merge-CA-bundle init-container approach for all three (confirmed live
+# 2026-08-27: OpenBao's own pod-level securityContext, runAsUser 100/
+# runAsNonRoot, blocked `apk add` from writing its package DB --
+# "Permission denied", Init:Error crash-loop) before this repo's own git
+# history turned up the simpler, previously-proven mechanism (see
+# argocd.tf's oidc.config comment and 11-secrets/openbao/managed's
+# oidc_discovery_ca_pem comment for the historical precedent, commits
+# 98f87ce/74e37e4).
+#
+# Non-secret, public information (a CA root certificate) -- a ConfigMap,
+# not a Secret. One canonical copy vendored in this repo
+# (files/letsencrypt-staging-root-ca.pem, the ROOT per Let's Encrypt's own
+# docs -- intermediates "are subject to change at any time and should not
+# be pinned"). gitops's grafana-chart references this ConfigMap by name
+# only -- it never carries its own copy.
+#
+# Shared with argocd.tf's oidc.config.rootCA -- one file read, used by both
+# consumers of this cert.
+locals {
+  letsencrypt_staging_ca_pem = file("${path.module}/files/letsencrypt-staging-root-ca.pem")
+}
+
+# monitoring namespace is already Terraform-managed above
+# (kubernetes_namespace.monitoring) for the same "must exist before
+# ArgoCD's own sync writes into it" reason -- straightforward depends_on
+# via the namespace reference itself, no chicken-and-egg here.
+resource "kubernetes_config_map" "letsencrypt_staging_ca_monitoring" {
+  count = var.letsencrypt_staging ? 1 : 0
+
+  metadata {
+    name      = "letsencrypt-staging-ca"
+    namespace = kubernetes_namespace.monitoring.metadata[0].name
+  }
+
+  data = {
+    "letsencrypt-staging-root-ca.pem" = local.letsencrypt_staging_ca_pem
   }
 }

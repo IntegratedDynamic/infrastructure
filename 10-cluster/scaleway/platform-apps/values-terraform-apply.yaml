@@ -7,7 +7,7 @@
 # dependency on grafana being actually Healthy (not just Synced), same
 # class as argo-workflows' eager Dex dial. It also reads
 # argo-workflows-scaleway-state-credentials + per-root extraSecretName
-# Secrets from eso-data-apps (via argo-workflows-secret) and needs the
+# Secrets from secrets-apps' wave 2 (via argo-workflows-secret) and needs the
 # argo-workflows/chart's CRDs + WorkflowTemplate already installed. This
 # domain therefore depends on a health wait on BOTH argo-workflows-apps AND
 # grafana-apps (argocd.tf's wait_argo_workflows_and_grafana_healthy gate).

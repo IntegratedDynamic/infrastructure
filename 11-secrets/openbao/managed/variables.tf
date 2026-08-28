@@ -17,6 +17,23 @@ variable "dex_github_connector" {
   sensitive   = true
 }
 
+# Mirrors 10-cluster/scaleway's var.letsencrypt_staging (see that variable's
+# own comment for the full "why") -- kept as an independent variable in this
+# root rather than a cross-root terraform_remote_state read of that one,
+# same "two roots' TEMPORARY overrides kept manually in sync" pattern this
+# flag already used historically (see git history: 98f87ce/74e37e4 added
+# rootCA/oidc_discovery_ca_pem together across both repos, 8fc3c74/3ff54d4
+# removed them together). Only consumed by vault_jwt_auth_backend.oidc's own
+# oidc_discovery_ca_pem below -- OpenBao's pod itself needs no CA/volume/init
+# container changes at all, since this field lets OpenBao trust a CA for
+# just this one auth backend's own outbound OIDC discovery call, entirely
+# server-side, independent of the pod's system trust store.
+variable "letsencrypt_staging" {
+  type        = bool
+  default     = false
+  description = "Use Let's Encrypt staging's root CA for OpenBao's own OIDC discovery call to auth.scalepack.fr (vault_jwt_auth_backend.oidc), matching 10-cluster/scaleway's var.letsencrypt_staging when that root's gateway-config runs letsencrypt-staging instead of letsencrypt-prod."
+}
+
 # privateKey.pem is the GitHub App's private key, downloaded from GitHub —
 # external, not generatable.
 variable "secrets_sync_github_eso_private_key" {

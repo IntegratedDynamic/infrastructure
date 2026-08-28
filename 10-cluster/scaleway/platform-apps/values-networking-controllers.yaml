@@ -1,0 +1,21 @@
+# envoy-gateway + cert-manager (+ its Scaleway DNS01 ACME webhook) -- the
+# CONTROLLER half of what used to be one combined values-networking.yaml
+# (split 2026-08-26/27, generalizing infra#100's proposal): these three
+# consume nothing but crds-apps being Established (module.wait_crds_healthy
+# in argocd.tf) -- no ExternalSecret, no dependency on the CRD-typed
+# resources (gateway-config's ClusterIssuers, external-dns) that in turn
+# depend on THEM being genuinely up. Splitting the controllers into their
+# own domain makes that real dependency direction explicit instead of
+# leaving it as an intra-domain wave boundary inside one shared
+# networking-apps -- see values-networking-resources.yaml for the other
+# half, and platform-apps/README.md for the full tier model.
+#
+# All one wave: neither controller needs the other's pod running, only
+# their shared CRD prerequisite (already guaranteed by crds-apps before
+# this domain is even created) -- same reasoning that already let them
+# share a wave in the old combined file.
+apps:
+  # ── wave 0 ──────────────────────────────────────────────────────────────
+  - {name: envoy-gateway, namespace: envoy-gateway-system, chartPath: services/platform/gateway/chart, valueFile: values-scaleway.yaml, wave: "0", skipCrds: true, syncWaveLabelPaths: ['gateway-helm.deployment.pod.labels.scalepack\.fr/sync-wave']}
+  - {name: cert-manager, namespace: cert-manager, chartPath: services/platform/cert-manager/chart, valueFile: values-scaleway.yaml, wave: "0", syncWaveLabelPaths: ['cert-manager.podLabels.scalepack\.fr/sync-wave', 'cert-manager.webhook.podLabels.scalepack\.fr/sync-wave', 'cert-manager.cainjector.podLabels.scalepack\.fr/sync-wave']}
+  - {name: cert-manager-webhook-scaleway, namespace: cert-manager, chartPath: services/platform/cert-manager/webhook-chart, valueFile: values-scaleway.yaml, wave: "0", syncWaveLabelPaths: ['scaleway-certmanager-webhook.podLabels.scalepack\.fr/sync-wave']}

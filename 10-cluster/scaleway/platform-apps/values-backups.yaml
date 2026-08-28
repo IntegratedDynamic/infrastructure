@@ -1,15 +1,44 @@
-# Velero — extracted from gitops repo's bootstrap/values.yaml wave 4
-# (infra#84). velero-scaleway-credentials is no longer an
-# ExternalSecret-materialized chart (gitops repo's former
-# velero/secret — deleted) — this repo's main.tf now writes that
-# Kubernetes Secret directly (still also written to OpenBao KV by
-# 11-secrets/openbao/managed, which stays the audited source of truth for
-# the credential value itself), since Terraform already owns the bucket +
-# IAM identity it comes from (03-storage/scaleway).
+# Velero + its two restore hooks (cert-restore, grafana-restore), in ONE
+# parent Application ordered by ArgoCD's own intra-Application sync-waves --
+# merged 2026-08-27 from what used to be two separate top-level
+# Applications (backups-apps + restore-apps) with a Terraform-level
+# `wait-argocd-apps-healthy` polling Job (wait_restore_healthy) between
+# them. That cross-Application hop is now a free intra-Application wave
+# boundary: cert-restore/grafana-restore in wave 1 only need Velero's
+# controller + CRDs serving, which wave 0 being Healthy already
+# guarantees.
 #
-# Single-app domain, no intra-domain ordering needed — kept as a wave-0
-# list (rather than a bare Application) for the same reason gitops repo's
-# bootstrap chart never special-cases single-wave domains: consistent shape
-# across secrets-apps/monitoring-apps/backups-apps, cheap to extend later.
+# Only ONE Terraform gate survives for this tree: argocd.tf's
+# module.wait_backups_healthy, which watches this single `backups-apps`
+# Application and now transitively covers both Velero being healthy AND
+# the two restore Jobs having finished (or explicitly skipped, fail-open).
+# gateway-config (networking-resources-apps) and grafana (grafana-apps)
+# gate on that one check instead of the deleted wait_restore_healthy.
+#
+# velero-scaleway-credentials is written directly as a Kubernetes Secret
+# by this repo's main.tf (still also written to OpenBao KV by
+# 11-secrets/openbao/managed, the audited source of truth), since
+# Terraform already owns the bucket + IAM identity it comes from
+# (03-storage/scaleway).
+#
+# A plain cross-Application ArgoCD sync-wave was tried once already for
+# exactly this restore ordering (2026-07-29, services/platform/velero/init,
+# since deleted) and failed live twice -- ArgoCD's ordering across sibling
+# top-level Applications isn't a hard guarantee. This merge does NOT
+# reintroduce that: cert-restore/grafana-restore are now waves of the SAME
+# Application as velero, where sync-wave ordering IS a native reliable
+# guarantee, not a cross-Application one.
 apps:
+  # ── wave 0: needs nothing but ArgoCD ───────────────────────────────────
+  # velero manages its own velero.io CRDs (2026-08-27 revert -- see
+  # values-crds.yaml's own comment): no skipCrds, no dependency on
+  # crds-apps.
   - {name: velero, namespace: velero, chartPath: services/platform/velero/chart, valueFile: values-scaleway.yaml, wave: "0", syncWaveLabelPaths: ['velero.podLabels.scalepack\.fr/sync-wave']}
+  # ── wave 1: needs Velero's controller + CRDs actually serving ──────────
+  # cert-restore was formerly a PreSync hook inside gateway-config's own
+  # chart; grafana-restore inside grafana-chart's own chart. Each carries
+  # the same restore.sh idempotence/wait logic and RBAC shape. The two
+  # restore Jobs are fully independent of each other -- they share wave 1
+  # only because both need wave 0 (Velero) Healthy first.
+  - {name: cert-restore, namespace: gateway, chartPath: services/platform/gateway/cert-restore, valueFile: values-scaleway.yaml, wave: "1"}
+  - {name: grafana-restore, namespace: monitoring, chartPath: services/platform/monitoring/grafana-restore, valueFile: values-scaleway.yaml, wave: "1"}

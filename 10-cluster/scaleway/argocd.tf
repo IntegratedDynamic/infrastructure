@@ -215,6 +215,21 @@ configs:
         - profile
         - email
         - groups
+%{if var.letsencrypt_staging~}
+      # var.letsencrypt_staging (see that variable's own comment): ArgoCD's
+      # native per-provider CA override for OIDC discovery/token calls to
+      # https://auth.scalepack.fr -- no pod/volume/init-container change
+      # needed (unlike a generic SSL_CERT_FILE override), and doesn't touch
+      # trust for any other legitimate HTTPS call this pod makes (e.g.
+      # GitHub for git repos). Same mechanism this repo used historically
+      # for the same purpose (2026-07-25, commit 98f87ce, reverted once
+      # back on letsencrypt-prod) -- reused here rather than the heavier
+      # merge-CA-bundle init-container approach main.tf's own comment on
+      # this flag explains was tried and reverted for OpenBao/ArgoCD.
+      # https://argo-cd.readthedocs.io/en/stable/operator-manual/user-management/#configuring-a-custom-root-ca-certificate-for-communicating-with-the-oidc-provider
+      rootCA: |
+        ${indent(8, trimspace(local.letsencrypt_staging_ca_pem))}
+%{endif~}
 
   rbac:
     policy.csv: |
@@ -493,6 +508,111 @@ locals {
   # Shared skeleton for every domain's single-Application `applications:`
   # values block -- only the domain name + valueFile actually change.
   platform_apps_source_repo = "https://github.com/IntegratedDynamic/infrastructure.git"
+
+  # var.letsencrypt_staging (see that variable's own comment): which
+  # ClusterIssuer gateway-config's Gateway actually uses. Threaded into
+  # networking_resources_apps' own Application parameters below (same
+  # pattern values-terraform-apply.yaml's gitRefParam/infraRevision already
+  # establishes), which platform-apps/templates/apps.yaml then injects into
+  # gateway-config's own child Application via its activeClusterIssuerParam
+  # flag (values-networking-resources.yaml).
+  active_cluster_issuer = var.letsencrypt_staging ? "letsencrypt-staging" : "letsencrypt-prod"
+}
+
+# ── Tier -1: crds-apps, every CRD-only chart across the whole platform ──────
+#
+# The one domain every controller-tier domain below (monitoring-apps,
+# networking-controllers-apps) that genuinely needs a CRD depends on
+# before it's even created -- see module.wait_crds_healthy right after it,
+# and platform-apps/README.md's "One CRDs domain for the whole platform"
+# section for the full history. secrets-apps/backups-apps/wireguard-apps do
+# NOT depend on it (2026-08-26/27 generalization, infra#100; secrets-apps
+# regained self-managed CRDs in the 2026-08-27 revert): OpenBao,
+# wireguard-config, external-secrets and velero each either consume no CRD
+# or install their own, so gating them "uniformly" the way this domain's
+# list used to be reasoned about would just be dead time -- see
+# values-secrets.yaml / values-backups.yaml.
+#
+# Generalizes what used to be two separate, scattered CRD-only Applications
+# (kube-prometheus-stack-crds inside monitoring-apps since 2026-08-13,
+# gateway-api-crds inside networking-apps for about an hour on 2026-08-26)
+# into a single upfront gate, then extended (2026-08-26/27) past those two
+# to every CRD-bearing platform component (external-secrets, cert-manager,
+# velero -- see values-crds.yaml's own header for the one deliberate
+# exception, argo-workflows): no product chart anywhere in this platform
+# can start before every CRD this repo installs already exists, closing
+# off that whole class of race (confirmed live 2026-08-26:
+# envoy-gateway/cert-manager racing for who installs the Gateway API CRDs
+# cost cert-manager 4 crash-loops and a ~40s CrashLoopBackOff tax even
+# after the CRDs were genuinely Established).
+#
+# depends_on ONLY helm_release.argocd: CRD registration needs nothing but
+# the API server reachable, no Secret, no other domain.
+resource "helm_release" "crds_apps" {
+  name      = "argocd-crds-apps"
+  namespace = "argocd"
+
+  repository = "https://argoproj.github.io/argo-helm"
+  chart      = "argocd-apps"
+  version    = "2.0.4"
+
+  timeout = 1800
+
+  depends_on = [
+    helm_release.argocd,
+  ]
+
+  values = [<<EOF
+applications:
+  crds-apps:
+    namespace: argocd
+    finalizers:
+      - resources-finalizer.argocd.argoproj.io
+    project: default
+    source:
+      repoURL: ${local.platform_apps_source_repo}
+      targetRevision: ${local.effective_infra_revision}
+      path: 10-cluster/scaleway/platform-apps
+      helm:
+        valueFiles:
+          - values-crds.yaml
+        parameters:
+          - name: revision
+            value: ${local.effective_gitops_revision}
+    destination:
+      server: https://kubernetes.default.svc
+      namespace: argocd
+    syncPolicy:
+      retry:
+        limit: 10
+      automated:
+        prune: true
+        selfHeal: true
+      syncOptions:
+        - CreateNamespace=true
+EOF
+  ]
+}
+
+# Real Terraform-enforced prerequisite of every Tier-0 domain -- ArgoCD has
+# no native way to say "don't even create Application X until Application Y
+# is genuinely Healthy" across independent top-level Applications, same
+# reasoning as every other module.wait_*_healthy gate in this file. Reuses
+# the shared wait_platform_apps RBAC (kubernetes_service_account/role/
+# role_binding, defined further down this file) -- Terraform resolves that
+# dependency by graph, not by file order.
+module "wait_crds_healthy" {
+  source = "./modules/wait-argocd-apps-healthy"
+
+  job_name             = "wait-crds-healthy"
+  app_names            = ["crds-apps"]
+  service_account_name = kubernetes_service_account.wait_platform_apps.metadata[0].name
+  revision_trigger     = helm_release.crds_apps.metadata.revision
+
+  depends_on = [
+    helm_release.crds_apps,
+    kubernetes_role_binding.wait_platform_apps,
+  ]
 }
 
 resource "helm_release" "secrets_apps" {
@@ -505,12 +625,26 @@ resource "helm_release" "secrets_apps" {
 
   timeout = 1800
 
-  # scaleway_s3_credentials/openbao_unseal_aws: without them, nothing
-  # ordered kubernetes_namespace.openbao's destroy after this release's own
-  # -- confirmed live (2026-08-25) that ArgoCD's openbao Application (with
-  # selfHeal: true, and resources-finalizer.argocd.argoproj.io) was still
-  # actively retrying "create content in namespace openbao" while Terraform
-  # was independently, concurrently deleting that same namespace directly.
+  # openbao/openbao-init merged BACK IN here as wave 0 (2026-08-27,
+  # see values-secrets.yaml's own header) -- the old standalone-apps
+  # Application and its wait_standalone_healthy Job are gone, that
+  # cross-Application OpenBao-readiness hop is now the wave 0 -> wave 1
+  # boundary inside THIS Application (secrets-sync in wave 1 only advances
+  # once wave 0's OpenBao is ArgoCD-health-check-settled, the same
+  # guarantee the deleted Job enforced). eso-data-apps merged in too, as
+  # wave 2.
+  #
+  # scaleway_s3_credentials/openbao_unseal_aws: kept in depends_on (moved
+  # here from the deleted standalone-apps) -- this Application now manages
+  # the openbao child Application again and writes into the openbao
+  # namespace, so it must still be guaranteed to finish its own
+  # cascade-delete before kubernetes_namespace.openbao's destroy (confirmed
+  # live 2026-08-25: ArgoCD's openbao Application was mid-retry writing into
+  # that namespace while Terraform deleted it directly).
+  #
+  # No module.wait_crds_healthy (2026-08-27 revert -- see values-crds.yaml's
+  # own comment): external-secrets manages its own CRDs again, and OpenBao
+  # needs no CRD at all -- starts in parallel with crds-apps.
   depends_on = [
     helm_release.argocd,
     kubernetes_secret.scaleway_s3_credentials,
@@ -522,8 +656,9 @@ applications:
   secrets-apps:
     namespace: argocd
     # Cascade-deletes this domain's own child Applications (openbao,
-    # external-secrets, ...) before removing this object -- see
-    # `bootstrap`'s own finalizers comment above for the full "why".
+    # openbao-init, external-secrets, secrets-sync, every *-secret
+    # ExternalSecret) before removing this object -- see `bootstrap`'s own
+    # finalizers comment above for the full "why".
     finalizers:
       - resources-finalizer.argocd.argoproj.io
     project: default
@@ -552,73 +687,51 @@ EOF
   ]
 }
 
-# THE FIX for the ESO/ExternalSecret cross-domain finalizer race (confirmed
-# live 2026-08-25, infra#84's own follow-up comment thread), generalized:
-# every ExternalSecret across every platform domain (dex-secret,
-# grafana-secret, wireguard-secret, argo-workflows-secret,
-# argocd-config-secret, cert-manager-webhook-secret, external-dns-secret)
-# lives in ONE dedicated domain here, instead of being bundled into each
-# product's own domain. Each carries a
-# externalsecrets.external-secrets.io/externalsecret-cleanup finalizer that
-# only ESO's own controller (secrets-apps domain) ever removes -- before
-# this domain existed, cert-manager-webhook-secret/external-dns-secret lived
-# directly in networking-apps, which raced secrets-apps' own teardown (both
-# were keys of one shared helm_release) and could strand that finalizer,
-# previously requiring a manual kubectl patch.
+# The ONE surviving Terraform gate for the whole secrets tree. Since the
+# 2026-08-27 merge (values-secrets.yaml) this single `secrets-apps`
+# Application holds OpenBao (wave 0), external-secrets (wave 0),
+# secrets-sync (wave 1), and every product's ExternalSecret (wave 2) --
+# so this one Synced+Healthy check now transitively covers everything the
+# deleted wait_standalone_healthy and the deleted "eso_data_apps after a
+# real wait_secrets_healthy" hop used to enforce as separate
+# cross-Application Jobs:
 #
-# Centralizing every ExternalSecret here, with this release depending on
-# secrets-apps, means EVERY product domain gets the same guarantee via the
-# same single edge ("A depends_on B" => A destroys before B): this release
-# (and every ExternalSecret it owns) is guaranteed to finish destroying
-# before secrets-apps' own release -- and therefore ESO's own controller --
-# even starts tearing down. No product domain needs its own direct
-# dependency on secrets-apps for this reason anymore; they depend on THIS
-# domain instead (see e.g. helm_release.networking_apps/wireguard_apps
-# below), which is what actually holds the ExternalSecret they consume.
-resource "helm_release" "eso_data_apps" {
-  name      = "argocd-eso-data-apps"
-  namespace = "argocd"
+#  - OpenBao genuinely ready to serve Kubernetes-auth logins (not just
+#    "pod Ready" -- raft-snapshot restore done, Kubernetes auth backend
+#    reloaded). Enforced by wave 0 -> wave 1 inside the Application now;
+#    confirmed live 2026-08-27 that losing this ordering gave ESO a
+#    persistent (multi-minute, non-self-healing) "403 permission denied"
+#    on its OpenBao login.
+#  - external-secrets.io CRDs Established before secrets-sync's
+#    ClusterSecretStore/PushSecret sync (external-secrets manages its own
+#    CRDs again -- 2026-08-27 revert, see values-crds.yaml). wave 0 ->
+#    wave 1 again.
+#  - ESO's ValidatingWebhookConfiguration actually serving before any
+#    product ExternalSecret syncs -- confirmed live 2026-08-26 (as the old
+#    eso-data-apps) that without this the ExternalSecrets fail outright, a
+#    hard non-self-healing sync error, NOT the "briefly races, self-heals
+#    via ESO's own refreshInterval" tolerance every downstream CONSUMER of
+#    those Secrets gets to rely on. wave 1 -> wave 2.
+#
+# Every domain that used to gate on wait_standalone_healthy or on
+# helm_release.eso_data_apps now gates on this module (hard) or on
+# helm_release.secrets_apps (soft create-order + destroy-ordering, which
+# also protects every ExternalSecret's
+# externalsecrets.external-secrets.io/externalsecret-cleanup finalizer:
+# "A depends_on B" => A destroys before B, so a consumer domain listing
+# secrets_apps is guaranteed to finish tearing down before ESO's own
+# controller does).
+module "wait_secrets_healthy" {
+  source = "./modules/wait-argocd-apps-healthy"
 
-  repository = "https://argoproj.github.io/argo-helm"
-  chart      = "argocd-apps"
-  version    = "2.0.4"
-
-  timeout = 1800
+  job_name             = "wait-secrets-healthy"
+  app_names            = ["secrets-apps"]
+  service_account_name = kubernetes_service_account.wait_platform_apps.metadata[0].name
+  revision_trigger     = helm_release.secrets_apps.metadata.revision
 
   depends_on = [
-    helm_release.argocd,
     helm_release.secrets_apps,
-  ]
-
-  values = [<<EOF
-applications:
-  eso-data-apps:
-    namespace: argocd
-    finalizers:
-      - resources-finalizer.argocd.argoproj.io
-    project: default
-    source:
-      repoURL: ${local.platform_apps_source_repo}
-      targetRevision: ${local.effective_infra_revision}
-      path: 10-cluster/scaleway/platform-apps
-      helm:
-        valueFiles:
-          - values-eso-data.yaml
-        parameters:
-          - name: revision
-            value: ${local.effective_gitops_revision}
-    destination:
-      server: https://kubernetes.default.svc
-      namespace: argocd
-    syncPolicy:
-      retry:
-        limit: 10
-      automated:
-        prune: true
-        selfHeal: true
-      syncOptions:
-        - CreateNamespace=true
-EOF
+    kubernetes_role_binding.wait_platform_apps,
   ]
 }
 
@@ -636,8 +749,11 @@ resource "helm_release" "monitoring_apps" {
   # Terraform-originated Secrets, see platform-apps/README.md's
   # "secret-delivery pattern") -- no ordering dependency on secrets-apps
   # needed, stays fully parallel with it, same as before this split.
+  # module.wait_crds_healthy (2026-08-26): kube-prometheus-stack's own CRDs
+  # now live in the shared crds-apps domain instead of a wave nested here.
   depends_on = [
     helm_release.argocd,
+    module.wait_crds_healthy,
     kubernetes_secret.thanos_objstore_config,
     kubernetes_secret.loki_s3_credentials,
     kubernetes_secret.tempo_s3_credentials,
@@ -688,13 +804,23 @@ resource "helm_release" "backups_apps" {
 
   timeout = 1800
 
-  # No ESO ExternalSecret in this domain either (velero's credential is also
+  # Since the 2026-08-27 merge (values-backups.yaml) this domain holds
+  # velero (wave 0) AND its two restore hooks cert-restore/grafana-restore
+  # (wave 1) -- the deleted restore-apps Application and its
+  # wait_restore_healthy Job are gone, that cross-Application hop is now the
+  # wave 0 -> wave 1 boundary inside THIS Application.
+  #
+  # No ESO ExternalSecret in this domain (velero's credential is
   # Terraform-originated). null_resource.velero_namespace_predelete_cleanup
   # (main.tf) stays listed here specifically, for the DESTROY direction: "A
   # depends_on B" means A destroys before B, so listing that null_resource
   # here makes THIS release destroy (and therefore Velero's controller die)
   # BEFORE that cleanup's local-exec runs -- see that resource's own comment
   # in main.tf for the two earlier, wrong attempts at this ordering.
+  # module.wait_crds_healthy dropped (2026-08-27 revert -- see
+  # values-crds.yaml's own comment): velero manages its own velero.io CRDs
+  # again, no external CRD dependency left -- starts in parallel with
+  # crds-apps.
   depends_on = [
     helm_release.argocd,
     kubernetes_secret.velero_scaleway_credentials,
@@ -705,8 +831,9 @@ resource "helm_release" "backups_apps" {
 applications:
   backups-apps:
     namespace: argocd
-    # Cascade-deletes this domain's own child Application (velero) before
-    # removing this object -- the specific fix for the finalizer race:
+    # Cascade-deletes this domain's own child Applications (velero,
+    # cert-restore, grafana-restore) before removing this object -- the
+    # specific fix for the finalizer race:
     # gives Velero's own pod a real, ArgoCD-orchestrated shutdown instead
     # of being torn down by helm_release.argocd's uninstall with no
     # coordination -- see `bootstrap`'s own finalizers comment above.
@@ -738,8 +865,34 @@ EOF
   ]
 }
 
-resource "helm_release" "networking_apps" {
-  name      = "argocd-networking-apps"
+# The ONE surviving Terraform gate for the whole backups tree. Since the
+# 2026-08-27 merge (values-backups.yaml) this single `backups-apps`
+# Application holds velero (wave 0) AND cert-restore/grafana-restore
+# (wave 1), so this one Synced+Healthy check now transitively covers both
+# Velero being genuinely healthy AND the two restore Jobs having finished
+# (or explicitly skipped, fail-open) -- what the deleted wait_restore_healthy
+# used to enforce as a separate cross-Application Job. cert-restore/
+# grafana-restore's own restore Jobs need Velero's controller genuinely
+# serving before they can query/create a Restore object; the wave 0 -> wave
+# 1 boundary inside this Application is what guarantees that now.
+# networking-resources-apps and grafana-apps gate on this module instead of
+# the deleted wait_restore_healthy.
+module "wait_backups_healthy" {
+  source = "./modules/wait-argocd-apps-healthy"
+
+  job_name             = "wait-backups-healthy"
+  app_names            = ["backups-apps"]
+  service_account_name = kubernetes_service_account.wait_platform_apps.metadata[0].name
+  revision_trigger     = helm_release.backups_apps.metadata.revision
+
+  depends_on = [
+    helm_release.backups_apps,
+    kubernetes_role_binding.wait_platform_apps,
+  ]
+}
+
+resource "helm_release" "networking_controllers_apps" {
+  name      = "argocd-networking-controllers-apps"
   namespace = "argocd"
 
   repository = "https://argoproj.github.io/argo-helm"
@@ -748,27 +901,23 @@ resource "helm_release" "networking_apps" {
 
   timeout = 1800
 
-  # cert-manager-webhook-secret/external-dns-secret used to live directly in
-  # this domain -- moved to eso-data-apps (see that resource's own comment
-  # for the original finalizer-race bug this fixed). envoy-gateway/
-  # cert-manager/external-dns still consume those Secrets at runtime, just
-  # from a different owning Application now -- depending on eso-data-apps
-  # keeps their creation roughly ordered ahead of this domain's own pods
-  # (same "briefly races, self-heals" tolerance every ESO consumer here
-  # already accepts, not a hard requirement now that the finalizer risk
-  # itself is fully owned by eso-data-apps' own depends_on).
+  # Split out of the old combined networking-apps (2026-08-26/27
+  # generalization, infra#100) -- envoy-gateway/cert-manager consume
+  # nothing but crds-apps being Established (module.wait_crds_healthy),
+  # not any ExternalSecret, so unlike networking-resources-apps below this
+  # domain has no dependency on secrets-apps at all.
   depends_on = [
     helm_release.argocd,
-    helm_release.eso_data_apps,
+    module.wait_crds_healthy,
   ]
 
   values = [<<EOF
 applications:
-  networking-apps:
+  networking-controllers-apps:
     namespace: argocd
     # Cascade-deletes this domain's own child Applications (envoy-gateway,
-    # cert-manager, gateway-config, ...) before removing this object --
-    # see `bootstrap`'s own finalizers comment above.
+    # cert-manager, ...) before removing this object -- see `bootstrap`'s
+    # own finalizers comment above.
     finalizers:
       - resources-finalizer.argocd.argoproj.io
     project: default
@@ -778,10 +927,118 @@ applications:
       path: 10-cluster/scaleway/platform-apps
       helm:
         valueFiles:
-          - values-networking.yaml
+          - values-networking-controllers.yaml
         parameters:
           - name: revision
             value: ${local.effective_gitops_revision}
+    destination:
+      server: https://kubernetes.default.svc
+      namespace: argocd
+    syncPolicy:
+      retry:
+        limit: 10
+      automated:
+        prune: true
+        selfHeal: true
+      syncOptions:
+        - CreateNamespace=true
+EOF
+  ]
+}
+
+# Real Terraform-enforced prerequisite of networking-resources-apps below --
+# gateway-config's ClusterIssuers are cert-manager.io-typed and its sync
+# fails outright (no self-heal) if cert-manager's own webhook isn't
+# registered and serving yet, a genuinely stronger requirement than "the
+# CRD exists" (crds-apps' own gate). Same wait-module pattern as every
+# other cross-domain health gate in this file.
+module "wait_networking_controllers_healthy" {
+  source = "./modules/wait-argocd-apps-healthy"
+
+  job_name             = "wait-networking-controllers-healthy"
+  app_names            = ["networking-controllers-apps"]
+  service_account_name = kubernetes_service_account.wait_platform_apps.metadata[0].name
+  revision_trigger     = helm_release.networking_controllers_apps.metadata.revision
+
+  depends_on = [
+    helm_release.networking_controllers_apps,
+    kubernetes_role_binding.wait_platform_apps,
+  ]
+}
+
+resource "helm_release" "networking_resources_apps" {
+  name      = "argocd-networking-resources-apps"
+  namespace = "argocd"
+
+  repository = "https://argoproj.github.io/argo-helm"
+  chart      = "argocd-apps"
+  version    = "2.0.4"
+
+  timeout = 1800
+
+  # Since the 2026-08-27 merge (values-networking-resources.yaml) this
+  # single Application holds gateway-config/external-dns (wave 0) AND every
+  # product's `*-gateway` HTTPRoute chart (wave 1) -- the deleted
+  # gateways-apps Application and its wait_networking_resources_healthy Job
+  # are gone, that cross-Application hop is now the wave 0 -> wave 1
+  # boundary inside THIS Application (every `*-gateway` in wave 1 attaches
+  # to the `Gateway` object wave 0's gateway-config creates, and needs
+  # nothing else wave 0 didn't already need).
+  #
+  # Networking CONTROLLERS deliberately stay a SEPARATE Application
+  # (helm_release.networking_controllers_apps) -- NOT merged in as an
+  # earlier wave here. Terraform can only gate an Application's creation,
+  # not pause mid-sync between two of its own waves, so folding the
+  # controllers in would force them to also wait for Secrets+Backups below
+  # before starting, for no reason (today they start as soon as crds-apps
+  # is Established). See Draft-proposal.md's "Correction" section.
+  #
+  # Gates:
+  #  - module.wait_networking_controllers_healthy (hard): gateway-config's
+  #    ClusterIssuers are cert-manager.io-typed and fail outright at the API
+  #    level if cert-manager's webhook isn't registered and serving yet.
+  #  - module.wait_secrets_healthy (hard, upgraded 2026-08-27 from the old
+  #    soft `depends_on = [eso_data_apps]`): gateway-config/external-dns
+  #    consume cert-manager-webhook-secret/external-dns-secret, and merge 1
+  #    made wait_secrets_healthy the single check covering every
+  #    ExternalSecret's webhook-serving readiness (plus the
+  #    externalsecret-cleanup finalizer's destroy-ordering).
+  #  - module.wait_backups_healthy (2026-08-27, was wait_restore_healthy):
+  #    gateway-config's wildcard TLS Secret restore is now wave 1 of
+  #    backups-apps.
+  depends_on = [
+    helm_release.argocd,
+    module.wait_networking_controllers_healthy,
+    module.wait_secrets_healthy,
+    module.wait_backups_healthy,
+  ]
+
+  values = [<<EOF
+applications:
+  networking-resources-apps:
+    namespace: argocd
+    # Cascade-deletes this domain's own child Applications (gateway-config,
+    # external-dns, every *-gateway HTTPRoute chart) before removing this
+    # object -- see `bootstrap`'s own finalizers comment above.
+    finalizers:
+      - resources-finalizer.argocd.argoproj.io
+    project: default
+    source:
+      repoURL: ${local.platform_apps_source_repo}
+      targetRevision: ${local.effective_infra_revision}
+      path: 10-cluster/scaleway/platform-apps
+      helm:
+        valueFiles:
+          - values-networking-resources.yaml
+        parameters:
+          - name: revision
+            value: ${local.effective_gitops_revision}
+          # var.letsencrypt_staging (see argocd.tf's local.active_cluster_issuer
+          # and that variable's own comment) -- picked up by gateway-config's
+          # own entry in values-networking-resources.yaml
+          # (activeClusterIssuerParam: true).
+          - name: activeClusterIssuer
+            value: ${local.active_cluster_issuer}
     destination:
       server: https://kubernetes.default.svc
       namespace: argocd
@@ -807,14 +1064,18 @@ resource "helm_release" "wireguard_apps" {
 
   timeout = 1800
 
-  # wireguard-secret itself now lives in eso-data-apps (see that resource's
-  # own comment) -- wireguard-config just consumes the Secret it
-  # materializes. No HTTPRoute in this domain (wireguard-config has no
-  # Gateway API dependency), so unlike every HTTPRoute-bearing domain added
-  # after this one, no wait on networking-apps' CRDs is needed here.
+  # wireguard-secret now lives in secrets-apps' wave 2 (see
+  # values-secrets.yaml) -- wireguard-config just consumes the Secret it
+  # materializes, so this is a soft create-order + destroy-ordering
+  # dependency on helm_release.secrets_apps (which also protects that
+  # ExternalSecret's externalsecret-cleanup finalizer -- "A depends_on B"
+  # => A destroys before ESO's own controller). No HTTPRoute in this domain
+  # (wireguard-config has no Gateway API dependency), and it consumes no
+  # CRD at all, so no wait on crds-apps either -- the same "don't pay for a
+  # dependency you don't have" reasoning that keeps OpenBao off crds-apps.
   depends_on = [
     helm_release.argocd,
-    helm_release.eso_data_apps,
+    helm_release.secrets_apps,
   ]
 
   values = [<<EOF
@@ -914,27 +1175,19 @@ resource "kubernetes_role_binding" "wait_platform_apps" {
 
 # ── Tier 1: dex/argocd-config/grafana, extracted from gitops repo (infra#84 follow-up) ───
 #
-# Each of these three domains shares the identical dependency profile:
-# eso-data-apps (for its own consumed Secret) + networking-apps' Gateway API
-# CRDs (for its own *-gateway HTTPRoute) -- but each stays its OWN
-# helm_release/Application rather than one bundled domain, since
-# argo-workflows-apps (Tier 2, below) needs to health-wait on dex
+# Each of these three domains shares the identical dependency profile: a
+# soft dependency on helm_release.secrets_apps (for its own consumed
+# Secret, now secrets-apps' wave 2 -- see values-secrets.yaml) -- but each
+# stays its OWN helm_release/Application rather than one bundled domain,
+# since argo-workflows-apps (Tier 2, below) needs to health-wait on dex
 # specifically, not a bundle diluted by argocd-config/grafana's unrelated
 # health.
-module "wait_networking_healthy" {
-  source = "./modules/wait-argocd-apps-healthy"
-
-  job_name             = "wait-networking-healthy"
-  app_names            = ["networking-apps"]
-  service_account_name = kubernetes_service_account.wait_platform_apps.metadata[0].name
-  revision_trigger     = helm_release.networking_apps.metadata.revision
-
-  depends_on = [
-    helm_release.networking_apps,
-    kubernetes_role_binding.wait_platform_apps,
-  ]
-}
-
+#
+# None of the three depends on networking's Gateway object directly -- that
+# dependency belonged to each domain's own `*-gateway` HTTPRoute chart, not
+# the product itself, and now lives in networking-resources-apps' wave 1
+# (2026-08-27 merge -- was the separate gateways-apps Application). See
+# platform-apps/README.md's "Decoupling gateway routes" section.
 resource "helm_release" "dex_apps" {
   name      = "argocd-dex-apps"
   namespace = "argocd"
@@ -947,8 +1200,7 @@ resource "helm_release" "dex_apps" {
 
   depends_on = [
     helm_release.argocd,
-    helm_release.eso_data_apps,
-    module.wait_networking_healthy,
+    helm_release.secrets_apps,
   ]
 
   values = [<<EOF
@@ -995,8 +1247,7 @@ resource "helm_release" "argocd_config_apps" {
 
   depends_on = [
     helm_release.argocd,
-    helm_release.eso_data_apps,
-    module.wait_networking_healthy,
+    helm_release.secrets_apps,
   ]
 
   values = [<<EOF
@@ -1041,10 +1292,21 @@ resource "helm_release" "grafana_apps" {
 
   timeout = 1800
 
+  # module.wait_backups_healthy (2026-08-27, was wait_restore_healthy):
+  # grafana's own PVC restore (grafana-restore) is now wave 1 of
+  # backups-apps, so the single wait_backups_healthy check covers it --
+  # replacing both the old separate restore-apps Application and, before
+  # that, the "PreSync hook on grafana-chart itself, fails open" design.
+  # helm_release.secrets_apps (was eso_data_apps): grafana-secret is now
+  # secrets-apps' wave 2.
   depends_on = [
     helm_release.argocd,
-    helm_release.eso_data_apps,
-    module.wait_networking_healthy,
+    helm_release.secrets_apps,
+    module.wait_backups_healthy,
+    # Referencing a count-based resource directly (no index/splat) depends
+    # on ALL of its instances -- zero of them when var.letsencrypt_staging
+    # is false, so this is a no-op in that case, not an error.
+    kubernetes_config_map.letsencrypt_staging_ca_monitoring,
   ]
 
   values = [<<EOF
@@ -1064,6 +1326,12 @@ applications:
         parameters:
           - name: revision
             value: ${local.effective_gitops_revision}
+          # var.letsencrypt_staging (see that variable's own comment) --
+          # picked up by grafana's own entry in values-grafana.yaml
+          # (extraValueFileParam), which conditionally appends the merge-CA
+          # values file trusting the staging root.
+          - name: letsEncryptStaging
+            value: "${var.letsencrypt_staging}"
     destination:
       server: https://kubernetes.default.svc
       namespace: argocd
@@ -1112,7 +1380,7 @@ resource "helm_release" "argo_workflows_apps" {
 
   depends_on = [
     helm_release.argocd,
-    helm_release.eso_data_apps,
+    helm_release.secrets_apps,
     module.wait_dex_healthy,
   ]
 
@@ -1185,7 +1453,7 @@ resource "helm_release" "terraform_apply_apps" {
 
   depends_on = [
     helm_release.argocd,
-    helm_release.eso_data_apps,
+    helm_release.secrets_apps,
     module.wait_argo_workflows_and_grafana_healthy,
   ]
 
@@ -1236,26 +1504,34 @@ EOF
 # DAG grew past the original flat "four domains in parallel, then bootstrap"
 # shape — this is now the FINAL gate in that DAG, not the only one; see
 # platform-apps/README.md for the full DAG and the other, narrower gates
-# (module "wait_networking_healthy", "wait_dex_healthy", etc.) that sit
-# between individual domains. Named for what it now actually checks — every
+# (module "wait_networking_controllers_healthy", "wait_secrets_healthy",
+# "wait_backups_healthy", "wait_dex_healthy", etc.) that sit between
+# individual domains. Named for what it now actually checks — every
 # domain, not just the original four "platform apps".
 #
-# app_names lists every domain by name, not just the DAG's leaves: checking
-# leaves alone would work (a leaf can't be Healthy without its own
-# ancestors having already succeeded), but listing everything explicitly is
-# the same defensive, easy-to-audit style the original four-app version of
-# this check already used — a leaf-only list would be a subtler invariant
-# to keep correct as domains are added/removed.
+# app_names lists every top-level domain Application by name, not just the
+# DAG's leaves: checking leaves alone would work (a leaf can't be Healthy
+# without its own ancestors having already succeeded), but listing
+# everything explicitly is the same defensive, easy-to-audit style the
+# original four-app version of this check already used — a leaf-only list
+# would be a subtler invariant to keep correct as domains are added/removed.
+# The 2026-08-27 merges (standalone-apps folded into secrets-apps' wave 0,
+# eso-data-apps into its wave 2, restore-apps into backups-apps' wave 1,
+# gateways-apps into networking-resources-apps' wave 1) removed three
+# entries here — the merged children are covered transitively via each
+# surviving parent Application's own recursive health
+# (resource.customizations.health.argoproj.io_Application).
 module "wait_all_domains_healthy" {
   source = "./modules/wait-argocd-apps-healthy"
 
   job_name = "wait-all-domains-healthy"
   app_names = [
+    "crds-apps",
     "secrets-apps",
-    "eso-data-apps",
     "monitoring-apps",
     "backups-apps",
-    "networking-apps",
+    "networking-controllers-apps",
+    "networking-resources-apps",
     "wireguard-apps",
     "dex-apps",
     "argocd-config-apps",
@@ -1272,11 +1548,12 @@ module "wait_all_domains_healthy" {
   # fresh Job, same "re-run the wait on redeploy" behavior the original
   # single-domain PLATFORM_APPS_REVISION env var had.
   revision_trigger = join(",", [
+    helm_release.crds_apps.metadata.revision,
     helm_release.secrets_apps.metadata.revision,
-    helm_release.eso_data_apps.metadata.revision,
     helm_release.monitoring_apps.metadata.revision,
     helm_release.backups_apps.metadata.revision,
-    helm_release.networking_apps.metadata.revision,
+    helm_release.networking_controllers_apps.metadata.revision,
+    helm_release.networking_resources_apps.metadata.revision,
     helm_release.wireguard_apps.metadata.revision,
     helm_release.dex_apps.metadata.revision,
     helm_release.argocd_config_apps.metadata.revision,
@@ -1286,11 +1563,12 @@ module "wait_all_domains_healthy" {
   ])
 
   depends_on = [
+    helm_release.crds_apps,
     helm_release.secrets_apps,
-    helm_release.eso_data_apps,
     helm_release.monitoring_apps,
     helm_release.backups_apps,
-    helm_release.networking_apps,
+    helm_release.networking_controllers_apps,
+    helm_release.networking_resources_apps,
     helm_release.wireguard_apps,
     helm_release.dex_apps,
     helm_release.argocd_config_apps,
