@@ -27,6 +27,27 @@ them. Skipping this fails with an opaque `403 Forbidden` on `ListObjectsV2`
 that looks identical whether credentials are missing, wrong, or real
 (non-Scaleway) AWS credentials are ambient instead.
 
+## Live-cluster testing discipline (`10-cluster/scaleway`)
+
+Every `apply`/`hard-destroy` cycle against the Scaleway homelab costs real
+time and real money (Kapsule cluster + node pool + LB + block storage, all
+billed). **Never dispatch one just to "see what happens" or to re-run the
+exact same untargeted test hoping for a different result.** Before every
+apply, be able to state in one sentence: which specific hypothesis this run
+tests, and what log/resource you will check to confirm or refute it —
+_before_ hitting apply, not after it finishes.
+
+When something breaks: go straight to the actual failing resource's own
+logs (`kubectl logs`, `kubectl describe`, the specific Job/pod involved) —
+immediately, on the first sign of trouble, not after the fact and not after
+being asked. Aggregate signals (ArgoCD Application `health`/`sync` status,
+"terraform apply exited 0") are not proof of correctness — they can be
+Healthy/Complete while the actual thing they wrap did the wrong thing
+internally. Cross-check specific resource state (pod logs, object status
+subresources, `kubectl get` on the actual CRs involved) before declaring
+anything fixed. Stopping at the first signal that happens to be convenient
+is not verification.
+
 ## Commands
 
 ```bash

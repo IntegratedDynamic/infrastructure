@@ -1,0 +1,56 @@
+# gateway-config + external-dns (the CRD-typed resource tier) + every
+# product's `*-gateway` HTTPRoute-only chart, in ONE parent Application
+# ordered by ArgoCD's own intra-Application sync-waves -- merged 2026-08-27
+# from what used to be two separate top-level Applications
+# (networking-resources-apps + gateways-apps) with a Terraform-level
+# `wait-argocd-apps-healthy` polling Job (wait_networking_resources_healthy)
+# between them. That cross-Application hop is now a free intra-Application
+# wave boundary: every `*-gateway` in wave 1 needs nothing beyond what
+# wave 0 already required (the ESO-materialized Secret each references, and
+# the `Gateway` object gateway-config in wave 0 itself creates).
+#
+# Networking CONTROLLERS (envoy-gateway/cert-manager) deliberately stay
+# their own separate Application (values-networking-controllers.yaml,
+# argocd.tf's helm_release.networking_controllers_apps) -- NOT merged in
+# here. Terraform can only gate an Application's creation, not pause
+# mid-sync between two of its own waves, so folding the controllers in as
+# an earlier wave would force them to also wait for Secrets+Backups before
+# starting, delaying them for no reason (today they start as soon as
+# crds-apps is Established). See Draft-proposal.md's "Correction" section.
+#
+# This Application's own gates (argocd.tf's helm_release
+# .networking_resources_apps depends_on): module.wait_networking_controllers_healthy
+# (hard -- gateway-config's ClusterIssuers are cert-manager.io-typed and
+# fail outright at the API level if cert-manager's webhook isn't serving),
+# module.wait_secrets_healthy (upgraded 2026-08-27 from the old soft
+# `depends_on = [eso_data_apps]` to a hard wait -- gateway-config/
+# external-dns consume cert-manager-webhook-secret/external-dns-secret,
+# and merge 1 made wait_secrets_healthy the single check covering every
+# ExternalSecret), and module.wait_backups_healthy (gateway-config's
+# wildcard TLS Secret restore, formerly wait_restore_healthy).
+apps:
+  # ── wave 0: gateway-config's Gateway + ClusterIssuers, external-dns ────
+  # gateway-config needs BOTH envoy-gateway's AND cert-manager's
+  # controllers actually running (its ClusterIssuer objects are
+  # cert-manager.io-typed) -- guaranteed before this Application is even
+  # created by module.wait_networking_controllers_healthy. external-dns
+  # doesn't strictly need the Gateway (soft/eventually-consistent DNS
+  # reconciliation) but shares wave 0 rather than getting its own -- wave
+  # reuse is free.
+  - {name: gateway-config, namespace: gateway, chartPath: services/platform/gateway/config, valueFile: values-scaleway.yaml, wave: "0", activeClusterIssuerParam: true}
+  - {name: external-dns, namespace: external-dns, chartPath: services/platform/external-dns/chart, valueFile: values-scaleway.yaml, wave: "0", syncWaveLabelPaths: ['external-dns.podLabels.scalepack\.fr/sync-wave']}
+  # ── wave 1: every product's bare `*-gateway` HTTPRoute chart ───────────
+  # dex-gateway, grafana-gateway, argocd-config-gateway,
+  # argo-workflows-gateway, openbao-gateway -- each is nothing but a bare
+  # HTTPRoute (see each one's own templates/httproute.yaml), no
+  # interdependency between them. Each attaches to the `Gateway` object
+  # wave 0's gateway-config creates, so wave 0 being Healthy is their only
+  # prerequisite. Kept OUT of each product's own domain (dex-apps/
+  # grafana-apps/...) so ArgoCD's recursive Application health check
+  # doesn't make the product itself wait on this tier's convergence -- see
+  # platform-apps/README.md's "Decoupling gateway routes" section.
+  - {name: dex-gateway, namespace: gateway, chartPath: services/platform/dex/gateway, valueFile: values.yaml, wave: "1"}
+  - {name: grafana-gateway, namespace: monitoring, chartPath: services/platform/monitoring/grafana-gateway, valueFile: values-scaleway.yaml, wave: "1"}
+  - {name: argocd-config-gateway, namespace: argocd, chartPath: services/platform/argocd-config/gateway, valueFile: values-scaleway.yaml, wave: "1"}
+  - {name: argo-workflows-gateway, namespace: argo-workflows, chartPath: services/platform/argo-workflows/gateway, valueFile: values.yaml, wave: "1"}
+  - {name: openbao-gateway, namespace: openbao, chartPath: services/platform/openbao/gateway, valueFile: values-scaleway.yaml, wave: "1"}

@@ -105,6 +105,15 @@ resource "vault_jwt_auth_backend" "oidc" {
   oidc_client_id     = "openbao"
   oidc_client_secret = random_password.openbao_client_secret.result
   default_role       = "admin"
+
+  # var.letsencrypt_staging (see that variable's own comment): trusts the
+  # Let's Encrypt staging root for this backend's own outbound OIDC
+  # discovery call, entirely server-side -- no pod/volume/init-container
+  # change needed, unlike a generic SSL_CERT_FILE override. chomp(): file()
+  # has no trailing newline stripped, and a diff-forever loop results
+  # without it (confirmed by this repo's own prior use of this exact field,
+  # see git history).
+  oidc_discovery_ca_pem = var.letsencrypt_staging ? chomp(file("${path.module}/files/letsencrypt-staging-root-ca.pem")) : null
 }
 
 resource "vault_jwt_auth_backend_role" "admin" {

@@ -1,5 +1,5 @@
 cluster_name = "scaleway-homelab"
-node_count   = 1
+node_count   = 2
 
 # Cross-root state reads — see 00-foundation/scaleway/env/00-foundation-scaleway-dev.tfvars
 # for the full bucket list. Keys updated 2026-08-24 (workspace-naming

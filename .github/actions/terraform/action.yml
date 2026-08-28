@@ -203,3 +203,47 @@ runs:
           destroy|hard-destroy) terraform -chdir="$ROOT" destroy -input=false -auto-approve -var-file="env/${TFVARS}" ;;
           *) echo "::error::unknown command '$COMMAND' (expected plan|apply|destroy|hard-destroy)"; exit 1 ;;
         esac
+
+    # Confirmed live (2026-08-26, three separate times in one session): this
+    # job's own timeout-minutes ceiling, or a manual `gh run cancel`, kills
+    # the runner mid-apply/destroy before Terraform's own S3 native lock
+    # (use_lockfile) gets released -- every subsequent run then fails
+    # immediately on "Error acquiring the state lock" until an admin
+    # manually runs `terraform force-unlock`. GitHub Actions still runs
+    # `if: failure() || cancelled()` steps after a job-timeout cancellation
+    # (the documented mechanism this relies on) or an ordinary step failure,
+    # so this only pays for an extra lock-probing `terraform plan` on the
+    # unhappy path -- a normal green run never runs this step at all.
+    #
+    # Safe to force-unlock unconditionally: this workflow's own concurrency
+    # group (scaleway-${{ github.ref }}, cancel-in-progress: false)
+    # guarantees only one run ever touches this root's state at a time, so
+    # any lock still held by the time THIS job's steps finish can only be
+    # THIS SAME job's own -- never a genuinely concurrent operation's.
+    - name: Release orphaned state lock (cleanup)
+      if: failure() || cancelled()
+      shell: bash
+      env:
+        ROOT: ${{ inputs.root }}
+        TFVARS: ${{ inputs.tfvars-file }}
+      run: |
+        set -uo pipefail
+        # -refresh=false: this only needs to attempt lock ACQUISITION, not
+        # produce a real plan -- the cluster itself may be mid-destroy or
+        # unreachable, and contacting every provider would defeat the point
+        # of a fast, reliable cleanup step. -lock-timeout=5s: fail fast if
+        # genuinely (and correctly) locked by a truly concurrent run, rather
+        # than hanging on the default wait.
+        log=$(mktemp)
+        if terraform -chdir="$ROOT" plan -input=false -refresh=false -lock-timeout=5s -var-file="env/${TFVARS}" >"$log" 2>&1; then
+          echo "State is not locked -- nothing to clean up."
+          exit 0
+        fi
+        lock_id=$(grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' "$log" | head -1)
+        if [ -z "$lock_id" ]; then
+          echo "Plan failed for a reason other than a state lock -- leaving state alone:"
+          cat "$log"
+          exit 0
+        fi
+        echo "Found an orphaned lock ($lock_id, left by this same run) -- releasing it."
+        terraform -chdir="$ROOT" force-unlock -force "$lock_id"

@@ -63,6 +63,29 @@ variable "update_kubeconfig" {
   description = "Set to true when using locally to automatically update you ~/.kube/config. Require `kubectl` and `scw` installed & configured."
 }
 
+# Feature flag (2026-08-27, infra#99): switches gateway-config's ACME
+# ClusterIssuer from letsencrypt-prod to letsencrypt-staging, and injects
+# the Let's Encrypt staging root CA (files/letsencrypt-staging-root-ca.pem
+# -- confirmed against Let's Encrypt's own docs that the ROOT, not an
+# intermediate, is the one safe to pin long-term) into every component that
+# makes real server-side HTTPS calls to the public https://auth.scalepack.fr
+# for OIDC (ArgoCD, Grafana, OpenBao -- confirmed via each one's actual
+# config; argo-workflows and Dex itself confirmed NOT to need this, see
+# argocd.tf's own comments). Exists because staging has a vastly higher
+# rate limit than production's real "5 duplicate certs per exact identifier
+# set per 168h" -- confirmed live (2026-08-27) that a burst of same-week
+# from-scratch cluster rebuilds (each one forcing a brand-new ACME issuance
+# with no prior Velero backup to restore from) exhausts that limit for
+# real. Default false: leaves every existing resource untouched -- flip
+# only for a burst of live-testing rebuilds, same "override on your own
+# branch, never merge the flip" spirit as gitops_revision/infra_revision
+# above.
+variable "letsencrypt_staging" {
+  type        = bool
+  default     = false
+  description = "Use Let's Encrypt staging (higher rate limit, untrusted CA) instead of production for the platform's public wildcard cert. Also injects the staging root CA into ArgoCD/Grafana/OpenBao so their own OIDC calls to auth.scalepack.fr still work."
+}
+
 
 # variable "gitops_revision" {
 #   type    = string

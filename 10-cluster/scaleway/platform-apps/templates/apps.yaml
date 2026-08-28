@@ -42,12 +42,18 @@ spec:
     helm:
       valueFiles:
         - {{ .valueFile }}
+        {{- if and .extraValueFileParam $.Values.letsEncryptStaging }}
+        # var.letsencrypt_staging (infra repo's argocd.tf) -- appends the
+        # merge-CA values file so this app trusts the Let's Encrypt staging
+        # root, on top of (never instead of) its own default values file.
+        - {{ .extraValueFileParam }}
+        {{- end }}
       {{- if .skipCrds }}
       # See gitops repo's bootstrap/templates/scaleway.yaml — same
       # skipCrds/dedicated-CRDs-Application split for kube-prometheus-stack.
       skipCrds: true
       {{- end }}
-      {{- if or .syncWaveLabelPaths .gitRefParam }}
+      {{- if or .syncWaveLabelPaths .gitRefParam .activeClusterIssuerParam }}
       parameters:
         {{- if .syncWaveLabelPaths }}
         # Same anti-affinity wave-label injection as
@@ -68,16 +74,78 @@ spec:
         - name: gitRef
           value: {{ $.Values.infraRevision | quote }}
         {{- end }}
+        {{- if .activeClusterIssuerParam }}
+        # var.letsencrypt_staging (infra repo's argocd.tf local.active_cluster_issuer)
+        # -- overrides this chart's own activeClusterIssuer default
+        # (letsencrypt-prod) so a live-testing burst can switch to
+        # letsencrypt-staging's much higher rate limit instead.
+        - name: activeClusterIssuer
+          value: {{ $.Values.activeClusterIssuer | quote }}
+        {{- end }}
       {{- end }}
 
   # Same webhook caBundle exception as gitops repo's
   # bootstrap/templates/scaleway.yaml — see that file's comment for why this
   # is unconditional rather than opt-in per app.
+  #
+  # ValidatingAdmissionPolicy/-Binding: confirmed live (2026-08-26,
+  # gateway-api-crds' own `safe-upgrades.gateway.networking.k8s.io` pair)
+  # these perpetually show OutOfSync despite every sync succeeding — the API
+  # server writes a `.status` block (observedGeneration, typeChecking) onto
+  # the live object that the git manifest never defines, and ArgoCD's
+  # built-in "ignore status for known kinds" list doesn't yet cover this
+  # still-relatively-new kind the way it does for e.g. Deployment. Same
+  # "harmless cosmetic drift forever, not a real problem" story as the
+  # webhook caBundle exception above, same unconditional fix.
+  #
+  # PushSecret: confirmed live (2026-08-26, secrets-sync's own
+  # `github-infrastructure-scaleway`) same story — ESO's controller writes a
+  # rich `.status` (conditions, refreshTime, syncedPushSecrets) that isn't
+  # being recognized as a server-managed status subresource, so ArgoCD
+  # diffs it against the git manifest's absence of any `status` key.
   ignoreDifferences:
     - group: admissionregistration.k8s.io
       kind: MutatingWebhookConfiguration
       jqPathExpressions:
         - '.webhooks[]?.clientConfig.caBundle'
+    - group: admissionregistration.k8s.io
+      kind: ValidatingAdmissionPolicy
+      jsonPointers:
+        - /status
+    - group: admissionregistration.k8s.io
+      kind: ValidatingAdmissionPolicyBinding
+      jsonPointers:
+        - /status
+    - group: external-secrets.io
+      kind: PushSecret
+      jsonPointers:
+        - /status
+    # batch/v1 Job: confirmed live (2026-08-27, openbao-init's own
+    # openbao-init-restore Job) -- a Job whose sync-options include
+    # Replace=true,Force=true (needed wherever spec.selector/template.labels
+    # are immutable, e.g. this one) apparently doesn't get ArgoCD's usual
+    # "ignore server-managed status" treatment for the Job kind the way a
+    # normal (non-Replace) sync would. A Job's own .status
+    # (active/ready/succeeded counters, conditions) changes continuously
+    # while it runs -- with selfHeal: true and no exclusion here, ArgoCD
+    # read every one of those status updates as drift and force-recreated
+    # the whole Job (a genuinely new object under Replace=true, not a
+    # patch) every time, spawning a fresh, truly concurrent pod every
+    # 17-47s while the previous one was still mid-run. Confirmed live:
+    # openbao-init-restore got recreated 3 times in under 90 seconds this
+    # way, with two of those pods genuinely running the restore script at
+    # the same time. This is a real bug in its own right (wasteful,
+    # concurrent writers against the same OpenBao instance) independent of
+    # -- but currently masked for openbao-init specifically by -- that
+    # script's own retry-safety marker (services/platform/openbao/init's
+    # openbao-restore-state Secret, gitops repo). Applied uniformly to
+    # every app rendered by this template rather than special-cased to
+    # openbao-init, since any other Replace=true,Force=true Job anywhere in
+    # the platform would hit the identical bug.
+    - group: batch
+      kind: Job
+      jsonPointers:
+        - /status
 
   destination:
     server: https://kubernetes.default.svc
