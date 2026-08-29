@@ -184,8 +184,8 @@ action doesn't use any of this yet — see the follow-up above).
 
 Every `data "terraform_remote_state"` reading a Scaleway-hosted bucket (see
 "Real rollout" above — `10-cluster/local`, `10-cluster/scaleway`,
-`11-secrets/openbao/managed`, `12-monitoring/grafana/bootstrap`,
-`12-monitoring/grafana/managed`) authenticates via a `data "external"`
+`11-secrets/openbao/managed`, `12-monitoring/grafana/managed`)
+authenticates via a `data "external"`
 block that shells out to `scw config get access-key`/`secret-key` — the
 *exact same* credentials `provider "scaleway" {}` already uses implicitly
 everywhere in this repo. An admin who already has `scw` configured (already

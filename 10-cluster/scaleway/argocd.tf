@@ -1419,16 +1419,17 @@ EOF
 # ── Tier 3: crossplane, extracted from gitops repo (infra#84 follow-up; issue #101) ───
 #
 # Crossplane core + upbound/provider-opentofu -- the unattended `tofu apply`
-# loop for 11-secrets/openbao/managed and 12-monitoring/grafana/{bootstrap,
-# managed}, replacing the terraform-apply CronWorkflows (issue #101). The
+# loop for 11-secrets/openbao/managed and 12-monitoring/grafana/managed,
+# replacing the terraform-apply CronWorkflows (issue #101). The
 # openbao/managed Workspace's own vault provider talks to OpenBao's
-# in-cluster Service, so this gates on module.wait_secrets_healthy; the two
-# grafana Workspaces (their grafana provider + grafana/bootstrap's folded-in
-# infra#82 self-heal probe both hit Grafana's live API) gate on
-# module.wait_grafana_healthy below. Neither is a hard blocker for the
-# Workspaces to eventually converge -- provider-opentofu retries on its own
-# backoff -- but starting crossplane-apps before either tool is up would
-# just burn reconcile attempts.
+# in-cluster Service, so this gates on module.wait_secrets_healthy; the
+# grafana/managed Workspace's grafana provider hits Grafana's live API
+# (basic-auth as admin -- there's no separate grafana/bootstrap root
+# anymore), so it gates on module.wait_grafana_healthy below. Neither is a
+# hard blocker for the Workspaces to eventually converge --
+# provider-opentofu retries on its own backoff -- but starting
+# crossplane-apps before either tool is up would just burn reconcile
+# attempts.
 module "wait_grafana_healthy" {
   source = "./modules/wait-argocd-apps-healthy"
 

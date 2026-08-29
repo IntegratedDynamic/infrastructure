@@ -41,77 +41,49 @@ terraform {
       source  = "grafana/grafana"
       version = "~> 4.0"
     }
-    external = {
-      source  = "hashicorp/external"
-      version = "~> 2.0"
+    # infra#82 restore-adopt probes in main.tf hit Grafana's live API for
+    # the current ids of the mcp-claude-code SA and the data sources, so a
+    # config-driven `import` can adopt them when this root's state is fresh
+    # but Grafana already carries them (post-restore). A plugin, so it runs
+    # in the provider-opentofu runtime image with nothing baked in.
+    http = {
+      source  = "hashicorp/http"
+      version = "~> 3.4"
     }
   }
 }
 
-# 12-monitoring/grafana/bootstrap's own state — the terraform service
-# account token this root authenticates as. Cross-root remote-state read,
-# not a hand-copied value, same convention as every other cross-root
-# credential in this repo.
-# Credentials for the cross-root Scaleway state read below. Two execution
-# contexts apply this root: an admin's machine (scw CLI configured) and
-# the in-cluster reconcile loop (Crossplane's opentofu.upbound.io/Workspace
-# for this root -- gitops repo services/platform/crossplane), which sets
-# SCW_ACCESS_KEY/SCW_SECRET_KEY as env vars -- confirmed live (against the
-# CronWorkflow this Workspace replaced), silently returned empty
-# credentials without this fallback (no error, since `scw` command
-# substitution failing just yields an empty string), which then broke the
-# cross-root state read below with a confusing "No valid credential
-# sources found" error instead of failing at the actual source. Env vars
-# now win when set; falling back to `scw config get` keeps the admin path
-# exactly as it was. Same fix as 11-secrets/openbao/managed/main.tf's
-# identical comment.
+# The `grafana` provider authenticates as Grafana's own admin via basic
+# auth. The password is 11-secrets/openbao/managed's
+# random_password.grafana_admin_password (backing kv/apps/grafana/admin) —
+# but it reaches this root as the env var TF_VAR_grafana_admin_password,
+# NOT a cross-root terraform_remote_state read:
 #
-# Plain `printf`, not `jq -n`: the only jq dependency this root had, and the
-# provider-opentofu runtime image doesn't ship it. Scaleway access/secret
-# keys are `[A-Za-z0-9-]` only, so no JSON escaping is needed; `$(...)`
-# already strips the trailing newline `scw config get` emits.
-data "external" "scw_credentials" {
-  program = ["sh", "-c", <<-EOT
-    printf '{"access_key":"%s","secret_key":"%s"}' \
-      "$${SCW_ACCESS_KEY:-$(scw config get access-key)}" \
-      "$${SCW_SECRET_KEY:-$(scw config get secret-key)}"
-  EOT
-  ]
-}
-
-locals {
-  # See main.tf-equivalent comment elsewhere in the repo: shared technical
-  # attributes for the cross-root Scaleway state read below, not "config" in
-  # the meaningful sense. The actual target is parametrized via variables.tf
-  # + env/, visible there instead of buried here.
-  scaleway_state_backend = {
-    region                      = "fr-par"
-    access_key                  = data.external.scw_credentials.result.access_key
-    secret_key                  = data.external.scw_credentials.result.secret_key
-    skip_credentials_validation = true
-    skip_region_validation      = true
-    skip_requesting_account_id  = true
-    skip_s3_checksum            = true
-    use_path_style              = true
-    endpoints = {
-      s3 = "https://s3.fr-par.scw.cloud"
-    }
-  }
-}
-
-data "terraform_remote_state" "grafana_bootstrap" {
-  backend = "s3"
-  config = merge(local.scaleway_state_backend, {
-    bucket = var.grafana_bootstrap_state_bucket
-    key    = var.grafana_bootstrap_state_key
-  })
-}
-
-# Already a bearer-style API token (grafana_service_account_token.key) — no
-# "user:pass" formatting needed, unlike bootstrap's admin basic-auth.
-# See that root's version.tf for why `url` is a variable, not a literal --
-# same reason applies here.
+#   - in-cluster: the Crossplane opentofu.upbound.io/Workspace for this root
+#     (gitops repo services/platform/crossplane/config) maps it from the
+#     ESO-synced Secret `crossplane-grafana-admin` (OpenBao kv/apps/grafana/
+#     admin, same ClusterSecretStore every other ExternalSecret uses).
+#   - locally: `export TF_VAR_grafana_admin_password=$(bao kv get -field=admin-password kv/apps/grafana/admin)`.
+#
+# Passing the credential straight in is deliberate: there is no separate
+# 12-monitoring/grafana/bootstrap root anymore (it only minted a `terraform`
+# SA token that could stop authenticating after a Velero restore while
+# still showing valid — infra#82 mode 1), and reading openbao/managed's
+# whole state blob over S3 just to pull one password out is a detour the
+# reconcile loop's env-var wiring already avoids for every other secret it
+# needs.
+#
+# `url` is a variable, not a literal, for the same reason the retired
+# bootstrap root gave: it defaults to Grafana's internal Service address
+# (http://grafana.monitoring.svc:80/, reachable here through the WireGuard
+# tunnel's internal-cluster DNS — 04-vpn/wireguard-site-to-site, infra#81),
+# but the in-cluster Workspace overrides it via TF_VAR_grafana_url because a
+# pod reaching the cluster's own public ingress from behind it hits a
+# hairpin-NAT gap ("context deadline exceeded"). Grafana's basic-auth API
+# path isn't behind the sso-guard edge policy, so the public route
+# (https://grafana.scalepack.fr/) still works if the tunnel is down — just
+# isn't the default.
 provider "grafana" {
   url  = var.grafana_url
-  auth = data.terraform_remote_state.grafana_bootstrap.outputs.service_account_token
+  auth = "admin:${var.grafana_admin_password}"
 }

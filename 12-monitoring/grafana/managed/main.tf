@@ -1,3 +1,57 @@
+# ── infra#82 restore-adopt ───────────────────────────────────────────────
+#
+# After a Velero PVC restore Grafana can carry resources this root created
+# (the mcp-claude-code SA, the data sources) that this root's own state no
+# longer tracks — e.g. the S3 state was rebuilt, or a `state rm` was done.
+# A plain `apply` then POSTs a name that already exists and wedges on a
+# 400/409 (the grafana provider has no adopt-if-present behaviour).
+#
+# Two admin-authed probes read the live ids; config-driven `import` blocks
+# (below each resource) adopt when the resource exists live but not in
+# state. `import` is idempotent — a no-op once the resource IS in state,
+# regardless of id — and carries no `replace_triggered_by`, so it cannot
+# oscillate in the Crossplane reconcile loop. On a fresh Grafana the probes
+# return nothing, the `for_each` is empty, and the resources create
+# normally.
+#
+# `hashicorp/http` surfaces a non-2xx as data, not a Terraform error, so a
+# down/restoring Grafana is observable rather than a hard plan failure —
+# the Workspace just retries on provider-opentofu's own backoff.
+data "http" "grafana_service_accounts" {
+  url = "${var.grafana_url}api/serviceaccounts/search?perpage=100&query=mcp-claude-code"
+  request_headers = {
+    Accept        = "application/json"
+    Authorization = "Basic ${base64encode("admin:${var.grafana_admin_password}")}"
+  }
+}
+
+data "http" "grafana_datasources" {
+  url = "${var.grafana_url}api/datasources"
+  request_headers = {
+    Accept        = "application/json"
+    Authorization = "Basic ${base64encode("admin:${var.grafana_admin_password}")}"
+  }
+}
+
+locals {
+  # Live numeric id of the mcp-claude-code SA, or null when Grafana doesn't
+  # return it (fresh instance, or the probe got a non-2xx / non-JSON body).
+  grafana_mcp_sa_live_id = try(
+    tostring(one([
+      for sa in jsondecode(data.http.grafana_service_accounts.response_body).serviceAccounts :
+      sa.id if sa.name == "mcp-claude-code"
+    ])),
+    null,
+  )
+
+  # uids of the data sources Grafana currently serves — the pinned literals
+  # ("prometheus"/"loki"/"tempo") are also the provider's import ids.
+  grafana_live_ds_uids = try(
+    [for ds in jsondecode(data.http.grafana_datasources.response_body) : ds.uid],
+    [],
+  )
+}
+
 # mcp-claude-code — the Grafana MCP server's (github.com/grafana/mcp-grafana)
 # own service account, used by Claude Code locally to query dashboards,
 # datasources, and alerts. role = "Editor" per that project's own
@@ -5,6 +59,12 @@
 resource "grafana_service_account" "mcp_claude_code" {
   name = "mcp-claude-code"
   role = "Editor"
+}
+
+import {
+  for_each = local.grafana_mcp_sa_live_id != null ? { adopt = local.grafana_mcp_sa_live_id } : {}
+  to       = grafana_service_account.mcp_claude_code
+  id       = each.value
 }
 
 resource "grafana_service_account_token" "mcp_claude_code" {
@@ -39,15 +99,16 @@ resource "grafana_service_account_token" "mcp_claude_code" {
 # state, so `apply` tried a plain POST /datasources for a name that already
 # existed and wedged on a 409 (the provider has no adopt-if-present
 # behavior). The Argo Workflows preflight script that used to work around
-# this with `state rm` + `import` is gone (issue #101) -- pinning the uid
-# removes the drift class instead: every snapshot taken after this change
-# carries the datasource under uid "prometheus", so any restore yields the
-# uid state already expects. `uid` is ForceNew on grafana_data_source, so
-# the very first apply of this change replaces the auto-uid datasource
-# once (harmless: dashboards resolve via the `$datasource` template var,
-# not a hardcoded uid -- see grafana_dashboard.defaults below). Residual,
-# documented in README.md: a restore from a snapshot OLDER than this change
-# still needs a one-off `tofu state rm grafana_data_source.<name>` + apply.
+# this with `state rm` + `import` is gone (issue #101). Two things replace
+# it: (1) the pinned `uid` here removes the drift class for a
+# state-intact restore -- every snapshot carries the datasource under uid
+# "prometheus", so a plain refresh matches; (2) the config-driven `import`
+# block just below adopts the datasource when this root's own state is
+# fresh but Grafana already carries it (state rebuilt, or a `state rm`).
+# `uid` is ForceNew on grafana_data_source, so the very first apply of the
+# uid pin replaced the auto-uid datasource once (harmless: dashboards
+# resolve via the `$datasource` template var, not a hardcoded uid -- see
+# grafana_dashboard.defaults below).
 resource "grafana_data_source" "prometheus" {
   type        = "prometheus"
   name        = "Prometheus"
@@ -55,6 +116,16 @@ resource "grafana_data_source" "prometheus" {
   url         = "http://kube-prometheus-stack-prometheus.monitoring.svc:9090"
   access_mode = "proxy"
   is_default  = true
+}
+
+# Adopt-if-present — see the "infra#82 restore-adopt" block at the top of
+# this file. The pinned uid IS the import id, so a snapshot taken since the
+# uid pin lands the datasource under exactly the id state expects; this
+# only fires when state itself is fresh but Grafana already carries it.
+import {
+  for_each = contains(local.grafana_live_ds_uids, "prometheus") ? { adopt = "prometheus" } : {}
+  to       = grafana_data_source.prometheus
+  id       = "prometheus"
 }
 
 # Loki + Tempo — same pattern as prometheus above, added alongside
@@ -85,6 +156,12 @@ resource "grafana_data_source" "loki" {
   }
 }
 
+import {
+  for_each = contains(local.grafana_live_ds_uids, "loki") ? { adopt = "loki" } : {}
+  to       = grafana_data_source.loki
+  id       = "loki"
+}
+
 resource "grafana_data_source" "tempo" {
   type        = "tempo"
   name        = "Tempo"
@@ -95,6 +172,12 @@ resource "grafana_data_source" "tempo" {
   lifecycle {
     ignore_changes = [json_data_encoded, http_headers]
   }
+}
+
+import {
+  for_each = contains(local.grafana_live_ds_uids, "tempo") ? { adopt = "tempo" } : {}
+  to       = grafana_data_source.tempo
+  id       = "tempo"
 }
 
 # Loki -> Tempo (click a trace ID in a log line, jump to that trace) and
@@ -129,6 +212,14 @@ resource "grafana_data_source_config" "loki" {
   })
 }
 
+# grafana_data_source_config imports by the datasource uid too — adopt it
+# alongside its datasource when state is fresh but Grafana carries it.
+import {
+  for_each = contains(local.grafana_live_ds_uids, "loki") ? { adopt = "loki" } : {}
+  to       = grafana_data_source_config.loki
+  id       = "loki"
+}
+
 # Deliberately minimal: no customQuery (let Tempo build the Loki query from
 # its own default tag matching rather than a hand-written LogQL query
 # assuming label names we haven't settled on) and no tracesToMetrics/
@@ -145,6 +236,12 @@ resource "grafana_data_source_config" "tempo" {
       filterByTraceID = false
     }
   })
+}
+
+import {
+  for_each = contains(local.grafana_live_ds_uids, "tempo") ? { adopt = "tempo" } : {}
+  to       = grafana_data_source_config.tempo
+  id       = "tempo"
 }
 
 # dashboards/*.json are the exact same dashboards kube-prometheus-stack
