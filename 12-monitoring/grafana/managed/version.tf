@@ -30,6 +30,13 @@ terraform {
   }
 
   required_providers {
+    # Pulled in by OpenTofu's s3 state backend (unlike Terraform's, its
+    # backend depends on the AWS provider); not used directly by this root.
+    # Constraint kept in step with the real-AWS roots (00-foundation/aws etc.).
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 6.0"
+    }
     grafana = {
       source  = "grafana/grafana"
       version = "~> 4.0"
