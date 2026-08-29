@@ -27,8 +27,12 @@ foundation_scaleway_state_key    = "00-foundation/scaleway/00-foundation-scalewa
 iam_bootstrap_scaleway_state_bucket = "id-terraform-state-01-iam-bootstrap-scaleway"
 iam_bootstrap_scaleway_state_key    = "01-iam/bootstrap/scaleway/01-iam-bootstrap-scaleway-dev/terraform.tfstate"
 
-# TEMPORARY live-test override, paired with 10-cluster/scaleway's own
-# letsencrypt_staging override -- see that variable's own comment. MUST be
-# reset to nothing (falls back to the "false" default) before this branch
-# merges, same as that root's override.
+# Standing state, kept in sync with 10-cluster/scaleway's own
+# letsencrypt_staging = true (see that root's env tfvars for the full "why":
+# gateway/cert-restore restores a staging-issued wildcard cert on every
+# boot, so the whole platform runs on LE staging). This flips OpenBao's own
+# oidc_discovery_ca_pem to the LE staging root so its server-side OIDC
+# discovery call to auth.scalepack.fr trusts the cert envoy-gateway
+# actually serves, instead of failing "x509: certificate signed by unknown
+# authority". Flip both roots back together if/when moving to prod certs.
 letsencrypt_staging = true
