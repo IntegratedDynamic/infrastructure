@@ -1,6 +1,11 @@
 cluster_name = "scaleway-homelab"
 node_count   = 2
 
+# ── TEMPORARY: combined live test of infra#107 (grafana adopt-via-import)
+# + gitops#57 (openbao-init marker). Throwaway branch, never merged.
+infra_revision  = "fix/grafana-workspace-adopt-existing-sa"
+gitops_revision = "fix/openbao-init-restore-marker-before-init"
+
 # This homelab runs on Let's Encrypt STAGING, not prod, as its standing
 # state (see var.letsencrypt_staging). Two reasons, both confirmed live:
 #  1. gateway/cert-restore restores the scalepack.fr wildcard TLS Secret
