@@ -1,5 +1,5 @@
 
-name: Terraform — Scaleway cluster
+name: OpenTofu — Scaleway cluster
 
 # Makes the run list self-explanatory (default would be the workflow name
 # for every run, indistinguishable at a glance) while staying close to the
@@ -11,12 +11,12 @@ name: Terraform — Scaleway cluster
 # checkout step only ever surfaces a commit hash, not a branch name; only
 # the run list's own branch column shows it otherwise, easy to miss once
 # you're inside a run looking at its logs.
-run-name: "Terraform ${{ inputs.command }} — Scaleway cluster (env: ${{ inputs.environment }}) @ ${{ github.ref_name }}"
+run-name: "OpenTofu ${{ inputs.command }} — Scaleway cluster (env: ${{ inputs.environment }}) @ ${{ github.ref_name }}"
 
 # Drives 10-cluster/scaleway through the .github/actions/terraform composite action.
 #
 # Iteration 1 (2026-08-25): workflow_dispatch only, mirroring a local
-# `terraform plan|apply|destroy` 1:1 (apply = up, destroy = down). This root's
+# `tofu plan|apply|destroy` 1:1 (apply = up, destroy = down). This root's
 # state backend auth (state-backend: scaleway below) had never actually been
 # exercised in CI before this — it was previously wired to assume a real AWS
 # IAM role for a bucket that has lived on Scaleway since the 2026-08-19 state
@@ -44,7 +44,7 @@ on:
     inputs:
       command:
         description: >
-          Terraform command (apply = up, destroy = down, hard-destroy = fast
+          OpenTofu command (apply = up, destroy = down, hard-destroy = fast
           down -- strips helm_release/kubernetes_* from state first, so
           destroy only has the Scaleway cluster left to delete; skips
           graceful in-cluster teardown, fine for this disposable cluster).

@@ -5,11 +5,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Setup
 
 ```bash
-mise install          # Install all tools (kubectl, minikube, terraform, helm, argocd, actionlint)
+mise install          # Install all tools (kubectl, minikube, opentofu, helm, argocd, actionlint)
 .githooks/install.sh  # Configure git to use local hooks directory
 ```
 
-**Before running `terraform init`/`plan`/`apply` locally against any
+**Before running `tofu init`/`plan`/`apply` locally against any
 Scaleway-hosted root** (every root except `00-foundation/aws` — see
 `00-foundation/scaleway/README.md`'s "Cross-root reads need no manual
 credential setup" section for the full explanation):
@@ -19,7 +19,7 @@ export AWS_ACCESS_KEY_ID=$(scw config get access-key)
 export AWS_SECRET_ACCESS_KEY=$(scw config get secret-key)
 ```
 
-Terraform's native `backend "s3" {}` block can only read the literal
+OpenTofu's native `backend "s3" {}` block can only read the literal
 `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` env var names for any
 S3-compatible endpoint, Scaleway included — it never reads `scw` CLI config,
 so `scw config info` showing valid credentials does not mean the backend has
@@ -41,7 +41,7 @@ When something breaks: go straight to the actual failing resource's own
 logs (`kubectl logs`, `kubectl describe`, the specific Job/pod involved) —
 immediately, on the first sign of trouble, not after the fact and not after
 being asked. Aggregate signals (ArgoCD Application `health`/`sync` status,
-"terraform apply exited 0") are not proof of correctness — they can be
+"tofu apply exited 0") are not proof of correctness — they can be
 Healthy/Complete while the actual thing they wrap did the wrong thing
 internally. Cross-check specific resource state (pod logs, object status
 subresources, `kubectl get` on the actual CRs involved) before declaring
@@ -52,7 +52,7 @@ is not verification.
 
 ```bash
 # Local cluster (minikube)
-mise run dev             # Full local env: start minikube + terraform init + apply
+mise run dev             # Full local env: start minikube + tofu init + apply
 mise run reset           # Destroy minikube cluster
 
 # Provider lock files
@@ -68,25 +68,26 @@ The `.terraform.lock.hcl` in each root must cover **both** `darwin_arm64` (local
 
 - bump a provider version constraint in any `version.tf`
 - add a new provider to a root
-- see a CI failure on the `Verify Terraform Lock Files` workflow
+- see a CI failure on the `Verify OpenTofu Lock Files` workflow
 
 `mise run lock` is equivalent to:
 
 ```bash
-terraform -chdir=00-foundation/aws                providers lock -platform=darwin_arm64 -platform=linux_amd64
-terraform -chdir=00-foundation/scaleway             providers lock -platform=darwin_arm64 -platform=linux_amd64
-terraform -chdir=01-iam/bootstrap/aws               providers lock -platform=darwin_arm64 -platform=linux_amd64
-terraform -chdir=01-iam/bootstrap/scaleway          providers lock -platform=darwin_arm64 -platform=linux_amd64
-terraform -chdir=01-iam/workload/scaleway           providers lock -platform=darwin_arm64 -platform=linux_amd64
-terraform -chdir=02-encryption/aws                  providers lock -platform=darwin_arm64 -platform=linux_amd64
-terraform -chdir=03-storage/scaleway                providers lock -platform=darwin_arm64 -platform=linux_amd64
-terraform -chdir=04-vpn/wireguard-site-to-site      providers lock -platform=darwin_arm64 -platform=linux_amd64
-terraform -chdir=04-vpn/wireguard-exit              providers lock -platform=darwin_arm64 -platform=linux_amd64
-terraform -chdir=10-cluster/local                   providers lock -platform=darwin_arm64 -platform=linux_amd64
-terraform -chdir=10-cluster/scaleway                providers lock -platform=darwin_arm64 -platform=linux_amd64
-terraform -chdir=11-secrets/openbao/bootstrap        providers lock -platform=darwin_arm64 -platform=linux_amd64
-terraform -chdir=12-monitoring/grafana/bootstrap     providers lock -platform=darwin_arm64 -platform=linux_amd64
-terraform -chdir=12-monitoring/grafana/managed       providers lock -platform=darwin_arm64 -platform=linux_amd64
+tofu -chdir=00-foundation/aws                providers lock -platform=darwin_arm64 -platform=linux_amd64
+tofu -chdir=00-foundation/scaleway             providers lock -platform=darwin_arm64 -platform=linux_amd64
+tofu -chdir=01-iam/bootstrap/aws               providers lock -platform=darwin_arm64 -platform=linux_amd64
+tofu -chdir=01-iam/bootstrap/scaleway          providers lock -platform=darwin_arm64 -platform=linux_amd64
+tofu -chdir=01-iam/workload/scaleway           providers lock -platform=darwin_arm64 -platform=linux_amd64
+tofu -chdir=02-encryption/aws                  providers lock -platform=darwin_arm64 -platform=linux_amd64
+tofu -chdir=03-storage/scaleway                providers lock -platform=darwin_arm64 -platform=linux_amd64
+tofu -chdir=04-vpn/wireguard-site-to-site      providers lock -platform=darwin_arm64 -platform=linux_amd64
+tofu -chdir=04-vpn/wireguard-exit              providers lock -platform=darwin_arm64 -platform=linux_amd64
+tofu -chdir=10-cluster/local                   providers lock -platform=darwin_arm64 -platform=linux_amd64
+tofu -chdir=10-cluster/scaleway                providers lock -platform=darwin_arm64 -platform=linux_amd64
+tofu -chdir=11-secrets/openbao/bootstrap        providers lock -platform=darwin_arm64 -platform=linux_amd64
+tofu -chdir=11-secrets/openbao/managed          providers lock -platform=darwin_arm64 -platform=linux_amd64
+tofu -chdir=12-monitoring/grafana/bootstrap     providers lock -platform=darwin_arm64 -platform=linux_amd64
+tofu -chdir=12-monitoring/grafana/managed       providers lock -platform=darwin_arm64 -platform=linux_amd64
 ```
 
 Commit the updated lock files alongside the version change.
@@ -268,7 +269,7 @@ roots had drifted out of sync after being moved or renamed (prefixes in the
 wrong segment order, workspace names inherited from a since-renamed
 directory, `10-cluster/scaleway` even carrying the misleading name
 `02-cluster-staging`) — all fixed by migrating each root's state into its new
-prefix/workspace via `terraform state pull` + `state push` (old state objects
+prefix/workspace via `tofu state pull` + `state push` (old state objects
 left orphaned in the same bucket, never deleted — see each root's
 `version.tf` header comment for its specific before/after).
 
@@ -280,7 +281,7 @@ credential unless the derived name is first frozen to a hardcoded local, as
 `02-encryption/aws/main.tf`'s `local.unseal_name` now is), `03-storage/scaleway`,
 and `01-iam/workload/scaleway` (both Scaleway IAM application/policy names —
 confirmed in-place-renamable, no credential rotation, since Scaleway API keys
-are tied to `application_id` not name) — always verify with `terraform plan`
+are tied to `application_id` not name) — always verify with `tofu plan`
 before applying a workspace rename, and don't assume every provider handles
 a name change the same way AWS's IAM access key does.
 
@@ -444,7 +445,7 @@ Scaleway tool buckets + their scoped identities, each with its own bucket AND it
 
 **PRs**: After each commit + push on a branch, create a draft PR if none exists. Title: `<type>: description`. Body: context, changes, linked issues (`Closes #123`), test instructions. Use [Conventional Comments](https://conventionalcomments.org/) in reviews (`praise`, `nitpick`, `suggestion`, `issue`, `todo`, `question`, `thought`).
 
-**Terraform workspaces**: a root that runs through CI declares its workspace variables in an `env/` folder — one `env/<name>.tfvars` per workspace. The **filename (without `.tfvars`) is the terraform workspace name** (so state lands at `<workspace_key_prefix>/<name>/<key>`, isolated per root) and the **file contents are that workspace's variable values**. Name it `<root-path-flattened-with-hyphens>-<env>` (e.g. `11-secrets-openbao-bootstrap-dev`) — see "Backend keys are decoupled from paths" above for the full convention and why a rename needs a real state migration, not just a file rename. The reusable **composite action `.github/actions/terraform`** takes `root` + `tfvars-file` + `command` (`plan`/`apply`/`destroy`) + `aws-role-arn` (all non-secret inputs) and runs `workspace select <name>` + the command `-var-file=env/<name>.tfvars`, after minting an Infisical OIDC token (skippable) and assuming the AWS role via OIDC. The action takes **no secret inputs**: provider credentials (`SCW_*`, `INFISICAL_MACHINE_IDENTITY_ID`) are read from the job env. The calling **workflow** owns the trigger→command mapping (push → apply, schedule → destroy, else plan), the `concurrency` guard, and the `environment` that scopes credentials — Scaleway keys live in the `scaleway` environment and are exposed to the action as job `env:` (never as plain inputs). The repo must be checked out before calling the action (it is a local action). This replaces the old reliance on a local, gitignored `.terraform/environment` (invisible to CI — a `default`-workspace run collides on the state key).
+**OpenTofu workspaces**: a root that runs through CI declares its workspace variables in an `env/` folder — one `env/<name>.tfvars` per workspace. The **filename (without `.tfvars`) is the OpenTofu workspace name** (so state lands at `<workspace_key_prefix>/<name>/<key>`, isolated per root) and the **file contents are that workspace's variable values**. Name it `<root-path-flattened-with-hyphens>-<env>` (e.g. `11-secrets-openbao-bootstrap-dev`) — see "Backend keys are decoupled from paths" above for the full convention and why a rename needs a real state migration, not just a file rename. The reusable **composite action `.github/actions/terraform`** takes `root` + `tfvars-file` + `command` (`plan`/`apply`/`destroy`) + `aws-role-arn` (all non-secret inputs) and runs `workspace select <name>` + the command `-var-file=env/<name>.tfvars`, after minting an Infisical OIDC token (skippable) and assuming the AWS role via OIDC. The action takes **no secret inputs**: provider credentials (`SCW_*`, `INFISICAL_MACHINE_IDENTITY_ID`) are read from the job env. The calling **workflow** owns the trigger→command mapping (push → apply, schedule → destroy, else plan), the `concurrency` guard, and the `environment` that scopes credentials — Scaleway keys live in the `scaleway` environment and are exposed to the action as job `env:` (never as plain inputs). The repo must be checked out before calling the action (it is a local action). This replaces the old reliance on a local, gitignored `.terraform/environment` (invisible to CI — a `default`-workspace run collides on the state key).
 
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,

@@ -1,7 +1,7 @@
 [tools]
 kubectl = "1.35"
 minikube = "1.38"
-terraform = "1.14"
+opentofu = "1.12"
 actionlint = "1.7"
 helm = "4.1.3"
 argocd = "3.3.6"
@@ -28,18 +28,18 @@ kubectl wait --for=condition=Ready nodes --all --timeout=120s
 [tasks.local-init]
 dir = "10-cluster/local"
 run = """
-terraform init
+tofu init
 """
 
 [tasks.local-apply]
 dir = "10-cluster/local"
 run = """
-ws=$(terraform workspace show)
+ws=$(tofu workspace show)
 if [ "$ws" = "default" ]; then
-  echo "error: terraform workspace is 'default' — select a real workspace first (terraform workspace select <env>)" >&2
+  echo "error: tofu workspace is 'default' — select a real workspace first (tofu workspace select <env>)" >&2
   exit 1
 fi
-terraform apply -auto-approve -var-file="env/${ws}.tfvars" $(test -f default.auto.tfvars && echo "-var-file=default.auto.tfvars")
+tofu apply -auto-approve -var-file="env/${ws}.tfvars" $(test -f default.auto.tfvars && echo "-var-file=default.auto.tfvars")
 """
 
 [tasks.dev]
@@ -69,11 +69,11 @@ usage = 'arg "<peer>" help="Peer name from 04-vpn/wireguard-site-to-site/variabl
 description = "Write your own WireGuard config to disk (never anyone else's)"
 dir = "04-vpn/wireguard-site-to-site"
 run = """
-terraform init
-terraform workspace select -or-create 04-vpn-wireguard-site-to-site-dev
-terraform apply -var-file=env/04-vpn-wireguard-site-to-site-dev.tfvars
+tofu init
+tofu workspace select -or-create 04-vpn-wireguard-site-to-site-dev
+tofu apply -var-file=env/04-vpn-wireguard-site-to-site-dev.tfvars
 mkdir -p generated
-terraform output -json peer_confs | jq -r --arg peer "${usage_peer?}" '.[$peer]' > "generated/${usage_peer?}.conf"
+tofu output -json peer_confs | jq -r --arg peer "${usage_peer?}" '.[$peer]' > "generated/${usage_peer?}.conf"
 chmod 600 "generated/${usage_peer?}.conf"
 echo "wrote generated/${usage_peer?}.conf"
 """
@@ -108,11 +108,11 @@ usage = 'arg "<peer>" help="Peer name from 04-vpn/wireguard-exit/variables.tf va
 description = "Write your own WireGuard exit-node config to disk (never anyone else's)"
 dir = "04-vpn/wireguard-exit"
 run = """
-terraform init
-terraform workspace select -or-create 04-vpn-wireguard-exit-dev
-terraform apply -var-file=env/04-vpn-wireguard-exit-dev.tfvars
+tofu init
+tofu workspace select -or-create 04-vpn-wireguard-exit-dev
+tofu apply -var-file=env/04-vpn-wireguard-exit-dev.tfvars
 mkdir -p generated
-terraform output -json peer_confs | jq -r --arg peer "${usage_peer?}" '.[$peer]' > "generated/${usage_peer?}.conf"
+tofu output -json peer_confs | jq -r --arg peer "${usage_peer?}" '.[$peer]' > "generated/${usage_peer?}.conf"
 chmod 600 "generated/${usage_peer?}.conf"
 echo "wrote generated/${usage_peer?}.conf"
 """
@@ -142,44 +142,44 @@ run = 'sudo wg-quick down "$(pwd)/generated/${usage_peer?}.conf"'
 # a GitHub Actions outage), or just faster than a push+dispatch round-trip.
 # Mirrors .github/actions/terraform/action.yml's own apply/destroy/
 # hard-destroy commands exactly. Workspace/tfvars hardcoded (not derived
-# like [tasks.local-apply]'s `terraform workspace show`) since this root has
+# like [tasks.local-apply]'s `tofu workspace show`) since this root has
 # exactly one dev environment. Exports AWS_ACCESS_KEY_ID/
 # AWS_SECRET_ACCESS_KEY from `scw config get` itself, every task -- see this
-# file's own header comment / CLAUDE.md's Setup section for why Terraform's
-# s3 backend needs those two literal env var names specifically; `scw config
+# file's own header comment / CLAUDE.md's Setup section for why the s3
+# backend needs those two literal env var names specifically; `scw config
 # info` showing valid credentials does not mean the backend has them.
 
 [tasks.scaleway-plan]
-description = "terraform plan against the live Scaleway homelab cluster"
+description = "tofu plan against the live Scaleway homelab cluster"
 dir = "10-cluster/scaleway"
 run = """
 export AWS_ACCESS_KEY_ID=$(scw config get access-key)
 export AWS_SECRET_ACCESS_KEY=$(scw config get secret-key)
-terraform init
-terraform workspace select -or-create 10-cluster-scaleway-dev
-terraform plan -var-file=env/10-cluster-scaleway-dev.tfvars
+tofu init
+tofu workspace select -or-create 10-cluster-scaleway-dev
+tofu plan -var-file=env/10-cluster-scaleway-dev.tfvars
 """
 
 [tasks.scaleway-apply]
-description = "terraform apply against the live Scaleway homelab cluster"
+description = "tofu apply against the live Scaleway homelab cluster"
 dir = "10-cluster/scaleway"
 run = """
 export AWS_ACCESS_KEY_ID=$(scw config get access-key)
 export AWS_SECRET_ACCESS_KEY=$(scw config get secret-key)
-terraform init
-terraform workspace select -or-create 10-cluster-scaleway-dev
-terraform apply -auto-approve -var-file=env/10-cluster-scaleway-dev.tfvars
+tofu init
+tofu workspace select -or-create 10-cluster-scaleway-dev
+tofu apply -auto-approve -var-file=env/10-cluster-scaleway-dev.tfvars
 """
 
 [tasks.scaleway-destroy]
-description = "Graceful terraform destroy of the Scaleway homelab cluster"
+description = "Graceful tofu destroy of the Scaleway homelab cluster"
 dir = "10-cluster/scaleway"
 run = """
 export AWS_ACCESS_KEY_ID=$(scw config get access-key)
 export AWS_SECRET_ACCESS_KEY=$(scw config get secret-key)
-terraform init
-terraform workspace select 10-cluster-scaleway-dev
-terraform destroy -auto-approve -var-file=env/10-cluster-scaleway-dev.tfvars
+tofu init
+tofu workspace select 10-cluster-scaleway-dev
+tofu destroy -auto-approve -var-file=env/10-cluster-scaleway-dev.tfvars
 """
 
 [tasks.scaleway-hard-destroy]
@@ -188,16 +188,16 @@ dir = "10-cluster/scaleway"
 run = """
 export AWS_ACCESS_KEY_ID=$(scw config get access-key)
 export AWS_SECRET_ACCESS_KEY=$(scw config get secret-key)
-terraform init
-terraform workspace select 10-cluster-scaleway-dev
-addrs=$(terraform state list | awk -F. '{ n = NF; type = $(n-1); name = $n; if (type == "helm_release" || type ~ /^kubernetes_/ || (type == "null_resource" && name == "velero_namespace_predelete_cleanup")) print }')
+tofu init
+tofu workspace select 10-cluster-scaleway-dev
+addrs=$(tofu state list | awk -F. '{ n = NF; type = $(n-1); name = $n; if (type == "helm_release" || type ~ /^kubernetes_/ || (type == "null_resource" && name == "velero_namespace_predelete_cleanup")) print }')
 if [ -z "$addrs" ]; then
   echo "Nothing to strip -- already gone or never created."
 else
   echo "$addrs"
-  echo "$addrs" | xargs terraform state rm
+  echo "$addrs" | xargs tofu state rm
 fi
-terraform destroy -auto-approve -var-file=env/10-cluster-scaleway-dev.tfvars
+tofu destroy -auto-approve -var-file=env/10-cluster-scaleway-dev.tfvars
 """
 
 
@@ -236,19 +236,19 @@ kubectl logs -n openbao "job/$job" --tail=5
 [tasks.lock]
 description = "Re-generate all .terraform.lock.hcl files for darwin_arm64 + linux_amd64"
 run = """
-terraform -chdir=00-foundation/aws                providers lock -platform=darwin_arm64 -platform=linux_amd64
-terraform -chdir=00-foundation/scaleway             providers lock -platform=darwin_arm64 -platform=linux_amd64
-terraform -chdir=01-iam/bootstrap/aws               providers lock -platform=darwin_arm64 -platform=linux_amd64
-terraform -chdir=01-iam/bootstrap/scaleway          providers lock -platform=darwin_arm64 -platform=linux_amd64
-terraform -chdir=01-iam/workload/scaleway           providers lock -platform=darwin_arm64 -platform=linux_amd64
-terraform -chdir=02-encryption/aws                  providers lock -platform=darwin_arm64 -platform=linux_amd64
-terraform -chdir=03-storage/scaleway                providers lock -platform=darwin_arm64 -platform=linux_amd64
-terraform -chdir=04-vpn/wireguard-site-to-site      providers lock -platform=darwin_arm64 -platform=linux_amd64
-terraform -chdir=04-vpn/wireguard-exit              providers lock -platform=darwin_arm64 -platform=linux_amd64
-terraform -chdir=10-cluster/local                   providers lock -platform=darwin_arm64 -platform=linux_amd64
-terraform -chdir=10-cluster/scaleway                providers lock -platform=darwin_arm64 -platform=linux_amd64
-terraform -chdir=11-secrets/openbao/bootstrap        providers lock -platform=darwin_arm64 -platform=linux_amd64
-terraform -chdir=11-secrets/openbao/managed          providers lock -platform=darwin_arm64 -platform=linux_amd64
-terraform -chdir=12-monitoring/grafana/bootstrap     providers lock -platform=darwin_arm64 -platform=linux_amd64
-terraform -chdir=12-monitoring/grafana/managed       providers lock -platform=darwin_arm64 -platform=linux_amd64
+tofu -chdir=00-foundation/aws                providers lock -platform=darwin_arm64 -platform=linux_amd64
+tofu -chdir=00-foundation/scaleway             providers lock -platform=darwin_arm64 -platform=linux_amd64
+tofu -chdir=01-iam/bootstrap/aws               providers lock -platform=darwin_arm64 -platform=linux_amd64
+tofu -chdir=01-iam/bootstrap/scaleway          providers lock -platform=darwin_arm64 -platform=linux_amd64
+tofu -chdir=01-iam/workload/scaleway           providers lock -platform=darwin_arm64 -platform=linux_amd64
+tofu -chdir=02-encryption/aws                  providers lock -platform=darwin_arm64 -platform=linux_amd64
+tofu -chdir=03-storage/scaleway                providers lock -platform=darwin_arm64 -platform=linux_amd64
+tofu -chdir=04-vpn/wireguard-site-to-site      providers lock -platform=darwin_arm64 -platform=linux_amd64
+tofu -chdir=04-vpn/wireguard-exit              providers lock -platform=darwin_arm64 -platform=linux_amd64
+tofu -chdir=10-cluster/local                   providers lock -platform=darwin_arm64 -platform=linux_amd64
+tofu -chdir=10-cluster/scaleway                providers lock -platform=darwin_arm64 -platform=linux_amd64
+tofu -chdir=11-secrets/openbao/bootstrap        providers lock -platform=darwin_arm64 -platform=linux_amd64
+tofu -chdir=11-secrets/openbao/managed          providers lock -platform=darwin_arm64 -platform=linux_amd64
+tofu -chdir=12-monitoring/grafana/bootstrap     providers lock -platform=darwin_arm64 -platform=linux_amd64
+tofu -chdir=12-monitoring/grafana/managed       providers lock -platform=darwin_arm64 -platform=linux_amd64
 """

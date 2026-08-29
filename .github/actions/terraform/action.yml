@@ -1,6 +1,6 @@
-name: Terraform
+name: OpenTofu
 description: >
-  Run Terraform for a workspace-driven root: set up Terraform, optionally mint an
+  Run OpenTofu for a workspace-driven root: set up OpenTofu, optionally mint an
   Infisical OIDC token, authenticate the S3-compatible state backend, then init →
   workspace select → plan/apply/destroy. The repository must already be checked out.
 
@@ -48,7 +48,7 @@ inputs:
     required: true
   command:
     description: >
-      Terraform command to run: plan | apply | destroy | hard-destroy.
+      OpenTofu command to run: plan | apply | destroy | hard-destroy.
       hard-destroy strips every helm_release/kubernetes_* resource (plus the
       velero-namespace finalizer workaround) from state before destroying,
       so the only thing left for `terraform destroy` to actually do is
@@ -86,10 +86,10 @@ inputs:
 runs:
   using: composite
   steps:
-    - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+    - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
       with:
-        # Keep in sync with mise.toml [tools] terraform version.
-        terraform_version: "1.14"
+        # Keep in sync with mise.toml [tools] opentofu version.
+        tofu_version: "1.12"
 
     # Keyless Infisical auth: mint a GitHub OIDC JWT into INFISICAL_AUTH_JWT (the
     # provider's default token env var). The audience must match the identity's
@@ -125,7 +125,7 @@ runs:
     # only) are written to $GITHUB_ENV, not just exported locally, so they
     # carry over to the next step -- each composite-action step is its own
     # shell invocation.
-    - name: Terraform init
+    - name: OpenTofu init
       shell: bash
       env:
         ROOT: ${{ inputs.root }}
@@ -147,18 +147,18 @@ runs:
           export AWS_SECRET_ACCESS_KEY="$SCALEWAY_STATE_SECRET_KEY"
         fi
         ws="${TFVARS%.tfvars}"
-        terraform -chdir="$ROOT" init -input=false
+        tofu -chdir="$ROOT" init -input=false
         # apply may target a brand-new env whose workspace doesn't exist yet;
         # read paths (plan/destroy) select an existing one.
         if [ "$COMMAND" = "apply" ]; then
-          terraform -chdir="$ROOT" workspace select -or-create "$ws"
+          tofu -chdir="$ROOT" workspace select -or-create "$ws"
         else
-          terraform -chdir="$ROOT" workspace select "$ws"
+          tofu -chdir="$ROOT" workspace select "$ws"
         fi
 
     # hard-destroy only: drop every resource whose deletion normally goes
     # through the Kubernetes API from state *before* destroy runs, so
-    # `terraform destroy` only has the cloud-provider resources left to
+    # `tofu destroy` only has the cloud-provider resources left to
     # actually delete (deleting the cluster itself takes everything inside
     # it with it -- 100x faster than a graceful Helm-uninstall-by-
     # Helm-uninstall teardown). `state rm` only touches Terraform's
@@ -174,7 +174,7 @@ runs:
         ROOT: ${{ inputs.root }}
       run: |
         set -euo pipefail
-        addrs=$(terraform -chdir="$ROOT" state list | awk -F. '
+        addrs=$(tofu -chdir="$ROOT" state list | awk -F. '
           { n = NF; type = $(n-1); name = $n
             if (type == "helm_release" || type ~ /^kubernetes_/ \
                 || (type == "null_resource" && name == "velero_namespace_predelete_cleanup")) print }
@@ -183,10 +183,10 @@ runs:
           echo "Nothing to strip -- already gone or never created."
         else
           echo "$addrs"
-          echo "$addrs" | xargs terraform -chdir="$ROOT" state rm
+          echo "$addrs" | xargs tofu -chdir="$ROOT" state rm
         fi
 
-    - name: Terraform ${{ inputs.command }}
+    - name: OpenTofu ${{ inputs.command }}
       shell: bash
       env:
         ROOT: ${{ inputs.root }}
@@ -198,9 +198,9 @@ runs:
       run: |
         set -euo pipefail
         case "$COMMAND" in
-          plan)                 terraform -chdir="$ROOT" plan    -input=false -var-file="env/${TFVARS}" ;;
-          apply)                terraform -chdir="$ROOT" apply   -input=false -auto-approve -var-file="env/${TFVARS}" ;;
-          destroy|hard-destroy) terraform -chdir="$ROOT" destroy -input=false -auto-approve -var-file="env/${TFVARS}" ;;
+          plan)                 tofu -chdir="$ROOT" plan    -input=false -var-file="env/${TFVARS}" ;;
+          apply)                tofu -chdir="$ROOT" apply   -input=false -auto-approve -var-file="env/${TFVARS}" ;;
+          destroy|hard-destroy) tofu -chdir="$ROOT" destroy -input=false -auto-approve -var-file="env/${TFVARS}" ;;
           *) echo "::error::unknown command '$COMMAND' (expected plan|apply|destroy|hard-destroy)"; exit 1 ;;
         esac
 
@@ -209,10 +209,10 @@ runs:
     # the runner mid-apply/destroy before Terraform's own S3 native lock
     # (use_lockfile) gets released -- every subsequent run then fails
     # immediately on "Error acquiring the state lock" until an admin
-    # manually runs `terraform force-unlock`. GitHub Actions still runs
+    # manually runs `tofu force-unlock`. GitHub Actions still runs
     # `if: failure() || cancelled()` steps after a job-timeout cancellation
     # (the documented mechanism this relies on) or an ordinary step failure,
-    # so this only pays for an extra lock-probing `terraform plan` on the
+    # so this only pays for an extra lock-probing `tofu plan` on the
     # unhappy path -- a normal green run never runs this step at all.
     #
     # Safe to force-unlock unconditionally: this workflow's own concurrency
@@ -235,7 +235,7 @@ runs:
         # genuinely (and correctly) locked by a truly concurrent run, rather
         # than hanging on the default wait.
         log=$(mktemp)
-        if terraform -chdir="$ROOT" plan -input=false -refresh=false -lock-timeout=5s -var-file="env/${TFVARS}" >"$log" 2>&1; then
+        if tofu -chdir="$ROOT" plan -input=false -refresh=false -lock-timeout=5s -var-file="env/${TFVARS}" >"$log" 2>&1; then
           echo "State is not locked -- nothing to clean up."
           exit 0
         fi
@@ -246,4 +246,4 @@ runs:
           exit 0
         fi
         echo "Found an orphaned lock ($lock_id, left by this same run) -- releasing it."
-        terraform -chdir="$ROOT" force-unlock -force "$lock_id"
+        tofu -chdir="$ROOT" force-unlock -force "$lock_id"
