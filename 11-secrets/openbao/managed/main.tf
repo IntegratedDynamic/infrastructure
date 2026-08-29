@@ -1,18 +1,24 @@
 # Credentials for the cross-root Scaleway state reads below. Two genuinely
 # different execution contexts apply this root, not a speculative one: an
 # admin's machine (scw CLI configured, a repo-wide prerequisite already) and
-# the Argo Workflows CronWorkflow (gitops repo services/platform/argo-
-# workflows) that runs it hourly from inside the cluster, where there's no
-# scw CLI and no local config — only SCW_ACCESS_KEY/SCW_SECRET_KEY landed as
-# env vars from the apps/argo-workflows/scaleway-state-credentials KV object
+# the in-cluster reconcile loop (Crossplane's opentofu.upbound.io/Workspace
+# for this root — gitops repo services/platform/crossplane) that runs it on
+# its own poll interval from inside the cluster, where there's no scw CLI
+# and no local config — only SCW_ACCESS_KEY/SCW_SECRET_KEY landed as env
+# vars from the apps/argo-workflows/scaleway-state-credentials KV object
 # below. Env vars win when set; falling back to `scw config get` keeps the
 # admin path exactly as it was.
+#
+# Plain `printf`, not `jq -n`: the only jq dependency this root had, and the
+# provider-opentofu runtime image doesn't ship it (same gap hashicorp's
+# terraform image had). Scaleway access/secret keys are `[A-Za-z0-9-]` only,
+# so no JSON escaping is needed; `$(...)` already strips the trailing
+# newline `scw config get` emits.
 data "external" "scw_credentials" {
   program = ["sh", "-c", <<-EOT
-    jq -n \
-      --arg ak "$${SCW_ACCESS_KEY:-$(scw config get access-key)}" \
-      --arg sk "$${SCW_SECRET_KEY:-$(scw config get secret-key)}" \
-      '{access_key:$ak, secret_key:$sk}'
+    printf '{"access_key":"%s","secret_key":"%s"}' \
+      "$${SCW_ACCESS_KEY:-$(scw config get access-key)}" \
+      "$${SCW_SECRET_KEY:-$(scw config get secret-key)}"
   EOT
   ]
 }

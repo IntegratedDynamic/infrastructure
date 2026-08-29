@@ -44,6 +44,36 @@ Terraform-managed by `11-secrets/openbao/managed`
   unlike the forced `secret_id_ttl_days` window in the OpenBao bootstrap
   root).
 
+## Self-heal (infra#82)
+
+`grafana_service_account_token.terraform` can stop authenticating ("invalid
+API key") while still *existing* and showing not-expired/not-revoked in
+Grafana's own metadata — a cluster rebuild that restores Grafana's PVC from
+an older Velero snapshot did exactly this on 2026-08-23. A plain `apply`
+loop can't notice: the provider only reads whether the token resource
+exists, never its secret value.
+
+Until issue #101 this was patched by a preflight script in the gitops repo's
+Argo Workflows CronWorkflow. That CronWorkflow is gone (Crossplane's
+`Workspace` has no pre-apply hook), so the self-heal now lives in `main.tf`:
+
+- `data.http.grafana_service_accounts` probes Grafana **as admin** (basic
+  auth, from `openbao/managed`'s state — not the SA token, so no dependency
+  cycle) for the live numeric id of the `terraform` service account.
+- `terraform_data.grafana_sa_liveness` holds that id (or `-1` if Grafana
+  doesn't return it); `grafana_service_account.terraform` and its token both
+  `replace_triggered_by` it. A restore that dropped the SA, or recreated it
+  under a new id, recreates both unattended on the next reconcile.
+- The narrow residual — SA keeps its id but the token secret is dead — is a
+  `check` block asserting a `Bearer`-authed call returns 200. It only
+  *warns* (on `tofu plan` / the Crossplane Workspace status); the fix is a
+  one-off `tofu apply -replace=grafana_service_account_token.terraform`
+  (see "Rotation / revocation" below).
+
+`hashicorp/http` surfaces non-2xx as data, not a Terraform error, so a
+down/restored Grafana is observable rather than a hard plan failure — the
+Workspace just retries on provider-opentofu's own backoff.
+
 ## Credentials
 
 - **`grafana` provider**: authenticates as Grafana's admin via basic auth
@@ -70,7 +100,14 @@ tofu -chdir=12-monitoring/grafana/bootstrap plan  -var-file=env/12-monitoring-gr
 tofu -chdir=12-monitoring/grafana/bootstrap apply -var-file=env/12-monitoring-grafana-bootstrap-dev.tfvars
 ```
 
-> Never `tofu apply`/`destroy` here without explicit approval.
+> Never `tofu apply`/`destroy` here **by hand** without explicit approval.
+
+In-cluster this root is reconciled continuously by Crossplane
+(`opentofu.upbound.io/Workspace` `grafana-bootstrap`, gitops repo's
+`services/platform/crossplane`) against `main` — issue #101, replacing the
+Argo Workflows CronWorkflow. `deletionPolicy: Orphan` + `managementPolicies`
+without `Delete` mean Crossplane only ever creates/updates, never
+`tofu destroy`.
 
 ## Consuming the service account (12-monitoring/grafana/managed onward)
 

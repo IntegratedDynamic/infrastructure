@@ -1,0 +1,23 @@
+# crossplane -- Crossplane core + upbound/provider-opentofu, the unattended
+# `tofu apply` loop for 11-secrets/openbao/managed and
+# 12-monitoring/grafana/{bootstrap,managed}. Replaces the terraform-apply
+# CronWorkflows this file used to point at (issue #101).
+#
+# Two child Applications, ordered by this domain's own sync-waves:
+#  - wave 0: crossplane-core (the operator). Must be Healthy before wave 1.
+#  - wave 1: crossplane-config -- the Provider (ships the Workspace CRD),
+#    ProviderConfig and the three Workspace CRs. gitRefParam: true threads
+#    var.infra_revision into every Workspace's git module `?ref=`, so a
+#    paired infra/gitops feature-branch pair reconciles the infra branch
+#    under test -- the same override the retired terraform-apply chart's
+#    `gitRef` used (infra#76).
+#
+# argocd.tf gates the parent crossplane-apps Application on
+# module.wait_secrets_healthy (OpenBao reachable, for the openbao/managed
+# Workspace + its vault provider) AND module.wait_grafana_healthy (Grafana
+# reachable, for the two grafana Workspaces). The grafana Workspaces just
+# retry on provider-opentofu's own backoff until Grafana answers -- a plus
+# over the CronWorkflow's wave-timed one-shot (ties into #93).
+apps:
+  - {name: crossplane-core, namespace: crossplane-system, chartPath: services/platform/crossplane/chart, valueFile: values-scaleway.yaml, wave: "0"}
+  - {name: crossplane-config, namespace: crossplane-system, chartPath: services/platform/crossplane/config, valueFile: values-scaleway.yaml, wave: "1", gitRefParam: true}

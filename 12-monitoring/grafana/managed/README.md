@@ -38,6 +38,29 @@ plugin binary is a real change to OpenBao's own deployment (gitops repo),
 not just a Terraform resource — worth a dedicated follow-up if/when this
 grows beyond one personal-use token.
 
+## Self-heal (infra#82)
+
+Beyond the MCP service account, `main.tf` also (re)creates the
+`Prometheus`/`Loki`/`Tempo` data sources and the default dashboards that
+were lost when Grafana split out of `kube-prometheus-stack`.
+
+infra#82 mode 2 (first hit 2026-08-23): after a Velero PVC restore, Grafana
+served a data source under a different random `uid` than the one in state,
+so `apply` tried a plain `POST /datasources` for a name that already
+existed and wedged on a 409. Until issue #101 a gitops CronWorkflow
+preflight worked around this with `state rm` + `import`. That's gone now;
+instead each `grafana_data_source` **pins `uid`** to a stable literal
+(`prometheus` / `loki` / `tempo`), so every snapshot carries the
+deterministic uid and any restore yields the one state expects.
+
+- `uid` is `ForceNew`, so the first apply of this change replaces the
+  auto-uid data sources once — harmless (dashboards resolve via the
+  `$datasource` template var, not a hardcoded uid).
+- Residual: a restore from a snapshot **older** than the uid-pin change
+  still lands a random uid. One-off fix:
+  `tofu state rm grafana_data_source.<name>` then re-apply. Self-limiting —
+  pre-pin snapshots age out of Velero retention.
+
 ## Credentials
 
 - **`grafana` provider**: authenticates as the `terraform` service account
@@ -62,7 +85,16 @@ tofu -chdir=12-monitoring/grafana/managed plan  -var-file=env/12-monitoring-graf
 tofu -chdir=12-monitoring/grafana/managed apply -var-file=env/12-monitoring-grafana-managed-dev.tfvars
 ```
 
-> Never `tofu apply`/`destroy` here without explicit approval.
+> Never `tofu apply`/`destroy` here **by hand** without explicit approval.
+
+In-cluster this root is reconciled continuously by Crossplane
+(`opentofu.upbound.io/Workspace` `grafana-managed`, gitops repo's
+`services/platform/crossplane`) against `main` — issue #101, replacing the
+Argo Workflows CronWorkflow. It reads `grafana/bootstrap`'s
+`service_account_token` via `terraform_remote_state`, so Crossplane's own
+backoff is what sequences it after `grafana-bootstrap` (no explicit
+ordering primitive). `deletionPolicy: Orphan` + `managementPolicies`
+without `Delete` mean Crossplane only ever creates/updates.
 
 ## Fetching the MCP token
 
