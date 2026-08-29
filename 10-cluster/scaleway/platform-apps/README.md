@@ -243,11 +243,18 @@ generalization built on):
   self-heal tolerance. Its own `HTTPRoute` no longer lives in this domain
   (moved to `gateways-apps`, same as every other Tier-1/Tier-2 product) and
   never needed a networking-apps edge of its own in the first place.
-- **Tier 3** (`depends_on = [module.wait_argo_workflows_and_grafana_healthy]`):
-  `terraform-apply-apps` — its `grafana-managed` root's preflight calls
-  Grafana's live HTTP API directly, and its PostSync
-  `initial-run-workflow` hook needs `argo-workflows`' own
-  `WorkflowTemplate`/CRDs already installed.
+- **Tier 3** (`depends_on = [module.wait_secrets_healthy, module.wait_grafana_healthy]`):
+  `crossplane-apps` — Crossplane core + `provider-opentofu`, the unattended
+  `tofu apply` loop for `11-secrets/openbao/managed` and
+  `12-monitoring/grafana/{bootstrap,managed}` (issue #101, replacing the
+  `terraform-apply` CronWorkflows). Its `openbao-managed` `Workspace`'s
+  `vault` provider talks to OpenBao's in-cluster Service
+  (`module.wait_secrets_healthy`); its two `grafana` `Workspace`s talk to
+  Grafana's (`module.wait_grafana_healthy`, `["grafana-apps"]` only — the
+  grafana half of the retired `wait_argo_workflows_and_grafana_healthy`).
+  Neither gate is a hard blocker for the `Workspace`s to eventually
+  converge — `provider-opentofu` retries on its own backoff — they just
+  keep `crossplane-apps` from starting before either tool is up.
 - **Final gate**: `module.wait_all_domains_healthy` (renamed from
   `wait_platform_apps_healthy` — same resource in spirit, just checking
   every domain now, not the original four) still gates `bootstrap`'s own

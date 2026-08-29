@@ -25,8 +25,8 @@ locals {
   argocd_controller_gomemlimit_mib   = floor(local.argocd_controller_memory_limit_mib * 0.85)
 
   # Both ArgoCD Applications' own `targetRevision` (evaluated by ArgoCD's
-  # repo-server) and the plain `git clone --branch` step inside
-  # terraform-apply's WorkflowTemplate (infra#76's gitRef) assume the
+  # repo-server) and every provider-opentofu Workspace's git module `?ref=`
+  # (infra#76's gitRef, now threaded through crossplane-config) assume the
   # branch named by var.gitops_revision/var.infra_revision actually exists
   # on its repo -- true for the "override on your own branch, test
   # end-to-end, never merge that change" DevX trick IF you remember to
@@ -512,7 +512,7 @@ locals {
   # var.letsencrypt_staging (see that variable's own comment): which
   # ClusterIssuer gateway-config's Gateway actually uses. Threaded into
   # networking_resources_apps' own Application parameters below (same
-  # pattern values-terraform-apply.yaml's gitRefParam/infraRevision already
+  # pattern values-crossplane.yaml's gitRefParam/infraRevision already
   # establishes), which platform-apps/templates/apps.yaml then injects into
   # gateway-config's own child Application via its activeClusterIssuerParam
   # flag (values-networking-resources.yaml).
@@ -1416,33 +1416,36 @@ EOF
   ]
 }
 
-# ── Tier 3: terraform-apply, extracted from gitops repo (infra#84 follow-up) ───
+# ── Tier 3: crossplane, extracted from gitops repo (infra#84 follow-up; issue #101) ───
 #
-# grafana-managed's preflight calls Grafana's live HTTP API directly, and
-# the PostSync initial-run-workflow hook needs argo-workflows' own
-# WorkflowTemplate/CRDs already installed -- hard dependency on BOTH
-# argo-workflows-apps AND grafana-apps being Healthy, not just Synced.
-module "wait_argo_workflows_and_grafana_healthy" {
+# Crossplane core + upbound/provider-opentofu -- the unattended `tofu apply`
+# loop for 11-secrets/openbao/managed and 12-monitoring/grafana/{bootstrap,
+# managed}, replacing the terraform-apply CronWorkflows (issue #101). The
+# openbao/managed Workspace's own vault provider talks to OpenBao's
+# in-cluster Service, so this gates on module.wait_secrets_healthy; the two
+# grafana Workspaces (their grafana provider + grafana/bootstrap's folded-in
+# infra#82 self-heal probe both hit Grafana's live API) gate on
+# module.wait_grafana_healthy below. Neither is a hard blocker for the
+# Workspaces to eventually converge -- provider-opentofu retries on its own
+# backoff -- but starting crossplane-apps before either tool is up would
+# just burn reconcile attempts.
+module "wait_grafana_healthy" {
   source = "./modules/wait-argocd-apps-healthy"
 
-  job_name  = "wait-argo-workflows-and-grafana-healthy"
-  app_names = ["argo-workflows-apps", "grafana-apps"]
+  job_name  = "wait-grafana-healthy"
+  app_names = ["grafana-apps"]
 
   service_account_name = kubernetes_service_account.wait_platform_apps.metadata[0].name
-  revision_trigger = join(",", [
-    helm_release.argo_workflows_apps.metadata.revision,
-    helm_release.grafana_apps.metadata.revision,
-  ])
+  revision_trigger     = helm_release.grafana_apps.metadata.revision
 
   depends_on = [
-    helm_release.argo_workflows_apps,
     helm_release.grafana_apps,
     kubernetes_role_binding.wait_platform_apps,
   ]
 }
 
-resource "helm_release" "terraform_apply_apps" {
-  name      = "argocd-terraform-apply-apps"
+resource "helm_release" "crossplane_apps" {
+  name      = "argocd-crossplane-apps"
   namespace = "argocd"
 
   repository = "https://argoproj.github.io/argo-helm"
@@ -1453,13 +1456,13 @@ resource "helm_release" "terraform_apply_apps" {
 
   depends_on = [
     helm_release.argocd,
-    helm_release.secrets_apps,
-    module.wait_argo_workflows_and_grafana_healthy,
+    module.wait_secrets_healthy,
+    module.wait_grafana_healthy,
   ]
 
   values = [<<EOF
 applications:
-  terraform-apply-apps:
+  crossplane-apps:
     namespace: argocd
     finalizers:
       - resources-finalizer.argocd.argoproj.io
@@ -1470,13 +1473,15 @@ applications:
       path: 10-cluster/scaleway/platform-apps
       helm:
         valueFiles:
-          - values-terraform-apply.yaml
+          - values-crossplane.yaml
         parameters:
           - name: revision
             value: ${local.effective_gitops_revision}
-          # infra#76: threads THIS repo's own revision through so the
-          # terraform-apply app's gitRefParam (values-terraform-apply.yaml)
-          # can override its chart's hardcoded `gitRef: main` default.
+          # infra#76: threads THIS repo's own revision through so
+          # crossplane-config's gitRefParam (values-crossplane.yaml)
+          # overrides its chart's `gitRef: main` default -- every
+          # Workspace's git module `?ref=` then follows the infra branch
+          # under test.
           - name: infraRevision
             value: ${local.effective_infra_revision}
     destination:
@@ -1537,7 +1542,7 @@ module "wait_all_domains_healthy" {
     "argocd-config-apps",
     "grafana-apps",
     "argo-workflows-apps",
-    "terraform-apply-apps",
+    "crossplane-apps",
   ]
   service_account_name = kubernetes_service_account.wait_platform_apps.metadata[0].name
 
@@ -1559,7 +1564,7 @@ module "wait_all_domains_healthy" {
     helm_release.argocd_config_apps.metadata.revision,
     helm_release.grafana_apps.metadata.revision,
     helm_release.argo_workflows_apps.metadata.revision,
-    helm_release.terraform_apply_apps.metadata.revision,
+    helm_release.crossplane_apps.metadata.revision,
   ])
 
   depends_on = [
@@ -1574,7 +1579,7 @@ module "wait_all_domains_healthy" {
     helm_release.argocd_config_apps,
     helm_release.grafana_apps,
     helm_release.argo_workflows_apps,
-    helm_release.terraform_apply_apps,
+    helm_release.crossplane_apps,
     kubernetes_role_binding.wait_platform_apps,
   ]
 }

@@ -43,6 +43,13 @@ terraform {
       source  = "hashicorp/external"
       version = "~> 2.0"
     }
+    # infra#82 mode-1 self-heal (main.tf): probes Grafana's live
+    # service-account state. A plugin, so it works in the provider-opentofu
+    # runtime image with nothing baked in -- unlike a curl/jq shell-out.
+    http = {
+      source  = "hashicorp/http"
+      version = "~> 3.4"
+    }
   }
 }
 
@@ -56,9 +63,10 @@ terraform {
 # assume the two roots under openbao/ share one workspace name.
 # Credentials for the cross-root Scaleway state read below. Two execution
 # contexts apply this root: an admin's machine (scw CLI configured) and
-# the gitops repo's Argo Workflows terraform-apply CronWorkflow, which
-# already sets SCW_ACCESS_KEY/SCW_SECRET_KEY as env vars but had no way to
-# hand them to this data source -- confirmed live, silently returned empty
+# the in-cluster reconcile loop (Crossplane's opentofu.upbound.io/Workspace
+# for this root -- gitops repo services/platform/crossplane), which sets
+# SCW_ACCESS_KEY/SCW_SECRET_KEY as env vars -- confirmed live (against the
+# CronWorkflow this Workspace replaced), silently returned empty
 # credentials without this fallback (no error, since `scw` command
 # substitution failing just yields an empty string), which then broke the
 # cross-root state read below with a confusing "No valid credential
@@ -66,12 +74,16 @@ terraform {
 # now win when set; falling back to `scw config get` keeps the admin path
 # exactly as it was. Same fix as 11-secrets/openbao/managed/main.tf's
 # identical comment.
+#
+# Plain `printf`, not `jq -n`: the only jq dependency this root had, and the
+# provider-opentofu runtime image doesn't ship it. Scaleway access/secret
+# keys are `[A-Za-z0-9-]` only, so no JSON escaping is needed; `$(...)`
+# already strips the trailing newline `scw config get` emits.
 data "external" "scw_credentials" {
   program = ["sh", "-c", <<-EOT
-    jq -n \
-      --arg ak "$${SCW_ACCESS_KEY:-$(scw config get access-key)}" \
-      --arg sk "$${SCW_SECRET_KEY:-$(scw config get secret-key)}" \
-      '{access_key:$ak, secret_key:$sk}'
+    printf '{"access_key":"%s","secret_key":"%s"}' \
+      "$${SCW_ACCESS_KEY:-$(scw config get access-key)}" \
+      "$${SCW_SECRET_KEY:-$(scw config get secret-key)}"
   EOT
   ]
 }

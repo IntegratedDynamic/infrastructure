@@ -8,9 +8,9 @@ resource "grafana_service_account" "mcp_claude_code" {
 }
 
 resource "grafana_service_account_token" "mcp_claude_code" {
-  name                = "mcp-claude-code"
-  service_account_id  = grafana_service_account.mcp_claude_code.id
-  seconds_to_live     = var.mcp_service_account_token_ttl_days * 24 * 3600
+  name               = "mcp-claude-code"
+  service_account_id = grafana_service_account.mcp_claude_code.id
+  seconds_to_live    = var.mcp_service_account_token_ttl_days * 24 * 3600
 }
 
 # The Prometheus datasource + the ~27 default dashboards below used to come
@@ -32,9 +32,26 @@ resource "grafana_service_account_token" "mcp_claude_code" {
 # variable, not a hardcoded datasource UID (confirmed by inspecting a
 # rendered dashboard JSON), so Grafana auto-selects whichever datasource is
 # marked default.
+#
+# uid pinned to a stable literal, not left for Grafana to auto-generate.
+# infra#82 mode 2 (first hit live 2026-08-23): after a Velero PVC restore,
+# Grafana served "Prometheus" under a different random uid than the one in
+# state, so `apply` tried a plain POST /datasources for a name that already
+# existed and wedged on a 409 (the provider has no adopt-if-present
+# behavior). The Argo Workflows preflight script that used to work around
+# this with `state rm` + `import` is gone (issue #101) -- pinning the uid
+# removes the drift class instead: every snapshot taken after this change
+# carries the datasource under uid "prometheus", so any restore yields the
+# uid state already expects. `uid` is ForceNew on grafana_data_source, so
+# the very first apply of this change replaces the auto-uid datasource
+# once (harmless: dashboards resolve via the `$datasource` template var,
+# not a hardcoded uid -- see grafana_dashboard.defaults below). Residual,
+# documented in README.md: a restore from a snapshot OLDER than this change
+# still needs a one-off `tofu state rm grafana_data_source.<name>` + apply.
 resource "grafana_data_source" "prometheus" {
   type        = "prometheus"
   name        = "Prometheus"
+  uid         = "prometheus"
   url         = "http://kube-prometheus-stack-prometheus.monitoring.svc:9090"
   access_mode = "proxy"
   is_default  = true
@@ -54,6 +71,7 @@ resource "grafana_data_source" "prometheus" {
 resource "grafana_data_source" "loki" {
   type        = "loki"
   name        = "Loki"
+  uid         = "loki" # pinned -- see grafana_data_source.prometheus's comment (infra#82 mode 2)
   url         = "http://loki.monitoring.svc:3100"
   access_mode = "proxy"
 
@@ -70,6 +88,7 @@ resource "grafana_data_source" "loki" {
 resource "grafana_data_source" "tempo" {
   type        = "tempo"
   name        = "Tempo"
+  uid         = "tempo" # pinned -- see grafana_data_source.prometheus's comment (infra#82 mode 2)
   url         = "http://tempo.monitoring.svc:3200"
   access_mode = "proxy"
 
