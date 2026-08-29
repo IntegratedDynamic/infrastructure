@@ -86,7 +86,6 @@ tofu -chdir=10-cluster/local                   providers lock -platform=darwin_a
 tofu -chdir=10-cluster/scaleway                providers lock -platform=darwin_arm64 -platform=linux_amd64
 tofu -chdir=11-secrets/openbao/bootstrap        providers lock -platform=darwin_arm64 -platform=linux_amd64
 tofu -chdir=11-secrets/openbao/managed          providers lock -platform=darwin_arm64 -platform=linux_amd64
-tofu -chdir=12-monitoring/grafana/bootstrap     providers lock -platform=darwin_arm64 -platform=linux_amd64
 tofu -chdir=12-monitoring/grafana/managed       providers lock -platform=darwin_arm64 -platform=linux_amd64
 ```
 
@@ -106,7 +105,7 @@ without a renumbering cascade; `10-cluster` in particular was moved up from
 `06-monitoring`) deliberately sit **after** `10-cluster`: both only apply
 successfully once the cluster exists and gitops has deployed the tool
 they configure onto it (`05-secrets/openbao/bootstrap`'s vault provider talks
-to OpenBao's own live route, `06-monitoring/grafana/bootstrap`'s grafana
+to OpenBao's own live route, `06-monitoring/grafana/managed`'s grafana
 provider talks to Grafana's) — numbering them ahead of `10-cluster` inverted
 the apply-order convention the prefix is supposed to encode. `06` had briefly
 been the first `07`-`09` gap filled (`06-monitoring/`); that gap is open again
@@ -218,8 +217,12 @@ modules/
 12-monitoring/                 # (was 06-monitoring/, moved 2026-08-24, same
                                #   reason as 11-secrets/ above)
   grafana/                     # domain: Grafana, managed by Terraform
-                               #   (bootstrap/ + managed/, same split as
-                               #   11-secrets/openbao) — its own domain
+                               #   (just managed/ — no bootstrap/ split
+                               #   unlike 11-secrets/openbao: Grafana's
+                               #   admin password is already Terraform state
+                               #   in 11-secrets/openbao/managed, so
+                               #   managed/ authenticates as admin directly,
+                               #   no minted trust anchor. Its own domain
                                #   since 11-secrets/ is scoped to OpenBao's
                                #   own config specifically, not any tool
                                #   that happens to need IaC.

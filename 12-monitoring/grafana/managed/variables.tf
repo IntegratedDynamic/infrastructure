@@ -1,21 +1,20 @@
-# 0 = never expires (Grafana's own sentinel for seconds_to_live) — mirrors
-# service_account_token_ttl_days in 12-monitoring/grafana/bootstrap.
+# 0 = never expires (Grafana's own sentinel for seconds_to_live). Set a
+# positive value to opt into rotation of the mcp-claude-code token.
 variable "mcp_service_account_token_ttl_days" {
   description = "Days before the mcp-claude-code service account token expires. 0 = never expires."
   type        = number
   default     = 0
 }
 
-# ── Cross-root state reads (Scaleway state buckets, see 00-foundation/scaleway) ──
-
-variable "grafana_bootstrap_state_bucket" {
-  description = "Scaleway bucket holding 12-monitoring/grafana/bootstrap's remote state."
+# Grafana's admin password (kv/apps/grafana/admin's admin-password field,
+# originated by 11-secrets/openbao/managed). Supplied as the env var
+# TF_VAR_grafana_admin_password — from the ESO-synced `crossplane-grafana-admin`
+# Secret in-cluster, or `bao kv get` locally. No default, no tfvars entry:
+# it's a secret and must never land in a committed file. See version.tf.
+variable "grafana_admin_password" {
+  description = "Grafana admin password the grafana provider authenticates with (env: TF_VAR_grafana_admin_password)."
   type        = string
-}
-
-variable "grafana_bootstrap_state_key" {
-  description = "Object key for 12-monitoring/grafana/bootstrap's state within grafana_bootstrap_state_bucket."
-  type        = string
+  sensitive   = true
 }
 
 # See version.tf's provider "grafana" block for why this is a variable.

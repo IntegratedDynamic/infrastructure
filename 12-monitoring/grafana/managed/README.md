@@ -1,10 +1,20 @@
 # 12-monitoring/grafana/managed — Grafana configuration, as code
 
-Grafana's actual declarative configuration, reconciled via the `terraform`
-service account `12-monitoring/grafana/bootstrap` mints. Today that's just
-one thing (the MCP server's own service account) — this is where future
-Grafana-as-code lives: dashboards, folders, alerting, OIDC config, etc.,
-same role `11-secrets/openbao/managed` plays for OpenBao.
+Grafana's actual declarative configuration, reconciled by authenticating
+directly as Grafana's **admin** (basic auth, password owned by
+`11-secrets/openbao/managed`). This is where Grafana-as-code lives:
+service accounts, data sources, dashboards, and later folders, alerting,
+OIDC config, etc. — same role `11-secrets/openbao/managed` plays for
+OpenBao.
+
+There is no `12-monitoring/grafana/bootstrap` root: it only ever minted a
+`terraform` service-account token for this root's `grafana` provider, and
+that token could stop authenticating after a Velero restore while still
+showing valid in Grafana's own metadata (infra#82 mode 1). Authenticating
+as the admin password OpenBao already regenerates-and-repushes on every
+restore removes that failure class outright, with no chicken-and-egg
+(Grafana's admin password is already Terraform state, unlike OpenBao's
+`root_token`).
 
 ## What it creates
 
@@ -16,15 +26,13 @@ same role `11-secrets/openbao/managed` plays for OpenBao.
 - `grafana_service_account_token.mcp_claude_code` — the token, generated
   once at apply time. `seconds_to_live` from
   `var.mcp_service_account_token_ttl_days` (default `0` — never expires;
-  set a positive value to opt into rotation).
-- `vault_kv_secret_v2.grafana_mcp_token` — writes the token to
-  `kv/apps/monitoring/grafana-mcp-token`. **Not** synced into the cluster by
-  anything (no ESO ExternalSecret reads this) — the only consumer is a
-  human (fetching it directly to configure the MCP server locally), same
-  rationale as `11-secrets/openbao/managed`'s `apps/wireguard/confs`. ESO
-  wouldn't help here anyway: its job is syncing into Kubernetes Secrets, and
-  the actual consumer is a local `claude mcp` process, not a cluster
-  workload.
+  set a positive value to opt into rotation). Exposed only as a `sensitive`
+  OpenTofu output (`mcp_service_account_token`) — the sole consumer is a
+  human on their own machine registering the MCP server. Not written to
+  OpenBao / synced into the cluster: state is always current post-apply,
+  and a second copy is just something else to keep fresh (see this root's
+  `outputs.tf` for the 2026-08-14 postmortem that dropped the OpenBao
+  write).
 
 ## A note on dynamic secrets
 
@@ -32,53 +40,82 @@ A community Vault plugin exists for this
 ([`Boostport/vault-plugin-secrets-grafana`](https://github.com/Boostport/vault-plugin-secrets-grafana)) —
 it would let OpenBao mint short-lived, auto-revoked Grafana tokens on demand
 instead of this root's static, Terraform-rotated one. Deliberately not
-adopted here: it still needs this same bootstrap Admin service account as
-its own backing credential, and registering a third-party (non-official)
-plugin binary is a real change to OpenBao's own deployment (gitops repo),
-not just a Terraform resource — worth a dedicated follow-up if/when this
-grows beyond one personal-use token.
+adopted here: it still needs a standing Grafana admin credential as its own
+backing secret, and registering a third-party (non-official) plugin binary
+is a real change to OpenBao's own deployment (gitops repo), not just a
+Terraform resource — worth a dedicated follow-up if/when this grows beyond
+one personal-use token.
 
-## Self-heal (infra#82)
+## Restore-adopt (infra#82)
 
-Beyond the MCP service account, `main.tf` also (re)creates the
-`Prometheus`/`Loki`/`Tempo` data sources and the default dashboards that
-were lost when Grafana split out of `kube-prometheus-stack`.
+`main.tf` (re)creates the `Prometheus`/`Loki`/`Tempo` data sources and the
+default dashboards that were lost when Grafana split out of
+`kube-prometheus-stack`, plus the MCP service account. After a Velero PVC
+restore, Grafana can already carry any of these under ids this root's own
+state doesn't track — a plain `apply` then `POST`s a name that exists and
+wedges on a 400/409 (the provider has no adopt-if-present behaviour). Until
+issue #101 a gitops CronWorkflow preflight patched this with `state rm` +
+`import`; that hook is gone. Two mechanisms replace it, both in `main.tf`,
+neither able to oscillate in the Crossplane reconcile loop:
 
-infra#82 mode 2 (first hit 2026-08-23): after a Velero PVC restore, Grafana
-served a data source under a different random `uid` than the one in state,
-so `apply` tried a plain `POST /datasources` for a name that already
-existed and wedged on a 409. Until issue #101 a gitops CronWorkflow
-preflight worked around this with `state rm` + `import`. That's gone now;
-instead each `grafana_data_source` **pins `uid`** to a stable literal
-(`prometheus` / `loki` / `tempo`), so every snapshot carries the
-deterministic uid and any restore yields the one state expects.
+1. **Pinned `uid` on every `grafana_data_source`** (`prometheus` / `loki` /
+   `tempo`) — the [provider's own documented pattern](https://registry.terraform.io/providers/grafana/grafana/latest/docs/resources/data_source)
+   (`uid` is a first-class field and the import id). A **state-intact**
+   restore then just refreshes cleanly — every snapshot carries the
+   datasource under the id state expects. Dashboards need no pin: they use
+   `overwrite = true` (upsert by embedded uid).
 
-- `uid` is `ForceNew`, so the first apply of this change replaces the
-  auto-uid data sources once — harmless (dashboards resolve via the
-  `$datasource` template var, not a hardcoded uid).
-- Residual: a restore from a snapshot **older** than the uid-pin change
-  still lands a random uid. One-off fix:
-  `tofu state rm grafana_data_source.<name>` then re-apply. Self-limiting —
-  pre-pin snapshots age out of Velero retention.
+2. **Config-driven `import` blocks**, gated on two admin-authed
+   `data.http` probes (`api/serviceaccounts/search`, `api/datasources`).
+   When this root's **state is fresh but Grafana already carries** the SA
+   or a datasource (state rebuilt, or a `state rm`), the `import` adopts it
+   instead of `POST`ing. `import` is idempotent — a no-op once the resource
+   is in state — and carries no `replace_triggered_by`. On a truly fresh
+   Grafana the probes return nothing and the resources create normally.
+
+So every resource this root manages is restore-safe: state-intact restore →
+clean refresh (uid pins); state lost, resource live → adopt (`import`);
+both fresh → create. No human `tofu state rm` in the loop.
+
+`hashicorp/http` returns a non-2xx (401, 404, 5xx) as *data*, so an
+auth/permission problem is observable in the probe result rather than a
+plan failure. A hard *transport* failure (Grafana Service down, DNS) does
+fail the plan — the Workspace then just isn't `READY` and retries on
+provider-opentofu's backoff, and the `crossplane-apps` tier's
+`wait_grafana_healthy` gate keeps that from happening on the very first
+reconcile.
+
+- `uid` is `ForceNew` on `grafana_data_source`, so the very first apply of
+  the uid pin replaced the auto-uid data sources once — harmless (dashboards
+  resolve via the `$datasource` template var).
+- The SA **token** (`grafana_service_account_token.mcp_claude_code`) has no
+  adopt path — its secret isn't retrievable — so a state-loss restore
+  recreates it (new `.key`, re-fetch via `tofu output`); the old token is
+  left orphaned in Grafana. Low stakes for a personal MCP token.
 
 ## Credentials
 
-- **`grafana` provider**: authenticates as the `terraform` service account
-  from `12-monitoring/grafana/bootstrap`, read via
-  `data.terraform_remote_state` — see `version.tf`. Defaults to Grafana's
-  internal Service address, same address/tunnel rationale as that root's
-  own `version.tf` (infrastructure#81).
-- **`vault` provider**: reuses the same `terraform` AppRole
-  `11-secrets/openbao/managed` itself authenticates as (its policy already
-  grants `kv/data|metadata/apps/*` broadly, so writing a new path here needs
-  no OpenBao-side policy change) — see that root's `version.tf` for the
-  address/split-DNS rationale.
+- **`grafana` provider**: authenticates as Grafana's **admin** via basic
+  auth (`"admin:${var.grafana_admin_password}"`). The password —
+  `11-secrets/openbao/managed`'s `random_password.grafana_admin_password`,
+  backing `kv/apps/grafana/admin` — reaches this root as the env var
+  **`TF_VAR_grafana_admin_password`**, not a cross-root state read:
+  - **in-cluster**: the Crossplane Workspace maps it from the ESO-synced
+    Secret `crossplane-grafana-admin` (gitops
+    `services/platform/crossplane/config`, same `openbao` ClusterSecretStore
+    every other ExternalSecret uses).
+  - **locally**: `export TF_VAR_grafana_admin_password=$(bao kv get -field=admin-password kv/apps/grafana/admin)`.
+
+  `var.grafana_url` defaults to Grafana's internal Service address (via the
+  WireGuard tunnel, infrastructure#81); the in-cluster Workspace overrides
+  it with `TF_VAR_grafana_url`.
 - **S3 state backend**: same AWS-style env vars as every other root (via
   `mise.toml`'s `[env]` block).
 
 ## Apply
 
 ```bash
+export TF_VAR_grafana_admin_password=$(bao kv get -field=admin-password kv/apps/grafana/admin)  # bring the WireGuard tunnel up first
 tofu -chdir=12-monitoring/grafana/managed init
 tofu -chdir=12-monitoring/grafana/managed workspace select -or-create 12-monitoring-grafana-managed-dev
 tofu -chdir=12-monitoring/grafana/managed plan  -var-file=env/12-monitoring-grafana-managed-dev.tfvars
@@ -90,17 +127,19 @@ tofu -chdir=12-monitoring/grafana/managed apply -var-file=env/12-monitoring-graf
 In-cluster this root is reconciled continuously by Crossplane
 (`opentofu.upbound.io/Workspace` `grafana-managed`, gitops repo's
 `services/platform/crossplane`) against `main` — issue #101, replacing the
-Argo Workflows CronWorkflow. It reads `grafana/bootstrap`'s
-`service_account_token` via `terraform_remote_state`, so Crossplane's own
-backoff is what sequences it after `grafana-bootstrap` (no explicit
-ordering primitive). `deletionPolicy: Orphan` + `managementPolicies`
-without `Delete` mean Crossplane only ever creates/updates.
+Argo Workflows CronWorkflow. `TF_VAR_grafana_admin_password` /
+`TF_VAR_grafana_url` come from that chart's env wiring (the
+`crossplane-grafana-admin` ESO Secret + a literal). No cross-root state
+read and no explicit ordering primitive — Grafana just has to be reachable,
+which the `crossplane-apps` tier's `wait_grafana_healthy` gate ensures
+before the Workspace is even created. `deletionPolicy: Orphan` +
+`managementPolicies` without `Delete` mean Crossplane only ever
+creates/updates.
 
 ## Fetching the MCP token
 
 ```bash
-bao login -method=oidc   # your own OIDC admin session
-bao kv get -field=token kv/apps/monitoring/grafana-mcp-token
+tofu -chdir=12-monitoring/grafana/managed output -raw mcp_service_account_token
 ```
 
 Then register the MCP server (default `local` scope — not committed to git):
@@ -117,8 +156,7 @@ claude mcp add-json "grafana" '{"command":"uvx","args":["mcp-grafana"],"env":{"G
   tofu -chdir=12-monitoring/grafana/managed apply -replace=grafana_service_account_token.mcp_claude_code -var-file=env/12-monitoring-grafana-managed-dev.tfvars
   ```
 
-  Bumps `data_json_wo_version` isn't needed here since the resource itself
-  is replaced (new `.key` value flows through automatically) — but re-fetch
-  the token from OpenBao afterward and re-register the MCP server, the old
-  one stops working immediately.
+  The new `.key` flows through automatically — re-fetch it with
+  `tofu output -raw mcp_service_account_token` and re-register the MCP
+  server; the old one stops working immediately.
 - **Full revocation** — destroy `grafana_service_account.mcp_claude_code`.
