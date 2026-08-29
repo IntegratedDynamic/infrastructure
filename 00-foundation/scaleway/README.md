@@ -43,12 +43,12 @@ This root's own state is self-hosted here too
 (`state_buckets["foundation_scaleway"]`) — bootstrapped the same one-time
 chicken-and-egg way `00-foundation/aws` was: created while its state still
 lived in the AWS bucket, then repointed at itself and migrated with
-`terraform init -migrate-state`.
+`tofu init -migrate-state`.
 
 **Rehearsal result (2026-08-18): confirmed working.** The migration procedure
 was rehearsed end to end first against a throwaway root, `99-scratch/migration-test`
 (applied against the AWS bucket, repointed at this root's
-`state_buckets["scratch"]` bucket, moved with `terraform init -migrate-state`,
+`state_buckets["scratch"]` bucket, moved with `tofu init -migrate-state`,
 verified, then destroyed and its directory deleted from the repo — its purpose
 was purely this rehearsal). Findings:
 
@@ -63,7 +63,7 @@ was purely this rehearsal). Findings:
   `02-encryption/aws`) uses for its *real* AWS credentials. The working
   approach: pass the Scaleway key pair via `-backend-config="access_key=..."`
   / `-backend-config="secret_key=..."` (from a gitignored file, never
-  committed) at `terraform init`, leaving ambient `AWS_ACCESS_KEY_ID`/
+  committed) at `tofu init`, leaving ambient `AWS_ACCESS_KEY_ID`/
   `AWS_SECRET_ACCESS_KEY` free for a real AWS provider. Still needs
   `.github/actions/terraform/action.yml` updated to do this for CI before any
   such root migrates — out of scope for this rehearsal, in scope for the real
@@ -203,7 +203,7 @@ structurally impossible — a `backend` block can only take literal values or
 read the fixed `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` env var names
 (same hard constraint noted in "Backend keys are decoupled from paths" in
 the root `CLAUDE.md` re: `endpoints.s3` — no variables, no data sources,
-full stop). So **every `terraform init`/`plan`/`apply` run locally against a
+full stop). So **every `tofu init`/`plan`/`apply` run locally against a
 Scaleway-hosted bucket — for every root in this repo, not just this one —
 needs those two exact env vars set to your Scaleway key first**:
 

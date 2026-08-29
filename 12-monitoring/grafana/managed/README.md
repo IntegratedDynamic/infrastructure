@@ -56,13 +56,13 @@ grows beyond one personal-use token.
 ## Apply
 
 ```bash
-terraform -chdir=12-monitoring/grafana/managed init
-terraform -chdir=12-monitoring/grafana/managed workspace select -or-create 12-monitoring-grafana-managed-dev
-terraform -chdir=12-monitoring/grafana/managed plan  -var-file=env/12-monitoring-grafana-managed-dev.tfvars
-terraform -chdir=12-monitoring/grafana/managed apply -var-file=env/12-monitoring-grafana-managed-dev.tfvars
+tofu -chdir=12-monitoring/grafana/managed init
+tofu -chdir=12-monitoring/grafana/managed workspace select -or-create 12-monitoring-grafana-managed-dev
+tofu -chdir=12-monitoring/grafana/managed plan  -var-file=env/12-monitoring-grafana-managed-dev.tfvars
+tofu -chdir=12-monitoring/grafana/managed apply -var-file=env/12-monitoring-grafana-managed-dev.tfvars
 ```
 
-> Never `terraform apply`/`destroy` here without explicit approval.
+> Never `tofu apply`/`destroy` here without explicit approval.
 
 ## Fetching the MCP token
 
@@ -82,7 +82,7 @@ claude mcp add-json "grafana" '{"command":"uvx","args":["mcp-grafana"],"env":{"G
 - **Token** — force early rotation with:
 
   ```bash
-  terraform -chdir=12-monitoring/grafana/managed apply -replace=grafana_service_account_token.mcp_claude_code -var-file=env/12-monitoring-grafana-managed-dev.tfvars
+  tofu -chdir=12-monitoring/grafana/managed apply -replace=grafana_service_account_token.mcp_claude_code -var-file=env/12-monitoring-grafana-managed-dev.tfvars
   ```
 
   Bumps `data_json_wo_version` isn't needed here since the resource itself

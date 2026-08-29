@@ -76,19 +76,19 @@ authenticating without a human in the loop.
 ## Apply
 
 ```bash
-terraform -chdir=11-secrets/openbao/bootstrap init
-terraform -chdir=11-secrets/openbao/bootstrap workspace select -or-create 11-secrets-openbao-bootstrap-dev
-terraform -chdir=11-secrets/openbao/bootstrap plan  -var-file=env/11-secrets-openbao-bootstrap-dev.tfvars    # review first
-terraform -chdir=11-secrets/openbao/bootstrap apply -var-file=env/11-secrets-openbao-bootstrap-dev.tfvars    # mounts approle/, creates policy+role+secret_id
+tofu -chdir=11-secrets/openbao/bootstrap init
+tofu -chdir=11-secrets/openbao/bootstrap workspace select -or-create 11-secrets-openbao-bootstrap-dev
+tofu -chdir=11-secrets/openbao/bootstrap plan  -var-file=env/11-secrets-openbao-bootstrap-dev.tfvars    # review first
+tofu -chdir=11-secrets/openbao/bootstrap apply -var-file=env/11-secrets-openbao-bootstrap-dev.tfvars    # mounts approle/, creates policy+role+secret_id
 ```
 
-> Never `terraform apply`/`destroy` here without explicit approval.
+> Never `tofu apply`/`destroy` here without explicit approval.
 
 ## Consuming the AppRole (11-secrets/openbao/managed onward)
 
 ```bash
-terraform -chdir=11-secrets/openbao/bootstrap output -raw role_id
-terraform -chdir=11-secrets/openbao/bootstrap output -raw secret_id   # sensitive — don't paste into shell history
+tofu -chdir=11-secrets/openbao/bootstrap output -raw role_id
+tofu -chdir=11-secrets/openbao/bootstrap output -raw secret_id   # sensitive — don't paste into shell history
 ```
 
 The consuming root's `local.auto.tfvars` (per-developer, gitignored — same
@@ -105,7 +105,7 @@ token.
   stops being usable after that window. Force early rotation with:
 
   ```bash
-  terraform -chdir=11-secrets/openbao/bootstrap apply -replace=vault_approle_auth_backend_role_secret_id.terraform -var-file=env/11-secrets-openbao-bootstrap-dev.tfvars
+  tofu -chdir=11-secrets/openbao/bootstrap apply -replace=vault_approle_auth_backend_role_secret_id.terraform -var-file=env/11-secrets-openbao-bootstrap-dev.tfvars
   ```
 
   Re-run the "Consuming the AppRole" step afterward — the old `secret_id`

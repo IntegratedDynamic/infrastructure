@@ -93,13 +93,13 @@ This root creates the very bucket it then stores its state in. Bootstrap order:
 2. Apply once with **local state** — temporarily comment out the `backend "s3"`
    block in `version.tf` so the bucket gets created:
    ```bash
-   terraform -chdir=00-foundation/aws init
-   terraform -chdir=00-foundation/aws apply   # creates the bucket (billable)
+   tofu -chdir=00-foundation/aws init
+   tofu -chdir=00-foundation/aws apply   # creates the bucket (billable)
    ```
 3. Re-add the `backend "s3"` block and migrate the local state into the bucket
    it now manages:
    ```bash
-   terraform -chdir=00-foundation/aws init -migrate-state
+   tofu -chdir=00-foundation/aws init -migrate-state
    ```
 
 After that, this root's own state lives at `state-backend/terraform.tfstate`
@@ -107,7 +107,7 @@ inside the bucket, just like every other root.
 
 ## Pointing another root at this bucket
 
-Add a `backend "s3"` block to the consuming root and run `terraform init`
+Add a `backend "s3"` block to the consuming root and run `tofu init`
 (`-migrate-state` if it already has local state). Give each root a distinct
 `key` *and* `workspace_key_prefix` so its state (and workspaces) stay separate
 inside the one shared bucket.
