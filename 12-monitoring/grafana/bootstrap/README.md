@@ -64,13 +64,13 @@ Terraform-managed by `11-secrets/openbao/managed`
 ## Apply
 
 ```bash
-terraform -chdir=12-monitoring/grafana/bootstrap init
-terraform -chdir=12-monitoring/grafana/bootstrap workspace select -or-create 12-monitoring-grafana-bootstrap-dev
-terraform -chdir=12-monitoring/grafana/bootstrap plan  -var-file=env/12-monitoring-grafana-bootstrap-dev.tfvars
-terraform -chdir=12-monitoring/grafana/bootstrap apply -var-file=env/12-monitoring-grafana-bootstrap-dev.tfvars
+tofu -chdir=12-monitoring/grafana/bootstrap init
+tofu -chdir=12-monitoring/grafana/bootstrap workspace select -or-create 12-monitoring-grafana-bootstrap-dev
+tofu -chdir=12-monitoring/grafana/bootstrap plan  -var-file=env/12-monitoring-grafana-bootstrap-dev.tfvars
+tofu -chdir=12-monitoring/grafana/bootstrap apply -var-file=env/12-monitoring-grafana-bootstrap-dev.tfvars
 ```
 
-> Never `terraform apply`/`destroy` here without explicit approval.
+> Never `tofu apply`/`destroy` here without explicit approval.
 
 ## Consuming the service account (12-monitoring/grafana/managed onward)
 
@@ -84,7 +84,7 @@ bootstrap/managed pair.
 - **Token** — force early rotation with:
 
   ```bash
-  terraform -chdir=12-monitoring/grafana/bootstrap apply -replace=grafana_service_account_token.terraform -var-file=env/12-monitoring-grafana-bootstrap-dev.tfvars
+  tofu -chdir=12-monitoring/grafana/bootstrap apply -replace=grafana_service_account_token.terraform -var-file=env/12-monitoring-grafana-bootstrap-dev.tfvars
   ```
 
   Re-apply `12-monitoring/grafana/managed` afterward — the old token stops

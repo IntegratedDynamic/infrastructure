@@ -37,7 +37,7 @@ then do the manual hand-offs below for just that new entry.
 ## Manual hand-offs — hardcoded cross-repo coupling to track
 
 Nothing here talks to the gitops repo or to OpenBao directly. Every row is
-a human copying a `terraform output` value somewhere else — same "two
+a human copying a `tofu output` value somewhere else — same "two
 systems kept in sync by convention, not automation" pattern as
 `11-secrets/openbao/managed`'s `secrets_sync_github` vs. the gitops repo's
 `apps/secrets-sync/values.yaml`. Accepted for now; each row is a spot that

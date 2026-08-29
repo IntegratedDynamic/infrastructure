@@ -8,7 +8,7 @@ for the manual commands this replaces) and only survived via the raft
 snapshots restored at boot by `apps/openbao-init/`.
 
 This is not a fresh bootstrap: every resource here was **imported**, not
-created, so that after the first `terraform apply` OpenBao ended up in
+created, so that after the first `tofu apply` OpenBao ended up in
 exactly the state it was already in — as if it had been built by Terraform
 from the start. See "Reconciling on a fresh checkout" below.
 
@@ -93,7 +93,7 @@ output), so `data_json` costs nothing extra and buys real drift detection:
 - `argo_workflows_scaleway_state_credentials`
   (`apps/argo-workflows/scaleway-state-credentials`) — `SCW_ACCESS_KEY`/
   `SCW_SECRET_KEY` for the gitops repo's Argo Workflows CronWorkflow (runs
-  `terraform apply` on this very root, hourly, from inside the cluster —
+  `tofu apply` on this very root, hourly, from inside the cluster —
   see that chart's own README for why). A dedicated workload identity
   (`01-iam/workload/scaleway`'s `argo-workflows-state`,
   `data.terraform_remote_state.dns_scaleway`), not a reused state-bucket
@@ -104,7 +104,7 @@ output), so `data_json` costs nothing extra and buys real drift detection:
   (`apps/argo-workflows/openbao-managed-tfvars`) — a duplicate, JSON-encoded
   copy of `var.dex_github_connector` /
   `var.secrets_sync_github_eso_private_key` / `var.secrets_sync_github`, so
-  the CronWorkflow's own unattended `terraform apply` of THIS root can
+  the CronWorkflow's own unattended `tofu apply` of THIS root can
   satisfy those three required variables too (same admin-supplied value,
   written to a second KV path in the same apply — not a read-back of the
   "real" objects those variables also feed; see `main.tf`'s comment on this
@@ -149,8 +149,8 @@ convention, not automation.
   `11-secrets/openbao/bootstrap`'s outputs —
 
   ```bash
-  terraform -chdir=../../bootstrap/openbao output -raw role_id
-  terraform -chdir=../../bootstrap/openbao output -raw secret_id
+  tofu -chdir=../../bootstrap/openbao output -raw role_id
+  tofu -chdir=../../bootstrap/openbao output -raw secret_id
   ```
 
 - **`var.dex_github_connector`**, **`var.secrets_sync_github_eso_private_key`**:
@@ -165,8 +165,8 @@ convention, not automation.
   from `04-vpn/wireguard`'s outputs —
 
   ```bash
-  terraform -chdir=../../../04-vpn/wireguard output -raw server_private_key
-  terraform -chdir=../../../04-vpn/wireguard output -json peer_private_keys | jq -r '."ci-github-actions"'
+  tofu -chdir=../../../04-vpn/wireguard output -raw server_private_key
+  tofu -chdir=../../../04-vpn/wireguard output -json peer_private_keys | jq -r '."ci-github-actions"'
   ```
 
   Same `local.auto.tfvars` as above.
@@ -176,16 +176,16 @@ convention, not automation.
 
 ## Reconciling on a fresh checkout
 
-Resources already existing in OpenBao need one `terraform import` each, once,
+Resources already existing in OpenBao need one `tofu import` each, once,
 to attach Terraform's state to them without recreating anything — see git
 history for the exact import commands used (mount, auth backends/roles,
 policies, then each `vault_kv_secret_v2` via `<mount>/data/<name>` as the
 import ID, e.g. `kv/data/apps/dex/credentials`).
 
 ```bash
-terraform -chdir=11-secrets/openbao/managed init
-terraform -chdir=11-secrets/openbao/managed workspace select -or-create 11-secrets-openbao-managed-dev
-terraform -chdir=11-secrets/openbao/managed plan
+tofu -chdir=11-secrets/openbao/managed init
+tofu -chdir=11-secrets/openbao/managed workspace select -or-create 11-secrets-openbao-managed-dev
+tofu -chdir=11-secrets/openbao/managed plan
 ```
 
 A clean plan (zero changes across the board, including the `vault_kv_secret_v2`
@@ -196,11 +196,11 @@ write-only never looking.
 ## Apply
 
 ```bash
-terraform -chdir=11-secrets/openbao/managed plan
-terraform -chdir=11-secrets/openbao/managed apply
+tofu -chdir=11-secrets/openbao/managed plan
+tofu -chdir=11-secrets/openbao/managed apply
 ```
 
-> Never `terraform apply`/`destroy` here without explicit approval — this
+> Never `tofu apply`/`destroy` here without explicit approval — this
 > backs live authentication paths (ESO, the snapshot agent, human OIDC
 > login) and live secret content (Dex/ArgoCD/Grafana client secrets,
 > Grafana's admin password, GitHub Actions secrets). A bad apply can lock

@@ -322,7 +322,7 @@ Re-measured end-to-end (2026-08-26, live fresh bootstrap): confirmed —
 `wait_dex_healthy` and `wait_argo_workflows_and_grafana_healthy` dropped to
 9s and 16s respectively (from a 45s-3m5s range across prior baselines),
 both completing while `wait_networking_healthy` was still running. Total
-`terraform apply` came in at 12m23s versus 16m41s/18m6s baselines — a
+`tofu apply` came in at 12m23s versus 16m41s/18m6s baselines — a
 26-32% cut, matching the prediction above.
 
 ## One CRDs domain for the whole platform (2026-08-26)
@@ -573,9 +573,9 @@ Wait-module count: **10 → 7** (`wait_crds_healthy`, `wait_secrets_healthy`,
 parent Application/wave claims each child moved. `bootstrap` chart
 untouched.
 
-## Teardown: use `hard-destroy`, not soft `terraform destroy`
+## Teardown: use `hard-destroy`, not soft `tofu destroy`
 
-Confirmed live 2026-08-28: a soft `terraform destroy` of this root
+Confirmed live 2026-08-28: a soft `tofu destroy` of this root
 deadlocks. `main.tf`'s Terraform-managed namespaces (`cert-manager`,
 `external-dns`, `monitoring`) get deleted early, but `cert-manager`'s
 aggregated `APIService v1alpha1.acme.scaleway.com` (from

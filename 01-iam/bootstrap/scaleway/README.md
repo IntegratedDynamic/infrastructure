@@ -61,12 +61,12 @@ Same as the other roots:
 ## Apply
 
 ```bash
-terraform -chdir=01-iam/bootstrap/scaleway init
-terraform -chdir=01-iam/bootstrap/scaleway plan    # review first
-terraform -chdir=01-iam/bootstrap/scaleway apply   # billable: creates an IAM key
+tofu -chdir=01-iam/bootstrap/scaleway init
+tofu -chdir=01-iam/bootstrap/scaleway plan    # review first
+tofu -chdir=01-iam/bootstrap/scaleway apply   # billable: creates an IAM key
 ```
 
-> Never `terraform apply`/`destroy` here without explicit approval.
+> Never `tofu apply`/`destroy` here without explicit approval.
 
 After apply, the access key is an output; the secret key is state-only.
 
@@ -80,12 +80,12 @@ state/output — **don't paste them into your shell history or echo them**:
 # SCW_ACCESS_KEY is a public identifier, exposed as a Terraform output:
 gh secret set SCW_ACCESS_KEY \
   --repo IntegratedDynamic/infrastructure \
-  --body "$(terraform -chdir=01-iam/bootstrap/scaleway output -raw access_key)"
+  --body "$(tofu -chdir=01-iam/bootstrap/scaleway output -raw access_key)"
 
 # SCW_SECRET_KEY is sensitive — pipe it from the API key resource without printing:
 gh secret set SCW_SECRET_KEY \
   --repo IntegratedDynamic/infrastructure \
-  --body "$(terraform -chdir=01-iam/bootstrap/scaleway state show -no-color 'module.ci_identity.scaleway_iam_api_key.this' \
+  --body "$(tofu -chdir=01-iam/bootstrap/scaleway state show -no-color 'module.ci_identity.scaleway_iam_api_key.this' \
             | awk '/secret_key/ {print $3; exit}' | tr -d '\"')"
 ```
 
@@ -116,12 +116,12 @@ The API key lives entirely in this root's state.
 
 - **Automatic** — `time_rotating.api_key` expires the key after
   `var.api_key_rotation_days` (default 365). Once that window lapses, the next
-  `terraform apply` rolls the expiry forward, which (since `expires_at` is
+  `tofu apply` rolls the expiry forward, which (since `expires_at` is
   ForceNew) creates fresh key material.
 - **On demand** — force it early with:
 
   ```bash
-  terraform -chdir=01-iam/bootstrap/scaleway apply -replace='module.ci_identity.scaleway_iam_api_key.this'
+  tofu -chdir=01-iam/bootstrap/scaleway apply -replace='module.ci_identity.scaleway_iam_api_key.this'
   ```
 
 Either way the key material changes, so **re-run the `gh secret set` steps above**
