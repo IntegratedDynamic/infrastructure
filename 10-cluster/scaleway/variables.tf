@@ -92,6 +92,21 @@ variable "letsencrypt_staging" {
 #   default = "main"
 # }
 
+# Threaded into networking_resources_apps' Application (argocd.tf) as the
+# `baseDomain` Helm parameter, which gateway-config and every `*-gateway`
+# chart derive their hostnames/wildcard cert from (gitops repo). Default
+# matches today's hardcoded value everywhere -- a plain `-var-file` apply
+# (main's own workspace) sees zero behavior change. An ephemeral workspace
+# overrides this to its own real subdomain (e.g. "pr-123.scalepack.fr") so
+# its own cert-manager/external-dns never contend with main's over the same
+# hostnames -- see 10-cluster/scaleway/argocd.tf's baseDomain parameter
+# comment for the full "why".
+variable "base_domain" {
+  description = "Base domain every platform hostname (ArgoCD, Grafana, OpenBao, ...) is built from -- gitops repo's gateway-config chart and every *-gateway chart derive their hostname/wildcard cert from this."
+  type        = string
+  default     = "scalepack.fr"
+}
+
 variable "argocd_admin_password_hash" {
   description = "Pre-computed bcrypt hash of the ArgoCD admin password. When set, Infisical is not consulted."
   type        = string

@@ -1051,6 +1051,17 @@ applications:
           # (activeClusterIssuerParam: true).
           - name: activeClusterIssuer
             value: ${local.active_cluster_issuer}
+          # var.base_domain -- picked up by gateway-config AND every
+          # *-gateway chart in this Application (baseDomainParam: true on
+          # each entry in values-networking-resources.yaml). Default
+          # ("scalepack.fr") matches every chart's own hardcoded default, so
+          # main's own workspace sees zero behavior change; an ephemeral
+          # workspace overrides var.base_domain to its own real subdomain so
+          # its cert-manager/external-dns never contend with main's cluster
+          # over the same hostnames -- see variables.tf's base_domain
+          # comment for the full "why".
+          - name: baseDomain
+            value: ${var.base_domain}
     destination:
       server: https://kubernetes.default.svc
       namespace: argocd
