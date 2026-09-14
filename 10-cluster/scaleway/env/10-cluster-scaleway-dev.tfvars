@@ -1,18 +1,17 @@
 cluster_name = "scaleway-homelab"
 node_count   = 2
 
-# THROWAWAY test override — pins both repos for live validation
-# (infra#107 / gitops#58), plus gitops#57 (openbao-init restore-marker
-# fix): the first apply attempt on this branch (run 34840560961) hit the
-# PRE-EXISTING openbao-init race bug #57 already fixes -- OpenBao ended up
-# initialized-but-empty (kubernetes auth never configured), so ESO's
-# ClusterSecretStore 403'd and wait-secrets-healthy timed out at 35m. #58's
-# grafana-admin ESO path can't be validated without OpenBao actually
-# healthy, so gitops_revision now points at a throwaway branch merging
-# #57 into #58 (test/grafana-admin-auth-combined). Drop before any merge to
+# THROWAWAY test override — pins both repos for live validation.
+# infra_revision = infra PR #107 (grafana-managed auth as Grafana admin).
+# gitops_revision = gitops PR #60, the single consolidated branch (was
+# #57 openbao-init restore-marker + Sync-hook fix, #58 grafana-bootstrap
+# Workspace removal, #59 PushSecret conversionStrategy drift -- all three
+# already confirmed Healthy end-to-end on the prior throwaway
+# test/grafana-admin-auth-combined branch; re-verifying against the real
+# PR branches now that they're consolidated). Drop before any merge to
 # main; never commit this pin on main itself.
 infra_revision  = "fix/grafana-workspace-adopt-existing-sa"
-gitops_revision = "test/grafana-admin-auth-combined"
+gitops_revision = "fix/openbao-crossplane-secrets-sync"
 
 # This homelab runs on Let's Encrypt STAGING, not prod, as its standing
 # state (see var.letsencrypt_staging). Two reasons, both confirmed live:
