@@ -349,6 +349,18 @@ server:
       enabled: true
       additionalLabels:
         release: kube-prometheus-stack
+  # reloader (gitops repo's services/platform/reloader/chart, secrets-apps
+  # wave 0) auto-detects a workload's own volume/env references to a
+  # changed ConfigMap/Secret -- but argocd-server never mounts
+  # argocd-oidc-client-secret that way, it's only ever read via argocd-cm's
+  # `$argocd-oidc-client-secret:oidc.clientSecret` string substitution,
+  # invisible to that scan. This explicit annotation is the fallback for
+  # exactly that case (see argocd_config_apps' restart-hook comment above
+  # for the incident this complements): any future rotation of that
+  # secret now gets a free rolling-restart instead of relying solely on
+  # a one-shot PostSync hook.
+  deploymentAnnotations:
+    secret.reloader.stakater.com/reload: "argocd-oidc-client-secret"
   resources:
     requests:
       cpu: 10m
