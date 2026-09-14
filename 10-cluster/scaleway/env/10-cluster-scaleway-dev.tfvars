@@ -1,6 +1,12 @@
 cluster_name = "scaleway-homelab"
 node_count   = 2
 
+# THROWAWAY test override — pins both repos to the grafana-admin-auth
+# branches for live validation (infra#107 / gitops#58). Drop before any
+# merge to main; never commit this pin on main itself.
+infra_revision  = "fix/grafana-workspace-adopt-existing-sa"
+gitops_revision = "fix/grafana-workspace-adopt-existing-sa"
+
 # This homelab runs on Let's Encrypt STAGING, not prod, as its standing
 # state (see var.letsencrypt_staging). Two reasons, both confirmed live:
 #  1. gateway/cert-restore restores the scalepack.fr wildcard TLS Secret
