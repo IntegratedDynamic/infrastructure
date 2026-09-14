@@ -1245,9 +1245,30 @@ resource "helm_release" "argocd_config_apps" {
 
   timeout = 1800
 
+  # module.wait_secrets_healthy (hard, promoted from the soft
+  # depends_on = [secrets_apps] every other Tier-1-soft app keeps):
+  # services/platform/argocd-config/config's PostSync restart-hook Job
+  # (argocd-config-restart-server) bounces argocd-server so it picks up
+  # argocd-oidc-client-secret's now-resolved $-reference (ArgoCD never
+  # re-reads a $secretName:key substitution live -- only a real pod
+  # restart clears it). Confirmed live (2026-09-14): the soft depends_on
+  # only waits for Terraform's own `helm install` of secrets_apps to
+  # return, not for that Application to actually sync -- argocd-config's
+  # sync (and its one-shot, HookSucceeded-deleted restart hook) finished
+  # at 20:32:43Z, 3+ minutes before secrets-apps wave 2 actually created
+  # argocd-oidc-client-secret at 20:36:01Z. The hook fired against a
+  # not-yet-existing secret, bounced argocd-server with an empty OIDC
+  # client secret, and never got a second chance to fire -- every SSO
+  # login then failed with oauth2 "invalid_client: Invalid client
+  # credentials" for the rest of that cluster's life. dex-apps/
+  # wireguard-apps can stay on the soft tier (their consumers are
+  # long-running Deployments that keep re-reading the mounted Secret /
+  # get bounced by reloader on change); a one-shot PostSync hook has no
+  # such self-healing, so it needs the real health-wait like
+  # networking-resources-apps' ExternalSecret consumers do above.
   depends_on = [
     helm_release.argocd,
-    helm_release.secrets_apps,
+    module.wait_secrets_healthy,
   ]
 
   values = [<<EOF
