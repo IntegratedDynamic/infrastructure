@@ -53,7 +53,7 @@ spec:
       # skipCrds/dedicated-CRDs-Application split for kube-prometheus-stack.
       skipCrds: true
       {{- end }}
-      {{- if or .syncWaveLabelPaths .gitRefParam .activeClusterIssuerParam .baseDomainParam }}
+      {{- if or .syncWaveLabelPaths .gitRefParam .activeClusterIssuerParam .hostSuffixParam }}
       parameters:
         {{- if .syncWaveLabelPaths }}
         # Same anti-affinity wave-label injection as
@@ -82,14 +82,15 @@ spec:
         - name: activeClusterIssuer
           value: {{ $.Values.activeClusterIssuer | quote }}
         {{- end }}
-        {{- if .baseDomainParam }}
-        # infra repo's var.base_domain (argocd.tf's networking_resources_apps
-        # values block) -- overrides this chart's own baseDomain default
-        # (scalepack.fr) so an ephemeral cluster workspace gets its own real
-        # subdomain instead of contending with main's cluster over the same
-        # hostnames. See variables.tf's base_domain comment for the full "why".
-        - name: baseDomain
-          value: {{ $.Values.baseDomain | quote }}
+        {{- if .hostSuffixParam }}
+        # infra repo's var.env_suffix / local.host_suffix (argocd.tf's
+        # networking_resources_apps values block) -- overrides this chart's
+        # own hostSuffix default ("") so an ephemeral cluster workspace's
+        # hostnames don't collide with main's cluster (or another
+        # concurrent ephemeral one). See variables.tf's env_suffix comment
+        # for the full "why".
+        - name: hostSuffix
+          value: {{ $.Values.hostSuffix | quote }}
         {{- end }}
       {{- end }}
 
