@@ -92,6 +92,24 @@ variable "letsencrypt_staging" {
 #   default = "main"
 # }
 
+# Threaded into networking_resources_apps' Application (argocd.tf) as the
+# `hostSuffix` Helm parameter, which every `*-gateway` chart appends to its
+# own hostname (gitops repo). Deliberately generic, not "pr_number" -- in
+# practice the ephemeral workflow (scaleway-ephemeral.yml) always sets this
+# to "pr-<number>", but nothing here cares what the string actually is,
+# only that it's unique per concurrent ephemeral cluster. Empty by default
+# (main's own workspace): zero behavior change, every hostname stays
+# exactly what it is today (e.g. "argocd.scalepack.fr"). When set, every
+# hostname gets "-${var.env_suffix}" appended (e.g.
+# "argocd-pr-123.scalepack.fr") -- a flat, single-DNS-label suffix, not a
+# nested subdomain, so it stays covered by gateway-config's existing
+# *.scalepack.fr wildcard cert with zero change to that chart.
+variable "env_suffix" {
+  description = "Pseudo-random unique suffix identifying this cluster's environment (e.g. \"pr-123\"). Empty for the main/dev workspace. When set, every platform hostname (ArgoCD, Grafana, OpenBao, ...) gets \"-<env_suffix>\" appended so this cluster's hostnames never collide with another concurrently-running one."
+  type        = string
+  default     = ""
+}
+
 variable "argocd_admin_password_hash" {
   description = "Pre-computed bcrypt hash of the ArgoCD admin password. When set, Infisical is not consulted."
   type        = string

@@ -53,7 +53,7 @@ spec:
       # skipCrds/dedicated-CRDs-Application split for kube-prometheus-stack.
       skipCrds: true
       {{- end }}
-      {{- if or .syncWaveLabelPaths .gitRefParam .activeClusterIssuerParam }}
+      {{- if or .syncWaveLabelPaths .gitRefParam .activeClusterIssuerParam .hostSuffixParam }}
       parameters:
         {{- if .syncWaveLabelPaths }}
         # Same anti-affinity wave-label injection as
@@ -81,6 +81,16 @@ spec:
         # letsencrypt-staging's much higher rate limit instead.
         - name: activeClusterIssuer
           value: {{ $.Values.activeClusterIssuer | quote }}
+        {{- end }}
+        {{- if .hostSuffixParam }}
+        # infra repo's var.env_suffix / local.host_suffix (argocd.tf's
+        # networking_resources_apps values block) -- overrides this chart's
+        # own hostSuffix default ("") so an ephemeral cluster workspace's
+        # hostnames don't collide with main's cluster (or another
+        # concurrent ephemeral one). See variables.tf's env_suffix comment
+        # for the full "why".
+        - name: hostSuffix
+          value: {{ $.Values.hostSuffix | quote }}
         {{- end }}
       {{- end }}
 

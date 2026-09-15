@@ -529,6 +529,15 @@ locals {
   # gateway-config's own child Application via its activeClusterIssuerParam
   # flag (values-networking-resources.yaml).
   active_cluster_issuer = var.letsencrypt_staging ? "letsencrypt-staging" : "letsencrypt-prod"
+
+  # var.env_suffix (see that variable's own comment) -- threaded into
+  # networking_resources_apps' own Application parameters below as
+  # `hostSuffix`, same pattern as active_cluster_issuer above. Empty stays
+  # empty (main's own workspace, zero behavior change); a non-empty value
+  # gets the leading "-" prepended once here so every *-gateway chart just
+  # appends this local verbatim instead of each reimplementing the
+  # empty-vs-non-empty branch.
+  host_suffix = var.env_suffix != "" ? "-${var.env_suffix}" : ""
 }
 
 # ── Tier -1: crds-apps, every CRD-only chart across the whole platform ──────
@@ -1051,6 +1060,16 @@ applications:
           # (activeClusterIssuerParam: true).
           - name: activeClusterIssuer
             value: ${local.active_cluster_issuer}
+          # var.env_suffix / local.host_suffix (see variables.tf's
+          # env_suffix comment) -- picked up by every *-gateway chart in
+          # this Application (hostSuffixParam: true on each entry in
+          # values-networking-resources.yaml), NOT gateway-config itself:
+          # a flat "-<suffix>" appended to an app's hostname (e.g.
+          # "argocd-pr-123.scalepack.fr") is still just one DNS label under
+          # scalepack.fr, so it stays covered by gateway-config's existing
+          # *.scalepack.fr wildcard with no change to that chart at all.
+          - name: hostSuffix
+            value: ${local.host_suffix}
     destination:
       server: https://kubernetes.default.svc
       namespace: argocd
