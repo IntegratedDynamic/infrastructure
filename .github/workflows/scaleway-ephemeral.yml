@@ -90,6 +90,7 @@ jobs:
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          EVENT_ACTION: ${{ github.event.action }}
         run: |
           set -euo pipefail
           slug="pr-${PR_NUMBER}"
@@ -103,7 +104,7 @@ jobs:
             echo "env_suffix     = \"${slug}\""
           } >> "10-cluster/scaleway/env/${tfvars}"
           echo "tfvars=${tfvars}" >> "$GITHUB_OUTPUT"
-          if [ "${{ github.event.action }}" = "closed" ] || [ "${{ github.event.action }}" = "unlabeled" ]; then
+          if [ "$EVENT_ACTION" = "closed" ] || [ "$EVENT_ACTION" = "unlabeled" ]; then
             echo "command=hard-destroy" >> "$GITHUB_OUTPUT"
           else
             echo "command=apply" >> "$GITHUB_OUTPUT"
