@@ -92,6 +92,53 @@ variable "letsencrypt_staging" {
 #   default = "main"
 # }
 
+# Threaded into networking_resources_apps' Application (argocd.tf) as the
+# `hostSuffix` Helm parameter, which every `*-gateway` chart appends to its
+# own hostname (gitops repo). Deliberately generic, not "pr_number" -- in
+# practice the ephemeral workflow (scaleway-ephemeral.yml) always sets this
+# to "pr-<number>", but nothing here cares what the string actually is,
+# only that it's unique per concurrent ephemeral cluster. Empty by default
+# (main's own workspace): zero behavior change, every hostname stays
+# exactly what it is today (e.g. "argocd.scalepack.fr"). When set, every
+# hostname gets "-${var.env_suffix}" appended (e.g.
+# "argocd-pr-123.scalepack.fr") -- a flat, single-DNS-label suffix, not a
+# nested subdomain, so it stays covered by gateway-config's existing
+# *.scalepack.fr wildcard cert with zero change to that chart.
+# nullable = false: argocd.tf's local.host_suffix only tests `!= ""`, which
+# would silently treat an explicit `env_suffix = null` override as non-empty
+# (null != "" is true in Terraform) and then crash deep in a string
+# interpolation ("-${null}" errors: "Cannot include a null value in a string
+# template") instead of failing clearly, or degrading gracefully, at the
+# boundary. Confirmed live (isolated repro): with both nullable = false and
+# this default set, OpenTofu silently substitutes the default ("") for an
+# explicit null override rather than erroring -- so local.host_suffix's
+# existing `!= ""` check is already correct and sufficient, because null can
+# no longer reach it as null at all.
+variable "env_suffix" {
+  description = "Pseudo-random unique suffix identifying this cluster's environment (e.g. \"pr-123\"). Empty for the main/dev workspace. When set, every platform hostname (ArgoCD, Grafana, OpenBao, ...) gets \"-<env_suffix>\" appended so this cluster's hostnames never collide with another concurrently-running one."
+  type        = string
+  default     = ""
+  nullable    = false
+}
+
+# Controls whether module.wait_all_domains_healthy (argocd.tf, moved to the
+# very end of this file's resource graph -- see that module's own comment)
+# actually runs. Confirmed live 2026-09-16 (ephemeral cluster pr-109):
+# crossplane-apps' own tofu-apply-in-a-Workspace loop (11-secrets/openbao
+# /managed, 12-monitoring/grafana/{bootstrap,managed}) takes far longer to
+# first-converge than every other domain -- fine to wait out on main's own
+# workspace (a genuine "the whole platform, including the slow stuff, is
+# done" confirmation), but not worth paying for on every ephemeral-cluster
+# test run, where the point is usually just "did the core platform + gitops
+# tree come up", not crossplane specifically. Default true: main's own
+# workspace keeps today's behavior unchanged; the ephemeral workflow
+# (scaleway-ephemeral.yml) sets this to false in its generated tfvars.
+variable "wait_all_domains_healthy" {
+  description = "Whether to run the final module.wait_all_domains_healthy gate (waits for every platform domain, crossplane-apps included, to be Synced+Healthy) at the end of apply. true for main's own workspace; the ephemeral workflow sets this false to skip crossplane's slow first-convergence."
+  type        = bool
+  default     = true
+}
+
 variable "argocd_admin_password_hash" {
   description = "Pre-computed bcrypt hash of the ArgoCD admin password. When set, Infisical is not consulted."
   type        = string

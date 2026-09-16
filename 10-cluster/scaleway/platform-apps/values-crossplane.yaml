@@ -6,8 +6,9 @@
 # Two child Applications, ordered by this domain's own sync-waves:
 #  - wave 0: crossplane-core (the operator). Must be Healthy before wave 1.
 #  - wave 1: crossplane-config -- the Provider (ships the Workspace CRD),
-#    ProviderConfig and the three Workspace CRs. gitRefParam: true threads
-#    var.infra_revision into every Workspace's git module `?ref=`, so a
+#    ProviderConfig and the three Workspace CRs. valueParams (gitRef, from
+#    infraRevision) threads var.infra_revision into every Workspace's git
+#    module `?ref=`, so a
 #    paired infra/gitops feature-branch pair reconciles the infra branch
 #    under test -- the same override the retired terraform-apply chart's
 #    `gitRef` used (infra#76).
@@ -20,4 +21,4 @@
 # over the CronWorkflow's wave-timed one-shot (ties into #93).
 apps:
   - {name: crossplane-core, namespace: crossplane-system, chartPath: services/platform/crossplane/chart, valueFile: values-scaleway.yaml, wave: "0"}
-  - {name: crossplane-config, namespace: crossplane-system, chartPath: services/platform/crossplane/config, valueFile: values-scaleway.yaml, wave: "1", gitRefParam: true}
+  - {name: crossplane-config, namespace: crossplane-system, chartPath: services/platform/crossplane/config, valueFile: values-scaleway.yaml, wave: "1", valueParams: [{name: gitRef, valueFrom: infraRevision}]}

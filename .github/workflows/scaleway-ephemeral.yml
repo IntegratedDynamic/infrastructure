@@ -1,0 +1,176 @@
+
+name: OpenTofu — Scaleway ephemeral cluster
+
+run-name: "OpenTofu ${{ (github.event.action == 'closed' || github.event.action == 'unlabeled') && 'hard-destroy' || 'apply' }} — Ephemeral Cluster pr-${{ github.event.pull_request.number }} @ ${{ github.event.pull_request.head.ref }}"
+
+# Companion to scaleway.yml's manual workflow_dispatch path (iteration 1,
+# unchanged, still the proven route for main's own 10-cluster-scaleway-dev
+# workspace). This is iteration 2: a PR on THIS repo, carrying the
+# `ephemeral-cluster` label, gets its own full copy of the homelab cluster in
+# its own OpenTofu workspace (pr-<number>) and a "-pr-<number>" suffix on
+# every platform hostname (see 10-cluster/scaleway/variables.tf's
+# env_suffix) -- so it never contends with main's live cluster over DNS
+# records, the LB, or the wildcard TLS cert. Opt-in via the label (not every
+# PR -- a Kapsule cluster + node pool + LB is real money, see this repo's own
+# CLAUDE.md "Live-cluster testing discipline"): apply on
+# opened/synchronize/reopened/labeled while the label is present,
+# hard-destroy on closed or on the label being removed.
+#
+# hard-destroy (not a graceful destroy) on cleanup: this cluster never holds
+# anything worth a graceful in-cluster teardown -- same rationale
+# scaleway.yml's own `command` input already documents for the disposable
+# homelab cluster in general.
+#
+# No new state bucket, no new IAM identity: the generated tfvars only ever
+# points at the SAME bucket/state-backend identity scaleway.yml uses
+# (id-terraform-state-10-cluster-scaleway) -- a fresh OpenTofu workspace is
+# just a new key under that same bucket, and the cross-root credential reads
+# (backup/openbao-unseal/dns state) are shared, unmodified, read-only
+# lookups every workspace can use identically.
+#
+# Two jobs, not one: this tfvars file drives a real apply/destroy of paid
+# cloud resources, so it's uploaded as its own build artifact (the actual
+# bytes tofu reads, downloadable from the run summary for as long as it's
+# retained) instead of only existing implicitly on one job's disposable
+# runner -- generate-tfvars needs no Scaleway credentials at all (pure PR
+# metadata), so splitting it out also keeps the `environment: scaleway`
+# secrets scoped to just the job that actually needs them.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled, closed]
+
+concurrency:
+  # Per-PR, not per-ref: synchronize (new commits) and labeled/unlabeled
+  # events on the same PR must serialize against each other and against the
+  # eventual close/destroy -- never cancel mid-flight (same reasoning as
+  # scaleway.yml's own group).
+  group: scaleway-ephemeral-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  generate-tfvars:
+    # unlabeled's own payload already reflects the label's REMOVAL -- it's
+    # gone from pull_request.labels by the time this evaluates, so the
+    # `contains` check alone would never fire the destroy this event is
+    # meant to trigger. github.event.label is the one exception: on a
+    # labeled/unlabeled event it's always the specific label that just
+    # changed, so this second clause catches exactly "ephemeral-cluster was
+    # the one just removed" without matching on some unrelated label change.
+    # Gating here (not on the terraform job below) is enough -- a skipped
+    # dependency skips its dependents too.
+    if: >-
+      contains(github.event.pull_request.labels.*.name, 'ephemeral-cluster') ||
+      (github.event.action == 'unlabeled' && github.event.label.name == 'ephemeral-cluster')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      tfvars: ${{ steps.vars.outputs.tfvars }}
+      command: ${{ steps.vars.outputs.command }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      # Real state key/workspace, not a throwaway name -- env/*.tfvars'
+      # filename (minus .tfvars) IS the OpenTofu workspace name, same
+      # convention this repo's CLAUDE.md documents for every other root.
+      # Generated fresh every run (never committed): the three appended keys
+      # don't exist in the dev tfvars today, so appending is safe -- no
+      # duplicate-key error.
+      - name: Generate ephemeral tfvars
+        id: vars
+        shell: bash
+        working-directory: 10-cluster/scaleway/env
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          EVENT_ACTION: ${{ github.event.action }}
+        run: |
+          set -euo pipefail
+          slug="pr-${PR_NUMBER}"
+          tfvars="10-cluster-scaleway-${slug}.tfvars"
+          cp "10-cluster-scaleway-dev.tfvars" "${tfvars}"
+          # cluster_name already exists in the dev tfvars (line 1) -- HCL
+          # rejects a duplicate attribute, so this overrides it IN PLACE
+          # instead of appending a second one (confirmed live 2026-09-16:
+          # `tofu apply` failed immediately, before touching Scaleway at
+          # all, with "Attribute redefined ... already set at
+          # env/10-cluster-scaleway-pr-109.tfvars:1,1-13"). infra_revision
+          # and env_suffix have no such collision -- dev tfvars never sets
+          # either -- so those two stay plain appends below.
+          sed -i "s/^cluster_name.*/cluster_name = \"${slug}\"/" "${tfvars}"
+          {
+            echo ""
+            echo "# Generated by .github/workflows/scaleway-ephemeral.yml -- never committed."
+            echo "infra_revision = \"${HEAD_REF}\""
+            echo "env_suffix     = \"${slug}\""
+            # var.wait_all_domains_healthy (see that variable's own
+            # comment) -- crossplane-apps' own tofu-apply-in-a-Workspace
+            # loop takes far longer to first-converge than everything
+            # else, and an ephemeral run just wants the core platform up
+            # fast, not a guarantee that crossplane specifically finished
+            # too. Confirmed live 2026-09-16 (ephemeral cluster pr-109).
+            echo "wait_all_domains_healthy = false"
+          } >> "${tfvars}"
+          echo "tfvars=${tfvars}" >> "$GITHUB_OUTPUT"
+          if [ "$EVENT_ACTION" = "closed" ] || [ "$EVENT_ACTION" = "unlabeled" ]; then
+            echo "command=hard-destroy" >> "$GITHUB_OUTPUT"
+          else
+            echo "command=apply" >> "$GITHUB_OUTPUT"
+          fi
+
+      # The actual bytes tofu will read for a real apply/destroy of paid
+      # cloud resources -- worth a durable, downloadable record beyond this
+      # job's own disposable runner, especially since the file itself is
+      # never committed. Short retention: a throwaway per-PR file, not
+      # worth the default 90-day window.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ steps.vars.outputs.tfvars }}
+          path: 10-cluster/scaleway/env/${{ steps.vars.outputs.tfvars }}
+          retention-days: 14
+
+  terraform:
+    needs: generate-tfvars
+    runs-on: ubuntu-latest
+    # Same as scaleway.yml -- identical platform, identical from-scratch
+    # convergence time.
+    timeout-minutes: 45
+    # Same GitHub environment as scaleway.yml -- reuses the same
+    # SCW_*/SCALEWAY_STATE_* secrets, no new identity needed per ephemeral
+    # workspace. Scoped to just this job -- generate-tfvars above needs none
+    # of it.
+    environment: scaleway
+    permissions:
+      contents: read
+    env:
+      SCW_ACCESS_KEY: ${{ secrets.SCW_ACCESS_KEY }}
+      SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
+      SCALEWAY_STATE_ACCESS_KEY: ${{ secrets.SCALEWAY_STATE_ACCESS_KEY }}
+      SCALEWAY_STATE_SECRET_KEY: ${{ secrets.SCALEWAY_STATE_SECRET_KEY }}
+      SCW_DEFAULT_ORGANIZATION_ID: ${{ vars.SCW_DEFAULT_ORGANIZATION_ID }}
+      SCW_DEFAULT_PROJECT_ID: ${{ vars.SCW_DEFAULT_PROJECT_ID }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ needs.generate-tfvars.outputs.tfvars }}
+          path: 10-cluster/scaleway/env
+
+      - uses: ./.github/actions/terraform
+        with:
+          root: 10-cluster/scaleway
+          tfvars-file: ${{ needs.generate-tfvars.outputs.tfvars }}
+          command: ${{ needs.generate-tfvars.outputs.command }}
+          state-backend: scaleway
+          infisical-oidc-audience: '' # this root doesn't consume Infisical

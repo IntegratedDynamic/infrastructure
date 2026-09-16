@@ -8,20 +8,27 @@ revision: main
 
 # THIS repo's (infrastructure) own revision, i.e. var.infra_revision --
 # distinct from `revision` above (that one's the gitops repo's ref).
-# Consumed by apps whose `gitRefParam: true` (see templates/apps.yaml) --
-# today just crossplane-config, which threads it into every provider-opentofu
-# Workspace's git module `?ref=` (infra#76: the retired terraform-apply
-# chart had `gitRef` hardcoded to "main" independent of infra_revision, so a
-# paired infra/gitops feature branch pair silently read infra's main
-# instead of the branch under test).
+# Consumed by apps opting into `valueParams: [{name: gitRef, valueFrom:
+# infraRevision}]` (see templates/apps.yaml) -- today just crossplane-config,
+# which threads it into every provider-opentofu Workspace's git module
+# `?ref=` (infra#76: the retired terraform-apply chart had `gitRef`
+# hardcoded to "main" independent of infra_revision, so a paired
+# infra/gitops feature branch pair silently read infra's main instead of
+# the branch under test).
 infraRevision: main
 
 # Populated per-domain by values-secrets.yaml / values-monitoring.yaml /
 # values-backups.yaml / values-crossplane.yaml. Each entry: {name,
 # namespace, chartPath, valueFile, wave, skipCrds?, syncWaveLabelPaths?,
-# gitRefParam?} — same shape as gitops repo's bootstrap/values.yaml
+# valueParams?} — same shape as gitops repo's bootstrap/values.yaml
 # scalewayApps list (this chart's templates/apps.yaml renders it the same
 # way). wave here is domain-local (parallel across secrets/monitoring/
 # backups, ordered only within one domain) — NOT the same numbering the
-# gitops repo's bootstrap chart uses for its own remaining apps.
+# gitops repo's bootstrap chart uses for its own remaining apps. valueParams
+# is a generic list of {name, valueFrom} pairs -- templates/apps.yaml
+# resolves each `valueFrom` as a lookup into this values file itself (e.g.
+# `infraRevision` above, or `activeClusterIssuer`/`hostSuffix`, both
+# supplied per-Application by argocd.tf, not defaulted here) and emits one
+# Helm parameter `name: value` per pair -- add a future override by adding
+# a values key + a {name, valueFrom} entry, no template change needed.
 apps: []
