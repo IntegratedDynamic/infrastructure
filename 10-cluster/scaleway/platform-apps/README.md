@@ -571,7 +571,7 @@ webhook-serving readiness.
 | **1 — Grafana** | soft `secrets_apps` + `module.wait_backups_healthy` (own PVC restore) | `grafana-apps` |
 | **1 — Net-resources + gateways** | `module.wait_networking_controllers_healthy` + `module.wait_secrets_healthy` + `module.wait_backups_healthy` (all hard) | `networking-resources-apps`: w0 `gateway-config`, `external-dns` → w1 every `*-gateway` HTTPRoute (`dex`/`grafana`/`argocd-config`/`argo-workflows`/`openbao`) |
 | **2-chain** (unchanged) | `wait_dex_healthy` → `argo-workflows-apps`; `wait_argo_workflows_and_grafana_healthy` → `terraform-apply-apps` | unchanged |
-| **Final** | `module.wait_all_domains_healthy` (12 top-level apps now, was 15) → `helm_release.argocd_apps` (bootstrap) → `wait_bootstrap_healthy` | unchanged mechanism |
+| **Final** | `helm_release.argocd_apps` (bootstrap) → `wait_bootstrap_healthy` → `module.wait_all_domains_healthy` (12 apps, optional) | reordered 2026-09-16, see below |
 
 Wait-module count: **10 → 7** (`wait_crds_healthy`, `wait_secrets_healthy`,
 `wait_backups_healthy`, `wait_networking_controllers_healthy`,
@@ -579,6 +579,21 @@ Wait-module count: **10 → 7** (`wait_crds_healthy`, `wait_secrets_healthy`,
 `wait_all_domains_healthy`). No gitops-repo chart changes — only which
 parent Application/wave claims each child moved. `bootstrap` chart
 untouched.
+
+**2026-09-16: `wait_all_domains_healthy` moved to the very end, and made
+optional (`var.wait_all_domains_healthy`, default `true`).** It used to run
+*before* `helm_release.argocd_apps`, gating bootstrap's own Application
+creation on every domain (crossplane-apps included) being Healthy first.
+Confirmed live (ephemeral cluster pr-109): crossplane-apps' own
+tofu-apply-in-a-Workspace loop (11-secrets/openbao/managed,
+12-monitoring/grafana/{bootstrap,managed}) takes far longer to
+first-converge than everything else, and bootstrap's own Application tree
+reads nothing from the other platform domains — so there was no
+correctness reason for its creation to wait on all of them. Now it runs
+LAST, after bootstrap itself is confirmed Healthy, as a final "the whole
+platform, slow stuff included, is truly done converging" check — skippable
+via `var.wait_all_domains_healthy = false` for a workspace (the ephemeral
+one) that just wants the core platform up fast.
 
 ## Teardown: use `hard-destroy`, not soft `tofu destroy`
 

@@ -435,10 +435,15 @@ resource "helm_release" "argocd_apps" {
   # exceed 5 minutes.
   timeout = 1800
 
-  # module.wait_all_domains_healthy (below) is the real Terraform-enforced
-  # prerequisite: bootstrap's Application must not even be created until
-  # every platform domain is Healthy — see platform-apps/README.md.
-  depends_on = [helm_release.argocd, module.wait_all_domains_healthy]
+  # module.wait_all_domains_healthy no longer gates this (2026-09-16 --
+  # moved to the very end of this file, after kubernetes_job_v1
+  # .wait_bootstrap_healthy below, and made optional via
+  # var.wait_all_domains_healthy). bootstrap's own Application doesn't
+  # actually read anything from the other platform domains, so there was
+  # no correctness reason for its creation to wait on all of them --
+  # crossplane-apps included -- being Healthy first. See that module's own
+  # comment (end of this file) for the full "why" this moved.
+  depends_on = [helm_release.argocd]
 
   values = [<<EOF
 applications:
@@ -529,6 +534,15 @@ locals {
   # gateway-config's own child Application via its activeClusterIssuerParam
   # flag (values-networking-resources.yaml).
   active_cluster_issuer = var.letsencrypt_staging ? "letsencrypt-staging" : "letsencrypt-prod"
+
+  # var.env_suffix (see that variable's own comment) -- threaded into
+  # networking_resources_apps' own Application parameters below as
+  # `hostSuffix`, same pattern as active_cluster_issuer above. Empty stays
+  # empty (main's own workspace, zero behavior change); a non-empty value
+  # gets the leading "-" prepended once here so every *-gateway chart just
+  # appends this local verbatim instead of each reimplementing the
+  # empty-vs-non-empty branch.
+  host_suffix = var.env_suffix != "" ? "-${var.env_suffix}" : ""
 }
 
 # ── Tier -1: crds-apps, every CRD-only chart across the whole platform ──────
@@ -1051,6 +1065,16 @@ applications:
           # (activeClusterIssuerParam: true).
           - name: activeClusterIssuer
             value: ${local.active_cluster_issuer}
+          # var.env_suffix / local.host_suffix (see variables.tf's
+          # env_suffix comment) -- picked up by every *-gateway chart in
+          # this Application (hostSuffixParam: true on each entry in
+          # values-networking-resources.yaml), NOT gateway-config itself:
+          # a flat "-<suffix>" appended to an app's hostname (e.g.
+          # "argocd-pr-123.scalepack.fr") is still just one DNS label under
+          # scalepack.fr, so it stays covered by gateway-config's existing
+          # *.scalepack.fr wildcard with no change to that chart at all.
+          - name: hostSuffix
+            value: ${local.host_suffix}
     destination:
       server: https://kubernetes.default.svc
       namespace: argocd
@@ -1533,91 +1557,6 @@ EOF
   ]
 }
 
-# The Terraform-enforced prerequisite itself: every platform domain must
-# reach Healthy before bootstrap's own Application resource is even created
-# (see that resource's depends_on above) — ArgoCD has no native way to
-# express "wait for these independent top-level Applications" (sync-wave
-# doesn't cross Application boundaries), so this is enforced as a real
-# Terraform apply-order dependency instead. Factored into the
-# wait-argocd-apps-healthy module (infra#84 follow-up) once the platform-apps
-# DAG grew past the original flat "four domains in parallel, then bootstrap"
-# shape — this is now the FINAL gate in that DAG, not the only one; see
-# platform-apps/README.md for the full DAG and the other, narrower gates
-# (module "wait_networking_controllers_healthy", "wait_secrets_healthy",
-# "wait_backups_healthy", "wait_dex_healthy", etc.) that sit between
-# individual domains. Named for what it now actually checks — every
-# domain, not just the original four "platform apps".
-#
-# app_names lists every top-level domain Application by name, not just the
-# DAG's leaves: checking leaves alone would work (a leaf can't be Healthy
-# without its own ancestors having already succeeded), but listing
-# everything explicitly is the same defensive, easy-to-audit style the
-# original four-app version of this check already used — a leaf-only list
-# would be a subtler invariant to keep correct as domains are added/removed.
-# The 2026-08-27 merges (standalone-apps folded into secrets-apps' wave 0,
-# eso-data-apps into its wave 2, restore-apps into backups-apps' wave 1,
-# gateways-apps into networking-resources-apps' wave 1) removed three
-# entries here — the merged children are covered transitively via each
-# surviving parent Application's own recursive health
-# (resource.customizations.health.argoproj.io_Application).
-module "wait_all_domains_healthy" {
-  source = "./modules/wait-argocd-apps-healthy"
-
-  job_name = "wait-all-domains-healthy"
-  app_names = [
-    "crds-apps",
-    "secrets-apps",
-    "monitoring-apps",
-    "backups-apps",
-    "networking-controllers-apps",
-    "networking-resources-apps",
-    "wireguard-apps",
-    "dex-apps",
-    "argocd-config-apps",
-    "grafana-apps",
-    "argo-workflows-apps",
-    "crossplane-apps",
-  ]
-  service_account_name = kubernetes_service_account.wait_platform_apps.metadata[0].name
-
-  # Forces a fresh Job whenever ANY watched domain is redeployed, and
-  # supplies the implicit Terraform dependency on all of them — see the
-  # module's own revision_trigger description. Joining every domain's own
-  # revision means a change to any one of them alone is enough to trigger a
-  # fresh Job, same "re-run the wait on redeploy" behavior the original
-  # single-domain PLATFORM_APPS_REVISION env var had.
-  revision_trigger = join(",", [
-    helm_release.crds_apps.metadata.revision,
-    helm_release.secrets_apps.metadata.revision,
-    helm_release.monitoring_apps.metadata.revision,
-    helm_release.backups_apps.metadata.revision,
-    helm_release.networking_controllers_apps.metadata.revision,
-    helm_release.networking_resources_apps.metadata.revision,
-    helm_release.wireguard_apps.metadata.revision,
-    helm_release.dex_apps.metadata.revision,
-    helm_release.argocd_config_apps.metadata.revision,
-    helm_release.grafana_apps.metadata.revision,
-    helm_release.argo_workflows_apps.metadata.revision,
-    helm_release.crossplane_apps.metadata.revision,
-  ])
-
-  depends_on = [
-    helm_release.crds_apps,
-    helm_release.secrets_apps,
-    helm_release.monitoring_apps,
-    helm_release.backups_apps,
-    helm_release.networking_controllers_apps,
-    helm_release.networking_resources_apps,
-    helm_release.wireguard_apps,
-    helm_release.dex_apps,
-    helm_release.argocd_config_apps,
-    helm_release.grafana_apps,
-    helm_release.argo_workflows_apps,
-    helm_release.crossplane_apps,
-    kubernetes_role_binding.wait_platform_apps,
-  ]
-}
-
 # Confirmed live (2026-08-25): without this, `terraform apply` reports
 # success the moment helm_release.argocd_apps creates the bootstrap
 # Application *object* — Helm's own --wait readiness checks understand
@@ -1698,5 +1637,111 @@ resource "kubernetes_job_v1" "wait_bootstrap_healthy" {
   depends_on = [
     helm_release.argocd_apps,
     kubernetes_role_binding.wait_platform_apps,
+  ]
+}
+
+# The Terraform-enforced "is EVERY platform domain actually healthy"
+# check — ArgoCD has no native way to express "wait for these independent
+# top-level Applications" (sync-wave doesn't cross Application boundaries),
+# so this is enforced as a real Terraform apply-order dependency instead.
+# Factored into the wait-argocd-apps-healthy module (infra#84 follow-up)
+# once the platform-apps DAG grew past the original flat "four domains in
+# parallel, then bootstrap" shape; see platform-apps/README.md for the
+# full DAG and the other, narrower gates (module
+# "wait_networking_controllers_healthy", "wait_secrets_healthy",
+# "wait_backups_healthy", "wait_dex_healthy", etc.) that sit between
+# individual domains.
+#
+# Moved to the very end of this file (2026-09-16, was originally right
+# before helm_release.argocd_apps, gating bootstrap's own Application
+# creation on it -- see that resource's depends_on comment) and made
+# optional via var.wait_all_domains_healthy (see that variable's own
+# comment). bootstrap's own Application doesn't actually read anything
+# from the other platform domains, so there was no correctness reason for
+# its creation to wait on all of them -- crossplane-apps included -- being
+# Healthy first. Confirmed live 2026-09-16 (ephemeral cluster pr-109):
+# crossplane-apps' own tofu-apply-in-a-Workspace loop takes far longer to
+# first-converge than every other domain, and blocking bootstrap's
+# creation on it delayed everything downstream for no reason. Now runs
+# LAST, after bootstrap itself is confirmed healthy
+# (kubernetes_job_v1.wait_bootstrap_healthy above) -- a genuine "the whole
+# platform, slow stuff included, is truly done converging" sanity check
+# for main's own workspace, skippable for an ephemeral one that just wants
+# the core platform up fast.
+#
+# app_names lists every top-level domain Application by name, not just the
+# DAG's leaves: checking leaves alone would work (a leaf can't be Healthy
+# without its own ancestors having already succeeded), but listing
+# everything explicitly is the same defensive, easy-to-audit style the
+# original four-app version of this check already used — a leaf-only list
+# would be a subtler invariant to keep correct as domains are added/removed.
+# The 2026-08-27 merges (standalone-apps folded into secrets-apps' wave 0,
+# eso-data-apps into its wave 2, restore-apps into backups-apps' wave 1,
+# gateways-apps into networking-resources-apps' wave 1) removed three
+# entries here — the merged children are covered transitively via each
+# surviving parent Application's own recursive health
+# (resource.customizations.health.argoproj.io_Application).
+module "wait_all_domains_healthy" {
+  count = var.wait_all_domains_healthy ? 1 : 0
+
+  source = "./modules/wait-argocd-apps-healthy"
+
+  job_name = "wait-all-domains-healthy"
+  app_names = [
+    "crds-apps",
+    "secrets-apps",
+    "monitoring-apps",
+    "backups-apps",
+    "networking-controllers-apps",
+    "networking-resources-apps",
+    "wireguard-apps",
+    "dex-apps",
+    "argocd-config-apps",
+    "grafana-apps",
+    "argo-workflows-apps",
+    "crossplane-apps",
+  ]
+  service_account_name = kubernetes_service_account.wait_platform_apps.metadata[0].name
+
+  # Forces a fresh Job whenever ANY watched domain is redeployed, and
+  # supplies the implicit Terraform dependency on all of them — see the
+  # module's own revision_trigger description. Joining every domain's own
+  # revision means a change to any one of them alone is enough to trigger a
+  # fresh Job, same "re-run the wait on redeploy" behavior the original
+  # single-domain PLATFORM_APPS_REVISION env var had.
+  revision_trigger = join(",", [
+    helm_release.crds_apps.metadata.revision,
+    helm_release.secrets_apps.metadata.revision,
+    helm_release.monitoring_apps.metadata.revision,
+    helm_release.backups_apps.metadata.revision,
+    helm_release.networking_controllers_apps.metadata.revision,
+    helm_release.networking_resources_apps.metadata.revision,
+    helm_release.wireguard_apps.metadata.revision,
+    helm_release.dex_apps.metadata.revision,
+    helm_release.argocd_config_apps.metadata.revision,
+    helm_release.grafana_apps.metadata.revision,
+    helm_release.argo_workflows_apps.metadata.revision,
+    helm_release.crossplane_apps.metadata.revision,
+  ])
+
+  # kubernetes_job_v1.wait_bootstrap_healthy added (2026-09-16, this
+  # module's move to the end): this is now the LAST gate in the whole
+  # graph, so it depends on bootstrap having already converged too, not
+  # just the platform-apps domains.
+  depends_on = [
+    helm_release.crds_apps,
+    helm_release.secrets_apps,
+    helm_release.monitoring_apps,
+    helm_release.backups_apps,
+    helm_release.networking_controllers_apps,
+    helm_release.networking_resources_apps,
+    helm_release.wireguard_apps,
+    helm_release.dex_apps,
+    helm_release.argocd_config_apps,
+    helm_release.grafana_apps,
+    helm_release.argo_workflows_apps,
+    helm_release.crossplane_apps,
+    kubernetes_role_binding.wait_platform_apps,
+    kubernetes_job_v1.wait_bootstrap_healthy,
   ]
 }
