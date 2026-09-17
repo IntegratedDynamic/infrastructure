@@ -1,0 +1,96 @@
+configs:
+  params:
+    server.insecure: true
+  cm:
+    # Without this, ArgoCD has no built-in health assessor for its own
+    # `Application` CRD -- a nested Application is treated as "Healthy" the
+    # instant it's created with no sync error, never actually reflecting
+    # whether its own Helm release finished deploying. Confirmed live
+    # 2026-08-12 (10-cluster/scaleway): wave 5 started ~14s after wave 4 was
+    # created, while wave 4's own chart took ~90s to actually deploy,
+    # causing a self-healing but real crash-loop race. Restores ArgoCD's own
+    # pre-1.8 behavior of recursing into a child Application's
+    # `.status.health` instead of defaulting to healthy-on-creation -- the
+    # documented fix for this well-known "app of apps" gotcha:
+    # https://argo-cd.readthedocs.io/en/stable/operator-manual/health/
+    resource.customizations.health.argoproj.io_Application: |
+      hs = {}
+      hs.status = "Progressing"
+      hs.message = ""
+      if obj.status ~= nil then
+        if obj.status.health ~= nil then
+          hs.status = obj.status.health.status
+          if obj.status.health.message ~= nil then
+            hs.message = obj.status.health.message
+          end
+        end
+      end
+      return hs
+
+# The chart's own embedded Dex is redundant whether or not a caller wires up
+# its own external OIDC provider (10-cluster/scaleway's shared Dex) or skips
+# login restriction entirely (10-cluster/kind, ephemeral) -- either way,
+# never the bundled one.
+dex:
+  enabled: false
+
+# Chart ships resources: {} for every component below by default. Confirmed
+# live 2026-08-11 (10-cluster/scaleway): with every platform chart
+# requestless, the scheduler has nothing to balance the node pool on and
+# Cluster Autoscaler never sees a reason to scale up, so a fresh cluster
+# boot piles every pod onto one node's worth of real RAM and OOMs.
+#
+# GOMEMLIMIT (see var.argocd_controller_memory_limit_mib): observed live
+# 2026-08-20 (10-cluster/scaleway) that even 2048Mi wasn't enough headroom
+# during a full Application-tree reconcile burst -- OOMKilled twice before
+# stabilizing. This makes the controller GC proactively at
+# ${gomemlimit_mib}MiB instead of waiting for the kernel to kill it at the
+# ${memory_limit_mib}Mi cgroup limit below, per ArgoCD's own docs (80-90% of
+# the container limit): https://argo-cd.readthedocs.io/en/stable/operator-manual/high_availability/#mitigating-oomkilled-events-from-memory-spikes
+#
+# repoServer/server/redis sizing: same live-tuning history
+# (10-cluster/scaleway, confirmed 2026-08-19/24 for controller/repoServer's
+# CPU/memory bumps) reused verbatim -- 10-cluster/kind hit the identical
+# class of contention (controller/repo-server starved comparing ~30
+# Applications at once under BestEffort QoS, several stuck oscillating
+# "Unknown" sync status) once its own DAG grew past a handful of domains.
+controller:
+  replicas: 1
+  env:
+    - name: GOMEMLIMIT
+      value: "${gomemlimit_mib}MiB"
+  resources:
+    requests:
+      cpu: 50m
+      memory: 768Mi
+    limits:
+      cpu: 3000m
+      memory: "${memory_limit_mib}Mi"
+
+repoServer:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 25m
+      memory: 192Mi
+    limits:
+      cpu: 3000m
+      memory: 768Mi
+
+server:
+  resources:
+    requests:
+      cpu: 10m
+      memory: 64Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+
+redis:
+  resources:
+    requests:
+      cpu: 10m
+      memory: 64Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi

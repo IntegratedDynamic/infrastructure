@@ -21,7 +21,7 @@ variable "infra_revision" {
 
 # ── Cross-root state reads (Scaleway state buckets) ─────────────────────────
 #
-# Same two remote-state reads 10-cluster/local/main.tf already does, same
+# Same two remote-state reads 10-cluster/scaleway/main.tf already does, same
 # variable names/defaults -- this tier restores OpenBao's REAL production
 # raft snapshot (see main.tf's own header comment for why: seal "awskms"
 # wraps the barrier key using the real production KMS key, so a target
