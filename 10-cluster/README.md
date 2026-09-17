@@ -16,7 +16,7 @@ responsibility, not this domain's.
   declarative GitOps, not Terraform — even though the top-level Application
   definitions themselves live in this repo (`scaleway/platform-apps/`), the
   actual product charts they point at are the `gitops` repo's.
-- **Two variants, sharing their orchestration through `modules/`.** `kind/`
+- **Two variants, sharing their orchestration through ONE module.** `kind/`
   (an ephemeral, disposable cluster — fast, free, on-every-PR validation,
   infra#110/#112) and `scaleway/` (the real Kapsule homelab cluster) each
   provision a genuinely different cluster (a throwaway `kind` cluster
@@ -24,19 +24,25 @@ responsibility, not this domain's.
   pool) and wire ArgoCD to a genuinely different login/exposure story (none
   vs. a real shared Dex/OIDC), so those parts stay separate, independent
   code. But the platform-apps DAG itself — which ArgoCD Applications exist,
-  in what order, gated by what `wait-argocd-apps-healthy` mechanism — used
-  to be hand-duplicated Terraform between the two roots (`argocd.tf` in
-  particular). infra#113 extracted that shared shape into `modules/`
-  (`argocd-platform-domain`, `wait-argocd-apps-healthy`, `argocd-wait-rbac`,
-  `argocd-base-values`) so each root's own `argocd.tf` only has to state
-  its own environment-specific config — which domains it wires up, the
-  dependency graph between them, and per-domain Application parameters —
-  not re-implement the DAG-building machinery itself. See
-  `modules/argocd-platform-domain/main.tf` for why the per-domain module
-  deliberately does NOT also own its wait gate (soft vs. hard cross-domain
-  dependencies would otherwise collapse into always-hard), and
-  `scaleway/platform-apps/README.md` for the platform-wide DAG this wiring
-  encodes.
+  gated by what — used to be hand-duplicated Terraform between the two
+  roots (`argocd.tf` in particular), then (infra#113, first pass) extracted
+  into four separate shared modules each root still had to hand-wire once
+  per domain. infra#113's actual landing shape is a single module,
+  `modules/platform-apps-dag`, driven entirely by a `domains` map each
+  root declares — mostly sourced straight from `env/*.tfvars` — so a root's
+  own `argocd.tf` only has to state genuinely environment-specific config
+  (provider/cluster bootstrapping, OIDC/Dex vs. none, the handful of truly
+  dynamic values no tfvars literal could express) and call the module
+  once. A fully free-form named cross-domain graph turned out not to be
+  expressible this way at all (confirmed live 2026-09-17: a self-
+  referencing `for_each` is a real OpenTofu cycle) — see
+  `modules/platform-apps-dag/main.tf`'s own header comment for why this
+  platform's real DAG instead reduces to six independently-named gates
+  (`crds-apps`/`secrets-apps`/`backups-apps`/`dex-apps`/
+  `networking-controllers-apps`/`grafana-apps`), each its own resource
+  address so the graph stays acyclic while every domain that doesn't need
+  a gate still runs in full parallel. See `scaleway/platform-apps/README.md`
+  for the platform-wide DAG this wiring encodes.
 - **The old `local/` (minikube) variant was removed entirely (infra#113).**
   It never shared the platform-apps DAG structure at all (it deployed only
   ArgoCD + a single `bootstrap` Application, none of the domain-by-domain
