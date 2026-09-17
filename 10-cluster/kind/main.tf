@@ -50,9 +50,9 @@
 # self-heal possible at all -- ESO can never satisfy a Merge target it's
 # structurally forbidden from creating.
 
-# Credentials for the two cross-root Scaleway state reads below. Unlike
-# 10-cluster/local/main.tf's plain `scw config get` (admin's machine only,
-# where `scw` is already configured), this root ALSO runs unattended in CI
+# Credentials for the two cross-root Scaleway state reads below. Unlike a
+# plain `scw config get` (admin's machine only, where `scw` is already
+# configured), this root ALSO runs unattended in CI
 # (.github/workflows/kind.yml), which has no `scw` config file at all --
 # only env vars. Same env-var-first pattern 11-secrets/openbao/managed/main.tf
 # already established for exactly this "two genuinely different execution
@@ -86,8 +86,7 @@ locals {
 }
 
 # 03-storage/scaleway's "backup" bucket + its scoped workload identity --
-# same remote-state key 10-cluster/local/main.tf and 10-cluster/scaleway/main.tf
-# both already read.
+# same remote-state key 10-cluster/scaleway/main.tf already reads.
 data "terraform_remote_state" "backup_scaleway" {
   backend = "s3"
   config = merge(local.scaleway_state_backend, {
@@ -98,8 +97,7 @@ data "terraform_remote_state" "backup_scaleway" {
 
 # 02-encryption/aws's KMS key + dedicated IAM user -- the real AWS
 # credentials OpenBao's seal "awskms" needs at startup to unseal a restored
-# snapshot. Same remote-state key 10-cluster/local/main.tf and
-# 10-cluster/scaleway/main.tf both already read.
+# snapshot. Same remote-state key 10-cluster/scaleway/main.tf already reads.
 data "terraform_remote_state" "openbao_unseal_aws" {
   backend = "s3"
   config = merge(local.scaleway_state_backend, {

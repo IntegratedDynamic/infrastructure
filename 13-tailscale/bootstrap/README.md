@@ -34,8 +34,8 @@ There's no way to create the very first Tailscale credential via Terraform
    than scoping an OAuth client for a credential that's only ever used
    locally and occasionally — no scope-picker UI to get right.
 2. Write it into a gitignored per-developer file (matches `*.auto.tfvars`
-   already in `.gitignore` — same shape as `10-cluster/local`'s
-   `nico.auto.tfvars`):
+   already in `.gitignore` — same shape as `10-cluster/scaleway`'s
+   `local.auto.tfvars`):
 
    ```hcl
    # 13-tailscale/bootstrap/nico.auto.tfvars — gitignored, never commit

@@ -103,10 +103,7 @@ to every real root in one session: `01-iam/bootstrap/aws`,
 `12-monitoring/grafana/managed`, `10-cluster/scaleway`, plus this root
 itself. Every `data "terraform_remote_state"` cross-root read (~11 of them)
 was repointed and parametrized too — bucket/key are now variables set in
-`env/*.tfvars`, not hardcoded literals. `10-cluster/local` has no backend of
-its own (local state) but its two cross-root reads (of `03-storage/scaleway`
-and `02-encryption/aws`) were fixed the same way, so it doesn't read a stale
-AWS-side copy.
+`env/*.tfvars`, not hardcoded literals.
 
 One pre-existing, unrelated drift was surfaced (not caused) by the
 migration: `03-storage/scaleway`'s `loki`/`tempo` buckets' live
@@ -183,7 +180,7 @@ action doesn't use any of this yet — see the follow-up above).
 ## Cross-root reads need no manual credential setup
 
 Every `data "terraform_remote_state"` reading a Scaleway-hosted bucket (see
-"Real rollout" above — `10-cluster/local`, `10-cluster/scaleway`,
+"Real rollout" above — `10-cluster/kind`, `10-cluster/scaleway`,
 `11-secrets/openbao/managed`, `12-monitoring/grafana/managed`)
 authenticates via a `data "external"`
 block that shells out to `scw config get access-key`/`secret-key` — the
