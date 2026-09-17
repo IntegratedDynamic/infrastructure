@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Setup
 
 ```bash
-mise install          # Install all tools (kubectl, minikube, opentofu, helm, argocd, actionlint)
+mise install          # Install all tools (kubectl, opentofu, helm, argocd, kind, actionlint)
 .githooks/install.sh  # Configure git to use local hooks directory
 ```
 
@@ -116,10 +116,6 @@ is not verification.
 ## Commands
 
 ```bash
-# Local cluster (minikube)
-mise run dev             # Full local env: start minikube + tofu init + apply
-mise run reset           # Destroy minikube cluster
-
 # Provider lock files
 mise run lock            # Re-generate every root's .terraform.lock.hcl for darwin_arm64 + linux_amd64
 
@@ -147,7 +143,6 @@ tofu -chdir=02-encryption/aws                  providers lock -platform=darwin_a
 tofu -chdir=03-storage/scaleway                providers lock -platform=darwin_arm64 -platform=linux_amd64
 tofu -chdir=04-vpn/wireguard-site-to-site      providers lock -platform=darwin_arm64 -platform=linux_amd64
 tofu -chdir=04-vpn/wireguard-exit              providers lock -platform=darwin_arm64 -platform=linux_amd64
-tofu -chdir=10-cluster/local                   providers lock -platform=darwin_arm64 -platform=linux_amd64
 tofu -chdir=10-cluster/scaleway                providers lock -platform=darwin_arm64 -platform=linux_amd64
 tofu -chdir=11-secrets/openbao/bootstrap        providers lock -platform=darwin_arm64 -platform=linux_amd64
 tofu -chdir=11-secrets/openbao/managed          providers lock -platform=darwin_arm64 -platform=linux_amd64
@@ -272,7 +267,29 @@ modules/
                                #   keys, own gitops app, own README
 10-cluster/                    # domain: the Kubernetes platform (moved up from
                                #   02- to free up low numbers for future domains)
-  local/                       #   minikube — local dev and debugging. Local backend (local files)
+  modules/                     #   shared Terraform behind BOTH kind/ and
+                               #   scaleway/'s platform-apps DAG (infra#113)
+                               #   — argocd-platform-domain (one ArgoCD
+                               #   Application), wait-argocd-apps-healthy
+                               #   (the Synced+Healthy poll Job), argocd-
+                               #   wait-rbac (that Job's ServiceAccount/
+                               #   Role/RoleBinding), argocd-base-values
+                               #   (shared ArgoCD helm_release resource
+                               #   sizing/GOMEMLIMIT/health-customization
+                               #   values fragment). Real environment
+                               #   differences (which domains exist, in
+                               #   what order, gated by what; OIDC/Dex
+                               #   login vs. none) stay in each root's own
+                               #   argocd.tf, not folded in here — see
+                               #   argocd-platform-domain/main.tf's own
+                               #   comment for why the per-domain module
+                               #   deliberately does NOT also own its wait
+                               #   gate.
+  kind/                        #   ephemeral kind cluster — fast, free,
+                               #   on-every-PR validation of the
+                               #   platform-apps DAG (infra#110/#112). No
+                               #   backend (local state, dies with the CI
+                               #   runner) — see its own version.tf.
   scaleway/                    #   Scaleway Kapsule cluster + ArgoCD bootstrap (homelab; WIP)
 11-secrets/                    # (was 05-secrets/, moved 2026-08-24 to sit
                                #   after 10-cluster — see the numbering note
@@ -379,20 +396,40 @@ the way it did before this refacto.
 
 ### `10-cluster/*`
 
-Terraform here is only a **one-time bootstrapper** — everything after ArgoCD is up lives in the `gitops` repo. The cluster internal state nor status will be reflected in the terraform state. 
+Terraform here is only a **one-time bootstrapper** — everything after ArgoCD is up lives in the `gitops` repo. The cluster internal state nor status will be reflected in the terraform state.
 
-### `10-cluster/local/`
+`kind/` and `scaleway/` share the platform-apps DAG's orchestration Terraform
+(which ArgoCD Applications exist, in what order, gated by what) through
+`10-cluster/modules/` (infra#113) — `argocd-platform-domain` (one Application
+per module call), `wait-argocd-apps-healthy` (the Synced+Healthy poll Job),
+`argocd-wait-rbac` (that Job's shared ServiceAccount/Role/RoleBinding), and
+`argocd-base-values` (the ArgoCD `helm_release`'s own shared resource-sizing/
+GOMEMLIMIT/health-customization values). Each root's own `argocd.tf` keeps
+only what's genuinely environment-specific: which domains it wires up (a full
+list for `scaleway/`, a trimmed one for `kind/` — see that root's own
+`argocd.tf` header comment for exactly what's dropped and why), the
+dependency graph between them, and ArgoCD's own login/exposure config (OIDC
+via a shared Dex for `scaleway/`, none for `kind/`'s ephemeral, single-use
+cluster). `10-cluster/local` (the old minikube dev entry) was removed
+entirely (infra#113) — it never shared this structure (deployed only ArgoCD +
+`bootstrap`, none of the platform-apps DAG) and was redundant with `kind/` as
+a fast, disposable Kubernetes target.
 
-Warning : This environment expect you an accessible local kubernetes cluster access, likely configured within your ~/.kube/config. This is automatically handled via `mise run dev`
+### `10-cluster/kind/`
 
-Two-step, one-time bootstrap:
-1. Fetch secrets from **Infisical** (universal auth machine identity). Credentials come from `nico.auto.tfvars` (per-developer, not shared).
-2. Deploy **ArgoCD** via Helm with the admin bcrypt password hash from Infisical (pre-hashed to prevent Terraform drift).
-3. Deploy the **argocd-apps bootstrap** Application, pointing ArgoCD at `https://github.com/IntegratedDynamic/gitops.git`. ArgoCD then self-manages all further cluster state from that separate GitOps repo.
+Fast, free, on-every-PR validation of the platform-apps DAG
+(infra#110/#112, `.github/workflows/kind.yml`) against a disposable `kind`
+cluster — no backend (local state, dies with the CI runner, see its own
+`version.tf`), no `bootstrap`/gitops app-of-apps Application (unlike the old
+`10-cluster/local`, see `argocd.tf`'s header comment for why that was tried
+and reverted). OpenBao is bootstrapped from a REAL restore of the production
+raft snapshot (not a fresh throwaway instance) so the domains that consume
+its secrets can actually be validated — see `main.tf`'s header comment for
+the full "why" and the trade-offs that implies.
 
 ### `10-cluster/scaleway/`
 
-Same bootstrap pattern as `local/`, but with the Kapsule cluster + node pool (`DEV1-M`, min=0/max=3) instead.
+Same bootstrap pattern as `kind/`, but with the Kapsule cluster + node pool (`DEV1-M`, min=0/max=3) instead, ArgoCD wired to a real OIDC login (shared Dex), and every platform-apps domain (`monitoring-apps`/`wireguard-apps`/`crossplane-apps` included).
 
 **Secrets/monitoring/backups/networking (infra#84, 2026-08-24 + scope
 addition 2026-08-25):** OpenBao+ESO, monitoring

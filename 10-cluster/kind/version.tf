@@ -1,5 +1,5 @@
-# No backend block, on purpose -- mirrors 10-cluster/local/version.tf. This
-# root's own kind cluster (created by a plain `kind create cluster` CI step
+# No backend block, on purpose. This root's own kind cluster (created by a
+# plain `kind create cluster` CI step
 # before `tofu apply`, never by Terraform itself -- see infra#110) and its
 # kubeconfig are both ephemeral within a single CI job, so there is nothing
 # to persist across runs and no reason to want a remote S3-compatible
