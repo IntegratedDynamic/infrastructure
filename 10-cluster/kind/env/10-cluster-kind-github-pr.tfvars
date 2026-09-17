@@ -12,16 +12,19 @@
 # generated one" pattern .github/workflows/scaleway-ephemeral.yml already
 # uses for the exact same reason (infra_revision there too).
 #
-# gitops_revision: pinned to gitops#63's own branch, not left at its
-# "main" default (10-cluster/kind/variables.tf) -- NOT a temporary
-# test-before-merge override like every other *_revision pin in this
-# repo. This tier's own companion gitops-side fixes (services/platform/
+# gitops_revision: pinned to gitops's epic/kind-ci-fast-tier branch, not
+# left at its "main" default (10-cluster/kind/variables.tf) -- NOT a
+# temporary test-before-merge override like every other *_revision pin in
+# this repo. This tier's own companion gitops-side fixes (services/platform/
 # openbao/chart's values-kind.yaml, cert-restore/grafana-restore's
 # values-kind.yaml, velero's enableCSISnapshotClass, gateway/config's
 # clusterissuer-selfsigned.yaml, openbao/init's hook-delete-policy
 # removal, external-dns's values-kind.yaml) all live ONLY on that branch
 # -- gitops main doesn't have any of them yet, so kind.yml's own DAG
-# can't actually converge against main at all right now. Flip back to
+# can't actually converge against main at all right now. Both this root's
+# own PRs (infra#112, gitops#63) were merged into their respective
+# epic/kind-ci-fast-tier branches rather than straight to main (2026-09-17
+# -- the wider infra#110 epic isn't done yet). Flip back to
 # 10-cluster/kind/variables.tf's own "main" default (by deleting this
-# line) once gitops#63 merges.
-gitops_revision = "feature/kind-ci-fast-tier"
+# line) once the epic itself merges to gitops main.
+gitops_revision = "epic/kind-ci-fast-tier"
