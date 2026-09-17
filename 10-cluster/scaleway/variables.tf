@@ -181,3 +181,24 @@ variable "dns_scaleway_state_key" {
   type        = string
 }
 
+# infra#113: the whole platform-apps DAG this homelab runs, as data -- see
+# modules/platform-apps-dag/variables.tf's own var.domains for the full
+# schema (kept in sync by hand, Terraform has no cross-root shared-type
+# import). Populated by env/10-cluster-scaleway-dev.tfvars; this root's own
+# argocd.tf only merges in the handful of dynamic values (resolved
+# revision, letsencrypt_staging/env_suffix-derived parameters, main.tf's own
+# Secret dependencies) that can't be expressed as tfvars data before calling
+# the module.
+variable "domains" {
+  type = map(object({
+    source         = optional(string, "infra")
+    value_files    = optional(list(string), [])
+    parameters     = optional(list(object({ name = string, value = string })), [])
+    needs_crds     = optional(bool, false)
+    needs_secrets  = optional(bool, false)
+    needs_backups  = optional(bool, false)
+    depends_on_ids = optional(list(string), [])
+    namespace      = optional(string, "argocd")
+  }))
+}
+

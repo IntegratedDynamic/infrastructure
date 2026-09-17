@@ -53,3 +53,23 @@ variable "openbao_unseal_aws_state_key" {
   type        = string
   default     = "02-encryption/aws/02-encryption-aws-dev/terraform.tfstate"
 }
+
+# infra#113: the whole platform-apps DAG this tier validates, as data -- see
+# modules/platform-apps-dag/variables.tf's own var.domains for the full
+# schema (kept in sync by hand, Terraform has no cross-root shared-type
+# import). Populated by env/10-cluster-kind-github-pr.tfvars; this root's
+# own argocd.tf only merges in the handful of Secret dependencies that live
+# in main.tf (can't be expressed as tfvars data -- see that file's own
+# comment) before calling the module.
+variable "domains" {
+  type = map(object({
+    source         = optional(string, "infra")
+    value_files    = optional(list(string), [])
+    parameters     = optional(list(object({ name = string, value = string })), [])
+    needs_crds     = optional(bool, false)
+    needs_secrets  = optional(bool, false)
+    needs_backups  = optional(bool, false)
+    depends_on_ids = optional(list(string), [])
+    namespace      = optional(string, "argocd")
+  }))
+}
