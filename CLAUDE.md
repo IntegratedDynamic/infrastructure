@@ -269,22 +269,36 @@ modules/
                                #   02- to free up low numbers for future domains)
   modules/                     #   shared Terraform behind BOTH kind/ and
                                #   scaleway/'s platform-apps DAG (infra#113)
-                               #   — argocd-platform-domain (one ArgoCD
-                               #   Application), wait-argocd-apps-healthy
-                               #   (the Synced+Healthy poll Job), argocd-
-                               #   wait-rbac (that Job's ServiceAccount/
-                               #   Role/RoleBinding), argocd-base-values
+                               #   — platform-apps-dag (the ONE module both
+                               #   roots call: builds every domain's own
+                               #   ArgoCD Application from a `domains` map
+                               #   input, mostly sourced straight from
+                               #   env/*.tfvars — see that module's own
+                               #   variables.tf), argocd-base-values
                                #   (shared ArgoCD helm_release resource
                                #   sizing/GOMEMLIMIT/health-customization
-                               #   values fragment). Real environment
-                               #   differences (which domains exist, in
-                               #   what order, gated by what; OIDC/Dex
-                               #   login vs. none) stay in each root's own
-                               #   argocd.tf, not folded in here — see
-                               #   argocd-platform-domain/main.tf's own
-                               #   comment for why the per-domain module
-                               #   deliberately does NOT also own its wait
-                               #   gate.
+                               #   values fragment). Each root's own
+                               #   argocd.tf keeps only what's genuinely
+                               #   environment-specific: provider/cluster
+                               #   bootstrapping, OIDC/Dex login vs. none,
+                               #   and the handful of truly dynamic values
+                               #   (resolved revision, root-owned Secret
+                               #   dependencies) merged onto that `domains`
+                               #   map before the one module call. Confirmed
+                               #   live (2026-09-17) that a fully free-form
+                               #   named cross-domain graph isn't
+                               #   expressible in one for_each'd resource at
+                               #   all (a real OpenTofu limitation:
+                               #   self-referencing for_each cycles) — see
+                               #   platform-apps-dag/main.tf's own header
+                               #   comment for why the real DAG instead
+                               #   reduces to six independently-named gates
+                               #   (crds-apps/secrets-apps/backups-apps/
+                               #   dex-apps/networking-controllers-apps/
+                               #   grafana-apps), each its own resource
+                               #   address so the graph stays acyclic while
+                               #   every domain that doesn't need a gate
+                               #   still runs in full parallel.
   kind/                        #   ephemeral kind cluster — fast, free,
                                #   on-every-PR validation of the
                                #   platform-apps DAG (infra#110/#112). No
@@ -399,18 +413,35 @@ the way it did before this refacto.
 Terraform here is only a **one-time bootstrapper** — everything after ArgoCD is up lives in the `gitops` repo. The cluster internal state nor status will be reflected in the terraform state.
 
 `kind/` and `scaleway/` share the platform-apps DAG's orchestration Terraform
-(which ArgoCD Applications exist, in what order, gated by what) through
-`10-cluster/modules/` (infra#113) — `argocd-platform-domain` (one Application
-per module call), `wait-argocd-apps-healthy` (the Synced+Healthy poll Job),
-`argocd-wait-rbac` (that Job's shared ServiceAccount/Role/RoleBinding), and
-`argocd-base-values` (the ArgoCD `helm_release`'s own shared resource-sizing/
-GOMEMLIMIT/health-customization values). Each root's own `argocd.tf` keeps
-only what's genuinely environment-specific: which domains it wires up (a full
-list for `scaleway/`, a trimmed one for `kind/` — see that root's own
-`argocd.tf` header comment for exactly what's dropped and why), the
-dependency graph between them, and ArgoCD's own login/exposure config (OIDC
-via a shared Dex for `scaleway/`, none for `kind/`'s ephemeral, single-use
-cluster). `10-cluster/local` (the old minikube dev entry) was removed
+(which ArgoCD Applications exist, gated by what) through **one** shared
+module, `10-cluster/modules/platform-apps-dag` (infra#113) — each root's own
+`argocd.tf` declares a `domains` map (which Applications, their `value_files`/
+`parameters`, and which of six well-known gates they need) mostly sourced
+straight from `env/*.tfvars`, merges on top the handful of genuinely dynamic
+values that can't be tfvars literals (resolved revision, root-owned Secret
+dependencies), and calls the module once. `argocd-base-values` (the ArgoCD
+`helm_release`'s own shared resource-sizing/GOMEMLIMIT/health-customization
+values) stays a separate, single-call module. A fully free-form named
+cross-domain graph turned out NOT to be expressible this way at all —
+confirmed live (2026-09-17): a for_each'd resource referencing another
+instance of itself (or of a sibling resource that references it back) via a
+dynamically-chosen key is a real OpenTofu cycle, not a syntax restriction to
+route around. What's real about this platform's own DAG instead reduces to
+**six independently-named gates** — `crds-apps`/`secrets-apps`/
+`backups-apps`/`dex-apps`/`networking-controllers-apps`/`grafana-apps` — each
+pulled into its own resource address inside the module so a "regular" domain
+can safely opt into `needs_crds`/`needs_secrets`/`needs_backups`/`needs_dex`/
+`needs_networking_controllers`/`needs_grafana` without ever closing a loop
+back into itself. See `platform-apps-dag/main.tf`'s own header comment for
+the full "why," and why this is a strict precision improvement over a
+generic topological-level scheme (no domain ever waits on a gate it doesn't
+actually need). Each root's own `argocd.tf` keeps only what's genuinely
+environment-specific: which domains it wires up (a full list for
+`scaleway/`, a trimmed one for `kind/` — see that root's own `argocd.tf`
+header comment for exactly what's dropped and why), and ArgoCD's own
+login/exposure config (OIDC via a shared Dex for `scaleway/`, none for
+`kind/`'s ephemeral, single-use cluster). `10-cluster/local` (the old
+minikube dev entry) was removed
 entirely (infra#113) — it never shared this structure (deployed only ArgoCD +
 `bootstrap`, none of the platform-apps DAG) and was redundant with `kind/` as
 a fast, disposable Kubernetes target.
