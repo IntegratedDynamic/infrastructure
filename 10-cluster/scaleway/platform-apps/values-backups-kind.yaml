@@ -1,0 +1,30 @@
+# kind CI tier (infra#110) -- same backups-apps tree as values-backups.yaml,
+# two swaps:
+#  - cert-restore / grafana-restore: valueFile: values-kind.yaml (gitops
+#    repo) instead of values-scaleway.yaml -- both charts already ship an
+#    `enabled` flag for exactly this (see each chart's own README), set to
+#    false for kind. Velero's own restore target is Secrets/PVCs scoped to
+#    THIS cluster's own prior state, which a fresh kind cluster never has --
+#    running these against a throwaway cluster would just burn the full
+#    ~25min fail-open budget each documents on every PR, for a restore that
+#    can never succeed.
+#  - velero itself keeps its Terraform-direct FAKE credentials
+#    (10-cluster/kind/main.tf) rather than the real ones OpenBao's restored
+#    KV actually has -- unlike the secrets-apps ExternalSecrets, there is no
+#    reason to let a kind CI run push real backup data into the production
+#    velero bucket. Expect Velero's own BackupStorageLocation to report
+#    Unavailable against these; confirmed live it does NOT block this
+#    Application's own ArgoCD health (infra#110 point 1) -- the Deployment's
+#    readiness probe doesn't depend on backend reachability.
+#  - velero's own valueFile is ALSO values-kind.yaml (not values-scaleway.yaml):
+#    confirmed live that vanilla kind has no external-snapshotter CRDs at
+#    all, so that chart's CSI VolumeSnapshotClass object (unconditional in
+#    values-scaleway.yaml) is a hard ArgoCD SyncFailed there. gitops repo's
+#    values-kind.yaml is otherwise an exact copy of values-scaleway.yaml
+#    with just enableCSISnapshotClass: false added.
+apps:
+  # ── wave 0 ──────────────────────────────────────────────────────────────
+  - {name: velero, namespace: velero, chartPath: services/platform/velero/chart, valueFile: values-kind.yaml, wave: "0", syncWaveLabelPaths: ['velero.podLabels.scalepack\.fr/sync-wave']}
+  # ── wave 1 ──────────────────────────────────────────────────────────────
+  - {name: cert-restore, namespace: gateway, chartPath: services/platform/gateway/cert-restore, valueFile: values-kind.yaml, wave: "1"}
+  - {name: grafana-restore, namespace: monitoring, chartPath: services/platform/monitoring/grafana-restore, valueFile: values-kind.yaml, wave: "1"}

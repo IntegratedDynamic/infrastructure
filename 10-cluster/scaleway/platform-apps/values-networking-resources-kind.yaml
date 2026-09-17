@@ -1,0 +1,34 @@
+# kind CI tier (infra#110) -- same networking-resources-apps tree as
+# values-networking-resources.yaml, one swap:
+#  - external-dns: valueFile: values-kind.yaml (gitops repo) instead of
+#    values-scaleway.yaml -- adds `dryRun: true` on top of the same
+#    settings otherwise. Structural block on real DNS mutation: external-dns
+#    still reconciles against the real, restored `external-dns-scaleway-
+#    credentials` (OpenBao KV, secrets-apps), computes and logs what it
+#    would change, but its own reconcile loop skips the provider's actual
+#    write call -- not a fake-credential workaround (see
+#    10-cluster/kind/main.tf's header comment).
+#
+# gateway-config keeps values-scaleway.yaml unmodified -- its ClusterIssuer
+# choice is threaded through activeClusterIssuer (10-cluster/kind/argocd.tf's
+# Application parameter, forced to "selfsigned"), not this values file, so
+# cert-manager never triggers a real DNS01 challenge through
+# cert-manager-webhook-scaleway regardless of that domain's own real
+# credentials either.
+#
+# Wave 1's `*-gateway` HTTPRoute charts are unchanged from production --
+# dex-apps/grafana-apps/argocd-config-apps/argo-workflows-apps are all kept
+# in this tier (10-cluster/kind/argocd.tf's own header comment), so there's
+# a real product on the other end of each one. openbao-gateway kept too,
+# for the same reason as production (openbao itself is always in this
+# tier's secrets-apps).
+apps:
+  # ── wave 0 ──────────────────────────────────────────────────────────────
+  - {name: gateway-config, namespace: gateway, chartPath: services/platform/gateway/config, valueFile: values-scaleway.yaml, wave: "0", valueParams: [{name: activeClusterIssuer, valueFrom: activeClusterIssuer}]}
+  - {name: external-dns, namespace: external-dns, chartPath: services/platform/external-dns/chart, valueFile: values-kind.yaml, wave: "0", syncWaveLabelPaths: ['external-dns.podLabels.scalepack\.fr/sync-wave']}
+  # ── wave 1 ──────────────────────────────────────────────────────────────
+  - {name: dex-gateway, namespace: gateway, chartPath: services/platform/dex/gateway, valueFile: values.yaml, wave: "1", valueParams: [{name: hostSuffix, valueFrom: hostSuffix}]}
+  - {name: grafana-gateway, namespace: monitoring, chartPath: services/platform/monitoring/grafana-gateway, valueFile: values-scaleway.yaml, wave: "1", valueParams: [{name: hostSuffix, valueFrom: hostSuffix}]}
+  - {name: argocd-config-gateway, namespace: argocd, chartPath: services/platform/argocd-config/gateway, valueFile: values-scaleway.yaml, wave: "1", valueParams: [{name: hostSuffix, valueFrom: hostSuffix}]}
+  - {name: argo-workflows-gateway, namespace: argo-workflows, chartPath: services/platform/argo-workflows/gateway, valueFile: values.yaml, wave: "1", valueParams: [{name: hostSuffix, valueFrom: hostSuffix}]}
+  - {name: openbao-gateway, namespace: openbao, chartPath: services/platform/openbao/gateway, valueFile: values-scaleway.yaml, wave: "1", valueParams: [{name: hostSuffix, valueFrom: hostSuffix}]}
