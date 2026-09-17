@@ -53,4 +53,7 @@ state_buckets = {
   cluster_scaleway = {
     bucket_name = "id-terraform-state-10-cluster-scaleway"
   }
+  tailscale_bootstrap = {
+    bucket_name = "id-terraform-state-13-tailscale-bootstrap"
+  }
 }

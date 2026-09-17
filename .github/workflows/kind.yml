@@ -1,0 +1,254 @@
+name: kind — fast platform-apps DAG validation
+
+# infra#110: a fast, free, on-every-PR validation tier for the
+# crds-apps -> secrets-apps -> monitoring/backups/networking-*-apps ->
+# dex/argocd-config/grafana/argo-workflows-apps DAG that 10-cluster/scaleway
+# drives against a real (billed) Kapsule cluster. Complements, never
+# replaces, that heavier opt-in tier (the `ephemeral-cluster` label,
+# scaleway-ephemeral.yml) -- see 10-cluster/kind/argocd.tf and main.tf for
+# what's deliberately dropped/kept and why.
+#
+# Deliberately NOT routed through .github/actions/terraform: that action is
+# entirely S3-backend-oriented (AWS OIDC role assumption or Scaleway backend
+# creds, `workspace select`). 10-cluster/kind has no backend block at all --
+# the kind cluster and its kubeconfig are both ephemeral within this one
+# job and die with the runner, so there's nothing to persist across runs
+# and no reason to want a remote backend.
+#
+# Not yet a required check (issue's own checklist item) -- promote once a
+# handful of green runs prove this isn't flaky. Known open risk, not yet
+# resolved: the full DAG (OpenBao + kube-prometheus-stack + Loki + Tempo +
+# cert-manager + envoy-gateway + Dex + Grafana + Argo Workflows + Velero)
+# pushed a local Docker Desktop kind node to 6.4/7.6GiB during live
+# development of this tier -- GitHub's standard ubuntu-latest runner has a
+# similar ~7GB ceiling. If this run is consistently OOM-flaky, the fix is
+# either a larger GitHub-hosted runner or trimming this tier's own DAG
+# further (point 6 in the issue: don't faithfully replicate every domain
+# just because Scaleway's tier does).
+
+on:
+  # `labeled`/`unlabeled` added so adding/removing the `tailscale` label
+  # alone re-triggers a run -- without them, only a push would pick up the
+  # debug-tailscale step's own `if:` condition below.
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+concurrency:
+  group: kind-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  # For .github/actions/debug-tailscale's OIDC workload identity
+  # federation -- lets the job mint its own short-lived GitHub OIDC token
+  # to present to Tailscale directly, no static secret needed.
+  id-token: write
+
+jobs:
+  kind:
+    runs-on: ubuntu-latest
+    # ~35min worst-case DAG convergence + action-upterm's own
+    # wait-timeout-minutes: 20 post-job debug window.
+    timeout-minutes: 60
+    # Same GitHub environment as every other Scaleway-touching workflow --
+    # this root needs read access to 03-storage/scaleway's "backup" bucket
+    # (OpenBao's real raft snapshot) and 02-encryption/aws's KMS
+    # unseal credentials (10-cluster/kind/main.tf's own header comment
+    # explains why a real snapshot restore, not a fresh throwaway instance,
+    # is the whole point). Whether SCW_ACCESS_KEY (the general CI identity)
+    # actually has read on those two specific buckets, or whether a
+    # narrower dedicated identity needs minting first, is an open question
+    # -- first real run here is the way to find out.
+    environment: scaleway
+    env:
+      SCW_ACCESS_KEY: ${{ secrets.SCW_ACCESS_KEY }}
+      SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
+      SCW_DEFAULT_ORGANIZATION_ID: ${{ vars.SCW_DEFAULT_ORGANIZATION_ID }}
+      SCW_DEFAULT_PROJECT_ID: ${{ vars.SCW_DEFAULT_PROJECT_ID }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      # mxschmitt/action-tmate was tried first and dropped (2026-09-17):
+      # confirmed live that tmate.io's own DNS has no A/AAAA records for
+      # any of its hostnames (ssh.tmate.io, nyc1.tmate.io, even the bare
+      # tmate.io -- all NXDOMAIN, verified independently of this runner),
+      # so session creation hung indefinitely with zero further log output
+      # -- that specific phase has no timeout at all in tmate's own action
+      # code, unlike the documented (but unrelated) connect-timeout-seconds.
+      #
+      # owenthereal/action-upterm and a hand-rolled `upterm host` invocation
+      # were tried next (same day) and also dropped: upterm's `ForceCommand`
+      # forces every SSH session/shell channel into a shared `tmux attach`,
+      # so a real non-interactive exec channel for an agent needed a bespoke
+      # loopback HTTP+JSON server reachable only via `ssh -L` -- it worked,
+      # but was more custom-protocol machinery than this needs, and still
+      # required a human to relay the session ID into the conversation every
+      # run (no way to discover it independently).
+      #
+      # Tailscale SSH replaces all of that: genuine SSH protocol end to end
+      # (no ForceCommand trick -- `ssh <hostname> '<command>'` just works,
+      # same as an interactive `ssh <hostname>`), the node joins under a
+      # predictable hostname (`<job>-<run_id>`) so no session-ID relay
+      # is needed, and OIDC workload identity federation means no static
+      # secret at all -- this job's own `id-token: write` permission
+      # (above) is what lets it authenticate. See CLAUDE.md's "Live
+      # debugging via Tailscale SSH" section and
+      # 13-tailscale/bootstrap/README.md for the full picture.
+      #
+      # Only runs when the PR carries the `tailscale` label -- opt-in, not
+      # every PR needs live debugging, and every run leaves an ephemeral
+      # node briefly joined to the tailnet.
+      - uses: ./.github/actions/debug-tailscale
+        if: contains(github.event.pull_request.labels.*.name, 'tailscale')
+        with:
+          oauth-client-id: ${{ vars.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ vars.TS_AUDIENCE }}
+
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        with:
+          # Keep in sync with mise.toml [tools] opentofu version.
+          tofu_version: "1.12"
+
+      - name: Install kind
+        env:
+          KIND_VERSION: "0.33.0" # Keep in sync with mise.toml [tools] kind version.
+        run: |
+          set -euo pipefail
+          curl -Lo /tmp/kind "https://kind.sigs.k8s.io/dl/v${KIND_VERSION}/kind-linux-amd64"
+          sudo install -m 0755 /tmp/kind /usr/local/bin/kind
+
+      - name: Create kind cluster
+        run: kind create cluster --name platform-apps-ci --wait 2m
+
+      # cloud-provider-kind assigns real IPs to `type: LoadBalancer`
+      # Services on kind (envoy-gateway's own Gateway Service) -- without
+      # it, ArgoCD's built-in Gateway API health check (requires
+      # `Programmed=True`, which needs an address) never resolves, and
+      # networking-resources-apps -- and everything gated on
+      # wait_all_domains_healthy behind it -- hangs for its own full
+      # 30-minute budget. Needs root (iptables/network namespace
+      # manipulation) -- GitHub-hosted runners have passwordless sudo,
+      # unlike a local admin's machine (this is why this exact piece was
+      # never live-verified locally during this tier's development).
+      - name: Install and start cloud-provider-kind
+        env:
+          CPK_VERSION: "0.11.1"
+        run: |
+          set -euo pipefail
+          curl -sL "https://github.com/kubernetes-sigs/cloud-provider-kind/releases/download/v${CPK_VERSION}/cloud-provider-kind_${CPK_VERSION}_linux_amd64.tar.gz" \
+            | tar -xz -C /tmp cloud-provider-kind
+          sudo install -m 0755 /tmp/cloud-provider-kind /usr/local/bin/cloud-provider-kind
+          # Writing to /tmp as the invoking (non-root) user is exactly
+          # what's wanted here; only the binary itself needs root, not this
+          # log file.
+          # shellcheck disable=SC2024
+          sudo /usr/local/bin/cloud-provider-kind > /tmp/cloud-provider-kind.log 2>&1 &
+
+      - name: tofu init
+        working-directory: 10-cluster/kind
+        run: tofu init -input=false
+
+      # Generates a per-run copy of env/10-cluster-kind-github-pr.tfvars
+      # with infra_revision appended -- same "generate a fresh tfvars,
+      # never commit the generated one" pattern
+      # .github/workflows/scaleway-ephemeral.yml already uses for the same
+      # variable. infra_revision is the PR's own head ref, so a PR
+      # touching 10-cluster/scaleway/platform-apps actually gets validated
+      # against ITS OWN changes, not main -- the entire point of this
+      # tier. gitops_revision is deliberately NOT appended here -- it
+      # stays at its "main" default (this tier isn't meant to validate a
+      # paired gitops-repo branch under test, 10-cluster/scaleway's own
+      # ephemeral tier already covers that combination); append it the
+      # same way, temporarily, only when deliberately testing a paired
+      # gitops change on your own branch.
+      - name: Generate tfvars
+        working-directory: 10-cluster/kind/env
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          set -euo pipefail
+          cp 10-cluster-kind-github-pr.tfvars 10-cluster-kind-github-pr.generated.tfvars
+          {
+            echo ""
+            echo "# Generated by .github/workflows/kind.yml -- never committed."
+            echo "infra_revision = \"${HEAD_REF}\""
+          } >> 10-cluster-kind-github-pr.generated.tfvars
+
+      - name: tofu apply
+        working-directory: 10-cluster/kind
+        run: tofu apply -input=false -auto-approve -var-file=env/10-cluster-kind-github-pr.generated.tfvars
+
+      # Aggregate ArgoCD/Terraform exit status alone isn't proof (CLAUDE.md's
+      # live-cluster testing discipline) -- module.wait_all_domains_healthy
+      # already enforces every domain is Synced+Healthy as a real apply-time
+      # gate, so a green `tofu apply` above already IS that proof. This is
+      # just a human-readable summary in the run log, not a second gate.
+      - name: Summarize Application status
+        if: failure()
+        run: |
+          kubectl get applications -n argocd \
+            -o custom-columns=NAME:.metadata.name,SYNC:.status.sync.status,HEALTH:.status.health.status
+
+      # A wait-*-healthy Job timing out only ever says "job: argocd/wait-X
+      # is in failed state" -- confirmed live (2026-09-16) that alone gives
+      # no way to tell which watched Application never converged or why.
+      # Everything a live debugging session would otherwise have to ask for
+      # one command at a time, up front instead: each wait Job's own pod
+      # logs (it already prints "Application/$app: sync=... health=..." on
+      # every poll -- the single most direct signal), the full status of
+      # every non-Healthy/non-Synced Application (conditions +
+      # operationState, where the actual ComparisonError/SyncError message
+      # lives), and every pod cluster-wide that isn't Running/Succeeded.
+      - name: Dump diagnostics
+        if: failure()
+        run: |
+          set +e
+          echo "::group::wait-*-healthy Job logs"
+          for job in $(kubectl get jobs -n argocd -o name | grep '^job.batch/wait-'); do
+            echo "--- $job ---"
+            kubectl logs -n argocd "$job" --tail=100
+          done
+          echo "::endgroup::"
+
+          echo "::group::Non-Healthy/non-Synced Application status"
+          kubectl get applications -n argocd -o json |
+            python3 -c '
+          import json, sys
+          apps = json.load(sys.stdin)["items"]
+          for a in apps:
+              name = a["metadata"]["name"]
+              status = a.get("status", {})
+              sync = status.get("sync", {}).get("status")
+              health = status.get("health", {}).get("status")
+              if sync != "Synced" or health != "Healthy":
+                  print("---", name, "(sync=" + str(sync) + " health=" + str(health) + ") ---")
+                  for c in status.get("conditions", []):
+                      print("  condition:", c)
+                  op = status.get("operationState", {})
+                  if op:
+                      print("  operationState.phase:", op.get("phase"))
+                      print("  operationState.message:", op.get("message"))
+          '
+          echo "::endgroup::"
+
+          echo "::group::Pods not Running/Succeeded, cluster-wide"
+          kubectl get pods -A --field-selector=status.phase!=Running,status.phase!=Succeeded
+          echo "::endgroup::"
+
+          echo "::group::cloud-provider-kind log"
+          cat /tmp/cloud-provider-kind.log 2>&1 || true
+          echo "::endgroup::"
+
+      # Disabled (2026-09-17) -- holding the runner open turned out not to
+      # be needed in practice: with the tailscale label, the debug session
+      # is already reachable for the job's full natural duration anyway,
+      # and this added nothing once that's true. Commented out rather than
+      # deleted so it's a one-line uncomment to bring back if a real
+      # post-job debug window is ever wanted again.
+      # - name: Hold Tailscale session open
+      #   if: always()
+      #   timeout-minutes: 20 # Matches the job's own worst-case-DAG-convergence comment above.
+      #   run: sleep 1200
