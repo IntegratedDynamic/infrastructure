@@ -27,6 +27,71 @@ them. Skipping this fails with an opaque `403 Forbidden` on `ListObjectsV2`
 that looks identical whether credentials are missing, wrong, or real
 (non-Scaleway) AWS credentials are ambient instead.
 
+## Live debugging via Tailscale SSH
+
+Any workflow that drops in the `.github/actions/debug-tailscale` step
+(`.github/workflows/kind.yml`/infra#110 is the first consumer) joins the
+runner to this homelab's tailnet under `tag:ci-debug`, with Tailscale SSH
+enabled (`tailscale up --ssh`). Both a human and Claude then reach it with
+plain, unmodified `ssh` — no relay session ID to paste, no shared terminal,
+no custom protocol.
+
+**Opt-in via the `tailscale` PR label** (`kind.yml`'s consumption of it,
+not a property of the action itself) — not every PR needs live debugging,
+and every run otherwise leaves an ephemeral node briefly joined to the
+tailnet for no reason. The workflow's `on.pull_request.types` includes
+`labeled`/`unlabeled` so adding the label alone re-triggers a run, no push
+needed.
+
+This replaced two upterm-based iterations (2026-09-17, same day): upterm's
+`ForceCommand` forces every SSH session/shell channel into a shared
+`tmux attach`, so a real non-interactive exec channel for Claude needed a
+bespoke loopback HTTP+JSON server reachable only via a `ssh -L`
+direct-tcpip tunnel (confirmed working, but more custom-protocol machinery
+than the problem warranted — flagged during the design conversation, not
+after the fact). It also left the session ID itself with no way to be
+discovered except a human pasting it in. Tailscale SSH is genuine SSH
+protocol end to end (no ForceCommand trick needed at all), and a runner
+joins under a **predictable hostname**, so that gap disappears too. Before
+upterm, `mxschmitt/action-tmate` was tried and dropped for an unrelated
+reason: tmate.io's DNS had no A/AAAA records for any of its hostnames at
+all, hanging session creation forever with no timeout anywhere in the
+action's own code.
+
+**Hostname**: `<job-id>-<run-id>` (`.github/actions/debug-tailscale`'s
+default `hostname` input) — `github.job` (the YAML job key, e.g. `kind`),
+not `github.workflow` (that workflow's free-text `name:`, which for
+`kind.yml` is `kind — fast platform-apps DAG validation` — spaces and an em
+dash, not a valid Tailscale hostname at all; confirmed live 2026-09-17,
+first real run's debug step failed outright on it).
+Derivable by anyone who knows the job ID and run ID, e.g. via
+`gh run list --workflow=kind.yml --branch=<branch> --limit=1`. No
+log-pasting needed on either side.
+
+**Connecting** (identical for a human or Claude — the whole point). Always
+as `runner@` — GitHub-hosted runners' actual local user, confirmed live
+2026-09-17; a plain `ssh <hostname>` defaults to your own local username
+and fails with `tailscale: failed to look up local user "<you>"` since
+that account doesn't exist on the runner:
+
+```bash
+ssh runner@<job>-<run_id> '<command>'   # non-interactive, real exit code
+ssh runner@<job>-<run_id>               # interactive shell
+# or: tailscale ssh runner@<hostname>
+```
+
+Requires `tailscale` installed and logged into the same tailnet on the
+connecting machine (one-time local setup, not part of this repo).
+
+**Provisioning** (the tailnet side — ACL + an OIDC workload identity
+federation trust, so GitHub Actions authenticates with its own per-run
+OIDC token instead of any stored secret): `13-tailscale/bootstrap/`, a
+`01-iam/bootstrap/`-style trust anchor kept as its own top-level domain —
+see that root's README for the full setup (bootstrap API key, first-apply
+ACL-overwrite warning) and its section below. The calling workflow's job
+needs `permissions: id-token: write` for the federation to work at all —
+`kind.yml`'s does.
+
 ## Live-cluster testing discipline (`10-cluster/scaleway`)
 
 Every `apply`/`hard-destroy` cycle against the Scaleway homelab costs real
@@ -87,6 +152,7 @@ tofu -chdir=10-cluster/scaleway                providers lock -platform=darwin_a
 tofu -chdir=11-secrets/openbao/bootstrap        providers lock -platform=darwin_arm64 -platform=linux_amd64
 tofu -chdir=11-secrets/openbao/managed          providers lock -platform=darwin_arm64 -platform=linux_amd64
 tofu -chdir=12-monitoring/grafana/managed       providers lock -platform=darwin_arm64 -platform=linux_amd64
+tofu -chdir=13-tailscale/bootstrap              providers lock -platform=darwin_arm64 -platform=linux_amd64
 ```
 
 Commit the updated lock files alongside the version change.
@@ -226,6 +292,22 @@ modules/
                                #   since 11-secrets/ is scoped to OpenBao's
                                #   own config specifically, not any tool
                                #   that happens to need IaC.
+13-tailscale/                  # domain: live GitHub Actions debugging
+                               #   (infra#110) — the tailnet ACL + OIDC
+                               #   federation trust any workflow's debug
+                               #   step consumes. Own top-level domain
+                               #   rather than folded into 01-iam/ (not a
+                               #   Scaleway identity) — see its README for
+                               #   why bootstrap/ still mirrors 01-iam/'s
+                               #   lifecycle split.
+  bootstrap/                   #   the tailnet ACL (SSH grant to
+                               #   tag:ci-debug) + a
+                               #   tailscale_federated_identity trusting
+                               #   GitHub's own OIDC tokens directly — no
+                               #   static secret. Human-applied trust
+                               #   anchor, needs a manually-generated
+                               #   Tailscale API key (chicken-and-egg, like
+                               #   every other bootstrap root).
 ```
 
 **The dependency spine** runs forward: `00-foundation/aws` (bucket + CI's AWS
@@ -439,6 +521,10 @@ AWS KMS key + a single-purpose IAM user for OpenBao's `seal "awskms"` auto-unsea
 ### `03-storage/scaleway/`
 
 Scaleway tool buckets + their scoped identities, each with its own bucket AND its own workload identity — kept as separate buckets/identities (not a shared bucket) because Velero writing into a shared bucket once broke OpenBao's `s3cmd`-based retention cleanup (confirmed live 2026-07-28), and Scaleway IAM can't scope Object Storage permissions below project level anyway. Six today: `backup` (OpenBao's own raft snapshots), `velero` (Kubernetes backups), `thanos` (Prometheus TSDB block storage, near-term/no-GLACIER), `loki` (log chunk storage, 1-day rolling retention matching Loki's own compactor), `tempo` (trace block storage, same 1-day shape), `argo_workflows_logs` (archived Argo Workflows container logs, same 1-day shape). One `module "buckets"` block with `for_each = var.buckets` (via `modules/scaleway-bucket-with-identity`) instantiates every bucket in `main.tf` — add a future tool bucket by adding a map entry to `var.buckets`, no new `.tf` resources. Renamed from `03-backup/scaleway` (which also held the OpenBao unseal KMS resources, now `02-encryption/aws`).
+
+### `13-tailscale/bootstrap/`
+
+The Tailscale-side trust anchor for live GitHub Actions debugging (infra#110, see "Live debugging via Tailscale SSH" above) — a `tailscale_acl` with TWO grants for `tag:ci-debug` (confirmed live 2026-09-17 that both are required: the `ssh` block alone governs SSH auth but grants no network reachability, so a general `acls` entry -- `autogroup:member` → `tag:ci-debug:*` -- is what actually gets a tag:ci-debug node into a member device's netmap at all; without it the node doesn't even appear as a peer despite joining successfully) plus a `tailscale_federated_identity` trusting GitHub Actions' own OIDC tokens directly (`issuer = token.actions.githubusercontent.com`, `subject = repo:IntegratedDynamic/infrastructure:*`, mirroring this repo's existing AWS OIDC trust scope) — `.github/actions/debug-tailscale` presents the calling job's own token, no static secret ever stored in GitHub. A `01-iam/bootstrap/`-style trust anchor in spirit (human-applied, rare changes, needs a manually-generated Tailscale API key — same chicken-and-egg every other bootstrap root has) but kept as its own top-level domain since it isn't a Scaleway identity; `13-tailscale/workload/` is a natural place for future scoped per-project Tailscale identities without a restructure. `tailscale_acl`'s `overwrite_existing_content = true` means an apply **replaces** the tailnet's whole policy file, not merges — see the root's own README before ever running `apply` here.
 
 ## Conventions
 

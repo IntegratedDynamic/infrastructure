@@ -1,0 +1,71 @@
+name: Debug via Tailscale
+description: >
+  Join this runner to the tailnet under tag:ci-debug with Tailscale SSH
+  enabled, so both a human and Claude can `ssh runner@<hostname>` straight into it
+  -- no shared tmux pane, no relay session ID to paste, real SSH exec
+  semantics for non-interactive commands. Drop this step into any workflow
+  that needs live debugging. See the root CLAUDE.md's "Live debugging via
+  Tailscale SSH" section and 13-tailscale/bootstrap/README.md for the full
+  picture -- this replaced an earlier upterm-based approach entirely.
+
+  Authenticates via OIDC workload identity federation, not a static
+  secret: the calling job presents its own GitHub Actions OIDC token
+  directly to Tailscale (validated against the trust configured in
+  13-tailscale/bootstrap's tailscale_federated_identity.ci_debug), so
+  there's no authkey/OAuth-secret to store as a GitHub secret at all. The
+  calling job MUST set `permissions: id-token: write` (GitHub refuses to
+  mint the token otherwise -- composite actions can't grant this
+  themselves, only the workflow that calls them can).
+
+inputs:
+  oauth-client-id:
+    description: >
+      The federated identity's client ID (13-tailscale/bootstrap's
+      ci_debug_oauth_client_id output). Not a secret -- store as a repo
+      variable (TS_OAUTH_CLIENT_ID) and pass it as vars.TS_OAUTH_CLIENT_ID
+      from the calling workflow. NOTE: any GitHub Actions expression
+      syntax written in THIS file's own description strings gets parsed
+      by GitHub's template engine too (confirmed live -- `vars` isn't a
+      valid context inside a composite action's own YAML, only in the
+      calling workflow), so this text deliberately spells out
+      "vars.TS_OAUTH_CLIENT_ID" instead of wrapping it in that syntax.
+    required: true
+  audience:
+    description: >
+      Must match the federated identity's own `audience` (13-tailscale/bootstrap's
+      ci_debug_audience output). Not a secret -- store as a repo variable
+      (TS_AUDIENCE) and pass it as vars.TS_AUDIENCE from the calling
+      workflow.
+    required: true
+  hostname:
+    description: >
+      Tailscale hostname for this node (must be a valid DNS label: 1-63
+      chars, alphanumeric + dashes). Default makes it derivable by anyone
+      who knows the job ID + run ID -- no session-ID relay needed:
+      `ssh runner@<job>-<run_id>` (runner@ -- that's the actual local user
+      on a GitHub-hosted runner, confirmed live 2026-09-17). Deliberately
+      github.job (the YAML job key, e.g.
+      "kind"), not github.workflow (that workflow's free-text `name:`,
+      "kind — fast platform-apps DAG validation" for kind.yml -- spaces and
+      an em dash, not a valid DNS label at all; github.job is always
+      identifier-safe, GitHub itself enforces that at the job-key syntax
+      level).
+    required: false
+    default: ${{ github.job }}-${{ github.run_id }}
+
+runs:
+  using: composite
+  steps:
+    # Ephemeral: the node disappears from the tailnet on its own once the
+    # runner disconnects, no manual cleanup. preauthorized-by-scope (the
+    # federated identity's own auth_keys scope) means no admin-console
+    # approval click per run either.
+    - uses: tailscale/github-action@780049a30b6ff5c378a9e7b389d15ece7a204888 # v4.1.3
+      with:
+        oauth-client-id: ${{ inputs.oauth-client-id }}
+        audience: ${{ inputs.audience }}
+        tags: tag:ci-debug
+        hostname: ${{ inputs.hostname }}
+        # Enables Tailscale SSH on this node -- genuine SSH protocol, no
+        # ForceCommand trick: `ssh <hostname> '<command>'` just works.
+        args: --ssh
