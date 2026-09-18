@@ -156,7 +156,7 @@ jobs:
       # never commit the generated one" pattern
       # .github/workflows/scaleway-ephemeral.yml already uses for the same
       # variable. infra_revision is the PR's own head ref, so a PR
-      # touching 10-cluster/scaleway/platform-apps actually gets validated
+      # touching 10-cluster/platform-apps actually gets validated
       # against ITS OWN changes, not main -- the entire point of this
       # tier. gitops_revision is deliberately NOT appended here -- it
       # stays at its "main" default (this tier isn't meant to validate a

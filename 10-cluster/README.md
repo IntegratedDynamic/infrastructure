@@ -14,8 +14,9 @@ responsibility, not this domain's.
 - **Ends by deploying ArgoCD and handing it a DAG of Applications to
   reconcile.** That's the handoff point: everything downstream of it is
   declarative GitOps, not Terraform — even though the top-level Application
-  definitions themselves live in this repo (`scaleway/platform-apps/`), the
-  actual product charts they point at are the `gitops` repo's.
+  definitions themselves live in this repo (`platform-apps/`, shared at this
+  domain's root — infra#115, not nested under either `kind/` or `scaleway/`),
+  the actual product charts they point at are the `gitops` repo's.
 - **Two variants, sharing their orchestration through ONE module.** `kind/`
   (an ephemeral, disposable cluster — fast, free, on-every-PR validation,
   infra#110/#112) and `scaleway/` (the real Kapsule homelab cluster) each
@@ -41,7 +42,7 @@ responsibility, not this domain's.
   (`crds-apps`/`secrets-apps`/`backups-apps`/`dex-apps`/
   `networking-controllers-apps`/`grafana-apps`), each its own resource
   address so the graph stays acyclic while every domain that doesn't need
-  a gate still runs in full parallel. See `scaleway/platform-apps/README.md`
+  a gate still runs in full parallel. See `platform-apps/README.md`
   for the platform-wide DAG this wiring encodes.
 - **The old `local/` (minikube) variant was removed entirely (infra#113).**
   It never shared the platform-apps DAG structure at all (it deployed only
