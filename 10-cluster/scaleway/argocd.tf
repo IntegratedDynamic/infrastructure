@@ -13,6 +13,24 @@
 # collapse into always-hard), and platform-apps/README.md for the
 # platform-wide DAG this wiring encodes.
 
+# infra#113 SSO-fix follow-up (2026-09-18): ephemeral clusters bypass the
+# real GitHub OAuth connector entirely instead of threading hostSuffix into
+# it -- GitHub's OAuth App requires an exact, manually pre-registered
+# redirect_uri per host, which doesn't scale to one new hostname per
+# ephemeral cluster (confirmed live testing cluster pr-114: "Be careful!
+# The redirect_uri is not associated with this application", GitHub's own
+# error page, not Dex's). Only generated for an ephemeral workspace
+# (var.env_suffix != "") -- the stable workspace's Dex never enables its
+# password DB at all (gitops repo's config-secret.yaml `ne hostSuffix ""`
+# guard), so there's nothing for this to protect there. A fresh random
+# password every apply, never a fixed value committed anywhere -- see
+# local.dex_static_password below for where it's threaded through.
+resource "random_password" "dex_static_password" {
+  count   = var.env_suffix != "" ? 1 : 0
+  length  = 24
+  special = false
+}
+
 locals {
   # Both ArgoCD Applications' own `targetRevision` (evaluated by ArgoCD's
   # repo-server) and every provider-opentofu Workspace's git module `?ref=`
@@ -90,6 +108,33 @@ locals {
   # appends this local verbatim instead of each reimplementing the
   # empty-vs-non-empty branch.
   host_suffix = var.env_suffix != "" ? "-${var.env_suffix}" : ""
+
+  # Empty on the stable workspace, matching random_password.dex_static_password's
+  # own count = 0 there -- see that resource's header comment.
+  dex_static_password = var.env_suffix != "" ? random_password.dex_static_password[0].result : ""
+}
+
+# infra#113 SSO-fix follow-up: also materialize the ephemeral login as a
+# plain kubectl-readable Secret -- scaleway-ephemeral.yml's job summary is
+# the primary path, but that's tied to one CI run's own retention; this
+# survives independently and needs nothing but cluster access
+# (`kubectl get secret dex-ephemeral-login -n default -o jsonpath=...`) to
+# read back. Only created for an ephemeral workspace, same guard as the
+# password itself -- the stable workspace never has a real GitHub-bypass
+# login to expose.
+resource "kubernetes_secret" "dex_ephemeral_login" {
+  count = var.env_suffix != "" ? 1 : 0
+
+  metadata {
+    name      = "dex-ephemeral-login"
+    namespace = "default"
+  }
+
+  data = {
+    username = "ephemeral"
+    password = local.dex_static_password
+    url      = "https://argocd${local.host_suffix}.scalepack.fr"
+  }
 }
 
 module "argocd_base_values" {
@@ -354,6 +399,7 @@ locals {
     # charts).
     dex-apps = [
       { name = "hostSuffix", value = local.host_suffix },
+      { name = "dexStaticPassword", value = local.dex_static_password },
     ]
     grafana-apps = [
       { name = "letsEncryptStaging", value = tostring(var.letsencrypt_staging) },

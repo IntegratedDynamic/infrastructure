@@ -174,3 +174,36 @@ jobs:
           command: ${{ needs.generate-tfvars.outputs.command }}
           state-backend: scaleway
           infisical-oidc-audience: '' # this root doesn't consume Infisical
+
+      # infra#113 SSO-fix follow-up: this workspace's Dex bypasses the real
+      # GitHub connector (see 10-cluster/scaleway/argocd.tf's
+      # random_password.dex_static_password header comment) -- surface the
+      # generated login here since there's no other way to retrieve it
+      # after the fact. AWS_ACCESS_KEY_ID/_SECRET_ACCESS_KEY and the
+      # selected workspace both carry over from the terraform action's own
+      # steps above (same job, same runner filesystem). apply-only: a
+      # destroy run has nothing left to read.
+      #
+      # Deliberately NO `::add-mask::` here (confirmed live 2026-09-18):
+      # GitHub masks job summaries against the same list as console log
+      # output, so masking this value before writing it to
+      # $GITHUB_STEP_SUMMARY made it render as literal "***" -- exactly
+      # the one place it's meant to actually be readable. Nothing else in
+      # this step echoes the password anywhere else, so there's no
+      # leakage this would have guarded against anyway.
+      - name: Surface the ephemeral Dex login
+        if: needs.generate-tfvars.outputs.command == 'apply'
+        shell: bash
+        working-directory: 10-cluster/scaleway
+        run: |
+          set -euo pipefail
+          password=$(tofu output -raw dex_static_password)
+          {
+            echo "### Ephemeral Dex login (bypasses GitHub SSO)"
+            echo ""
+            echo "- URL: https://auth-pr-${{ github.event.pull_request.number }}.scalepack.fr"
+            echo "- Username: \`ephemeral\`"
+            echo "- Password: \`${password}\`"
+            echo ""
+            echo "role:readonly only -- no \`groups\` claim to match ArgoCD's admin rule."
+          } >> "$GITHUB_STEP_SUMMARY"

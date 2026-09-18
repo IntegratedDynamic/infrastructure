@@ -31,5 +31,12 @@
 # cluster's OIDC login resolves against ITS OWN Dex instead of
 # production's. See argocd.tf's domain_extra_parameters (dex-apps entry)
 # for where this value actually comes from.
+#
+# valueParams (dexStaticPassword): infra#113 SSO-fix follow-up -- threads
+# random_password.dex_static_password (argocd.tf) through to the gitops
+# chart's local-password-DB fallback (config-secret.yaml), used instead of
+# the real GitHub connector on ephemeral clusters (see
+# values-scaleway.yaml's dexStaticPassword comment there for the full
+# "why"). Empty on the stable workspace, same as hostSuffix above.
 apps:
-  - {name: dex, namespace: gateway, chartPath: services/platform/dex/chart, valueFile: values-scaleway.yaml, wave: "0", syncWaveLabelPaths: ['dex.podLabels.scalepack\.fr/sync-wave'], valueParams: [{name: hostSuffix, valueFrom: hostSuffix}]}
+  - {name: dex, namespace: gateway, chartPath: services/platform/dex/chart, valueFile: values-scaleway.yaml, wave: "0", syncWaveLabelPaths: ['dex.podLabels.scalepack\.fr/sync-wave'], valueParams: [{name: hostSuffix, valueFrom: hostSuffix}, {name: dexStaticPassword, valueFrom: dexStaticPassword}]}
