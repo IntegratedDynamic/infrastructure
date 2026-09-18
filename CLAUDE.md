@@ -299,6 +299,31 @@ modules/
                                #   address so the graph stays acyclic while
                                #   every domain that doesn't need a gate
                                #   still runs in full parallel.
+  platform-apps/               #   the shared Helm chart driving the DAG
+                               #   above — every ArgoCD Application's own
+                               #   values-*.yaml, split one per domain (see
+                               #   its own README.md for the full
+                               #   secrets/monitoring/backups/networking
+                               #   design history). Lives at this domain's
+                               #   root, not nested under scaleway/ (moved
+                               #   there 2026-09-18, infra#115) — kind/ and
+                               #   scaleway/ both reference it symmetrically
+                               #   via modules/platform-apps-dag's own
+                               #   infra_source_path default, so nesting it
+                               #   under either root's own directory would
+                               #   misrepresent which environment actually
+                               #   owns it (neither does).
+  files/                       #   non-secret, environment-agnostic static
+                               #   assets referenced by more than a chart
+                               #   value — today just
+                               #   letsencrypt-staging-root-ca.pem (the
+                               #   Let's Encrypt staging root CA scaleway/
+                               #   injects into ArgoCD/Grafana's own OIDC
+                               #   trust when var.letsencrypt_staging is
+                               #   set). Same "domain root, not nested under
+                               #   one environment's own directory" reasoning
+                               #   as platform-apps/ above, even though
+                               #   scaleway/ is its only consumer today.
   kind/                        #   ephemeral kind cluster — fast, free,
                                #   on-every-PR validation of the
                                #   platform-apps DAG (infra#110/#112). No
@@ -469,7 +494,9 @@ stays in `gitops`), Velero, and cluster networking (envoy-gateway,
 cert-manager + its Scaleway DNS01 webhook, external-dns, gateway-config —
 NOT the per-product `*-gateway` HTTPRoute charts like `dex-gateway`, which
 stay in `gitops`) were extracted from `gitops` repo's `bootstrap`
-app-of-apps into this root's own `platform-apps/` chart — four ArgoCD
+app-of-apps into the shared `10-cluster/platform-apps/` chart (moved out of
+this root's own directory 2026-09-18, infra#115 — see that domain's own
+tree entry above) — four ArgoCD
 Applications (`secrets-apps`/`monitoring-apps`/`backups-apps`/`networking-apps`,
 created via `argocd.tf`'s `argocd_platform_apps` helm_release, same
 `argocd-apps` chart mechanism `bootstrap` itself uses) that start in

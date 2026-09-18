@@ -100,7 +100,7 @@ variable "infra_source_repo" {
 variable "infra_source_path" {
   description = "Path within var.infra_source_repo the shared platform-apps chart lives at, for every domain with source = \"infra\"."
   type        = string
-  default     = "10-cluster/scaleway/platform-apps"
+  default     = "10-cluster/platform-apps"
 }
 
 variable "infra_revision" {
