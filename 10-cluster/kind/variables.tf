@@ -11,7 +11,7 @@ variable "gitops_revision" {
 
 # Revision of THIS repo (infrastructure) the platform-apps Applications
 # below pull their chart from. The kind CI workflow sets this to the PR's
-# own head SHA so a PR touching 10-cluster/scaleway/platform-apps actually
+# own head SHA so a PR touching 10-cluster/platform-apps actually
 # gets validated against ITS OWN changes, not main -- the entire point of
 # this tier. See argocd.tf's local.platform_apps_source_repo.
 variable "infra_revision" {

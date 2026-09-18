@@ -8,7 +8,7 @@
 # var.domains right before the single module.platform_apps call. See that
 # module's main.tf for why the per-domain module deliberately does NOT also
 # own its wait gate (soft vs. hard cross-domain dependencies would otherwise
-# collapse into always-hard), and 10-cluster/scaleway/platform-apps/README.md
+# collapse into always-hard), and 10-cluster/platform-apps/README.md
 # for the platform-wide DAG this wiring encodes.
 #
 # See env/10-cluster-kind-github-pr.tfvars for what's trimmed relative to

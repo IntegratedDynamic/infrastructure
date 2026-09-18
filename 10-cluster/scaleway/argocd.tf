@@ -10,7 +10,7 @@
 # right before the single module.platform_apps call. See that module's
 # main.tf for why the per-domain module deliberately does NOT also own its
 # wait gate (soft vs. hard cross-domain dependencies would otherwise
-# collapse into always-hard), and platform-apps/README.md for the
+# collapse into always-hard), and 10-cluster/platform-apps/README.md for the
 # platform-wide DAG this wiring encodes.
 
 # infra#113 SSO-fix follow-up (2026-09-18): ephemeral clusters bypass the
@@ -46,7 +46,6 @@ locals {
   # below.
   gitops_source_repo        = "https://github.com/IntegratedDynamic/gitops.git"
   platform_apps_source_repo = "https://github.com/IntegratedDynamic/infrastructure.git"
-  platform_apps_path        = "10-cluster/scaleway/platform-apps"
 }
 
 # `--heads`-only existence probe per repo/revision -- always exits 0 and
