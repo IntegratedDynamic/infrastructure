@@ -2,9 +2,9 @@
 # crds-apps -> secrets-apps -> monitoring/backups/networking-* platform-apps
 # DAG that 10-cluster/scaleway/argocd.tf drives against a real Kapsule
 # cluster. This root reuses that SAME chart
-# (10-cluster/scaleway/platform-apps) via the helm_release blocks in
-# argocd.tf (this directory) -- never a forked copy -- so the two tiers
-# can't silently drift apart.
+# (10-cluster/platform-apps, shared at the domain root -- infra#115) via the
+# helm_release blocks in argocd.tf (this directory) -- never a forked copy --
+# so the two tiers can't silently drift apart.
 #
 # OpenBao is bootstrapped from a REAL restore of the production raft
 # snapshot (gitops repo's services/platform/openbao/init, values-scaleway.yaml

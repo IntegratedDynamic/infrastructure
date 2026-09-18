@@ -580,15 +580,18 @@ resource "kubernetes_secret" "external_dns_scaleway_credentials" {
 #
 # Non-secret, public information (a CA root certificate) -- a ConfigMap,
 # not a Secret. One canonical copy vendored in this repo
-# (files/letsencrypt-staging-root-ca.pem, the ROOT per Let's Encrypt's own
+# (../files/letsencrypt-staging-root-ca.pem, the ROOT per Let's Encrypt's own
 # docs -- intermediates "are subject to change at any time and should not
-# be pinned"). gitops's grafana-chart references this ConfigMap by name
-# only -- it never carries its own copy.
+# be pinned"). Lives one level up, at the 10-cluster/ domain root, not nested
+# under this root specifically -- nothing about a CA cert is Scaleway-only,
+# even though this root is the only consumer today (kind/ has no public,
+# internet-facing TLS to trust). gitops's grafana-chart references this
+# ConfigMap by name only -- it never carries its own copy.
 #
 # Shared with argocd.tf's oidc.config.rootCA -- one file read, used by both
 # consumers of this cert.
 locals {
-  letsencrypt_staging_ca_pem = file("${path.module}/files/letsencrypt-staging-root-ca.pem")
+  letsencrypt_staging_ca_pem = file("${path.module}/../files/letsencrypt-staging-root-ca.pem")
 }
 
 # monitoring namespace is already Terraform-managed above
