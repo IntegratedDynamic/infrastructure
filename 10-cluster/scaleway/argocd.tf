@@ -136,7 +136,18 @@ resource "helm_release" "argocd" {
         applicationsetcontroller.log.format: json
 
       cm:
-        url: https://argocd.scalepack.fr
+        # var.env_suffix/local.host_suffix (see that variable's own comment
+        # for the full "why"): confirmed live (infra#113 SSO-fix,
+        # 2026-09-17) that this had NEVER been threaded through here despite
+        # every *-gateway chart's own hostname already supporting it --
+        # ArgoCD kept generating OAuth callback URLs against the UNSUFFIXED
+        # https://argocd.scalepack.fr even on an ephemeral cluster actually
+        # reachable at https://argocd-pr-123.scalepack.fr, so the OIDC
+        # redirect_uri never matched what Dex's own static client (gitops
+        # repo, services/platform/dex/chart) whitelisted -- SSO login failed
+        # outright. See oidc.config.issuer below for the other half of this
+        # fix.
+        url: https://argocd${local.host_suffix}.scalepack.fr
 
         # Cuts cluster-cache memory, not just the controller's own
         # footprint -- by default the controller watches every API
@@ -180,7 +191,15 @@ resource "helm_release" "argocd" {
         # defined.
         oidc.config: |
           name: Dex
-          issuer: https://auth.scalepack.fr
+          # var.env_suffix/local.host_suffix -- must match Dex's OWN
+          # gateway hostname exactly (gitops repo's
+          # services/platform/dex/gateway builds "auth" + hostSuffix +
+          # ".scalepack.fr") and its static "argocd" client's issuer
+          # (services/platform/dex/chart). Without this, an ephemeral
+          # cluster's ArgoCD talked OIDC discovery against production's
+          # real Dex instead of its own -- see cm.url above for the full
+          # "why" this was missing.
+          issuer: https://auth${local.host_suffix}.scalepack.fr
           clientID: argocd
           # Resolved from the argocd-oidc-client-secret Secret (gitops repo:
           # apps/argocd-config), not the default argocd-secret — that secret
@@ -311,8 +330,8 @@ resource "helm_release" "argocd" {
 locals {
   domain_extra_parameters = {
     # var.letsencrypt_staging/var.env_suffix -- picked up by gateway-config's
-    # own entry (activeClusterIssuerParam: true) and every *-gateway chart's
-    # own entry (hostSuffixParam: true) in values-networking-resources.yaml.
+    # and every *-gateway chart's own valueParams entry in
+    # values-networking-resources.yaml.
     networking-resources-apps = [
       { name = "activeClusterIssuer", value = local.active_cluster_issuer },
       { name = "hostSuffix", value = local.host_suffix },
@@ -323,6 +342,18 @@ locals {
     # then follows the infra branch under test.
     crossplane-apps = [
       { name = "infraRevision", value = local.effective_infra_revision },
+    ]
+    # infra#113 SSO-fix: Dex's own issuer/redirectURI config (gitops repo,
+    # services/platform/dex/chart) needs the SAME hostSuffix its own
+    # gateway hostname already gets -- see helm_release.argocd's own
+    # oidc.config.issuer comment above for the confirmed-live symptom
+    # without this (an ephemeral cluster's OIDC login hitting production's
+    # real Dex instead of its own). Picked up by this app's own
+    # valueParams entry in values-dex.yaml (same mechanism
+    # values-networking-resources.yaml already uses for the *-gateway
+    # charts).
+    dex-apps = [
+      { name = "hostSuffix", value = local.host_suffix },
     ]
     grafana-apps = [
       { name = "letsEncryptStaging", value = tostring(var.letsencrypt_staging) },

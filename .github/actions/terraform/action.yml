@@ -183,7 +183,22 @@ runs:
           echo "Nothing to strip -- already gone or never created."
         else
           echo "$addrs"
-          echo "$addrs" | xargs tofu -chdir="$ROOT" state rm
+          # Confirmed live (2026-09-17, infra#113): plain `xargs` does its
+          # OWN quote/backslash interpretation of its input by default --
+          # a for_each-keyed address like
+          # module.platform_apps.helm_release.gate_domain["backups-apps"]
+          # has its embedded `"..."` misparsed as an xargs quoting token
+          # (not a literal part of the resource address), silently
+          # mangling the argument `tofu state rm` actually receives into
+          # something like an empty/garbled index -- "Index value
+          # required: Index brackets must contain either a literal number
+          # or a literal string". NUL-delimiting the input and using
+          # `xargs -0` (portable -- both GNU and BSD xargs support it,
+          # unlike GNU-only `-d`) disables that interpretation entirely,
+          # passing each address through byte-for-byte. Never triggered
+          # before infra#113: this root had no for_each-keyed (bracketed)
+          # resource addresses until that refactor.
+          echo "$addrs" | tr '\n' '\0' | xargs -0 tofu -chdir="$ROOT" state rm
         fi
 
     - name: OpenTofu ${{ inputs.command }}

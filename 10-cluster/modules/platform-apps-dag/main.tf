@@ -104,14 +104,28 @@ locals {
     }
   }
 
-  # The six well-known gate domain keys -- hardcoded here, not data-driven,
-  # because splitting them into their own resource address (below) is what
-  # keeps this module's dependency graph acyclic at all (see this file's
-  # own header comment). A future seventh gate needs a real edit here, not
-  # a tfvars change -- a genuinely rare, structural change, not per-
-  # environment config.
+  # crds-apps sits in its OWN resource address, separate from the other
+  # five gates below -- confirmed live (2026-09-17) that
+  # networking-controllers-apps (one of the five) has a real dependency on
+  # crds-apps (needs_crds = true in every existing tfvars), and lumping it
+  # into the SAME for_each'd resource as crds-apps itself would reproduce
+  # the exact self-referencing cycle this whole split exists to avoid --
+  # wait_crds referencing helm_release.gate_domain["crds-apps"] while
+  # ANOTHER instance of that same resource (networking-controllers-apps)
+  # referenced wait_crds back. crds-apps has zero incoming needs itself
+  # (the most foundational leaf), so it's the one gate genuinely safe to
+  # keep singular.
+  crds_domain_keys = ["crds-apps"]
+
+  # The five remaining well-known gate domain keys -- hardcoded here, not
+  # data-driven, for the same reason crds-apps is split out above. A future
+  # seventh gate needs a real edit here, not a tfvars change -- a
+  # genuinely rare, structural change, not per-environment config. None of
+  # these five may EVER set needs_secrets/needs_backups/needs_dex/
+  # needs_networking_controllers/needs_grafana on each other (that would
+  # reproduce the same cycle) -- needs_crds is the one exception, safe
+  # because crds-apps lives in the separate resource address above.
   gate_domain_keys = [
-    "crds-apps",
     "secrets-apps",
     "backups-apps",
     "dex-apps",
@@ -119,10 +133,11 @@ locals {
     "grafana-apps",
   ]
 
+  crds_domain     = { for k in local.crds_domain_keys : k => var.domains[k] if contains(keys(var.domains), k) }
   gate_domains    = { for k in local.gate_domain_keys : k => var.domains[k] if contains(keys(var.domains), k) }
-  regular_domains = { for k, d in var.domains : k => d if !contains(local.gate_domain_keys, k) }
+  regular_domains = { for k, d in var.domains : k => d if !contains(local.crds_domain_keys, k) && !contains(local.gate_domain_keys, k) }
 
-  has_crds                   = contains(keys(local.gate_domains), "crds-apps")
+  has_crds                   = contains(keys(local.crds_domain), "crds-apps")
   has_secrets                = contains(keys(local.gate_domains), "secrets-apps")
   has_backups                = contains(keys(local.gate_domains), "backups-apps")
   has_dex                    = contains(keys(local.gate_domains), "dex-apps")
@@ -175,13 +190,47 @@ resource "kubernetes_role_binding" "wait" {
   }
 }
 
-# ── The six gate domains' own Applications (separate resource address) ─────
+# ── crds-apps' own Application (its own resource address) ──────────────────
 #
-# None of the six ever needs another one of the six -- confirmed against
-# every existing dependency edge -- so this pool only ever needs
-# depends_on_ids (root-owned resources), never a cross-gate reference. Kept
-# entirely separate from helm_release.domain below (see this file's own
-# header comment for why that separation is load-bearing, not cosmetic).
+# The most foundational leaf -- has zero incoming needs of its own, so this
+# is the one gate genuinely safe to keep singular. See this file's own
+# header comment (locals block) for why it can't share a resource address
+# with the other five gates.
+resource "terraform_data" "crds_domain_dep_anchor" {
+  for_each = local.crds_domain
+
+  input = each.value.depends_on_ids
+}
+
+resource "helm_release" "crds_domain" {
+  for_each = local.crds_domain
+
+  name      = "argocd-${each.key}"
+  namespace = local.application_specs[each.key].namespace
+
+  repository = "https://argoproj.github.io/argo-helm"
+  chart      = "argocd-apps"
+  version    = "2.0.4"
+
+  timeout = 1800
+
+  values = [yamlencode({ applications = { (each.key) = local.application_specs[each.key] } })]
+
+  set = [
+    {
+      name  = "__terraform_dependency_anchor"
+      value = terraform_data.crds_domain_dep_anchor[each.key].id
+    }
+  ]
+}
+
+# ── The five remaining gate domains' own Applications (separate resource
+#    address from both crds_domain above and helm_release.domain below) ────
+#
+# May reference kubernetes_job_v1.wait_crds (which only ever points into
+# helm_release.crds_domain, a genuinely different resource address) via
+# needs_crds -- but never each other's wait Jobs, which WOULD reproduce
+# the self-referencing cycle this split exists to avoid.
 resource "terraform_data" "gate_domain_dep_anchor" {
   for_each = local.gate_domains
 
@@ -202,18 +251,19 @@ resource "helm_release" "gate_domain" {
 
   values = [yamlencode({ applications = { (each.key) = local.application_specs[each.key] } })]
 
-  # Not a real chart value (the argocd-apps chart only ever reads
-  # .Values.applications above) -- purely a data-flow anchor so
-  # terraform_data.gate_domain_dep_anchor[each.key]'s own depends_on_ids
-  # are wired into the graph via an ordinary argument, since `depends_on`
-  # itself forbids `each.key` as an index (see this file's own header
-  # comment).
-  set = [
-    {
-      name  = "__terraform_dependency_anchor"
-      value = terraform_data.gate_domain_dep_anchor[each.key].id
-    }
-  ]
+  # Not real chart values (the argocd-apps chart only ever reads
+  # .Values.applications above) -- purely data-flow anchors, since
+  # `depends_on` itself forbids both `each.key` as an index and any
+  # conditional/concat expression (see this file's own header comment).
+  set = concat(
+    [
+      {
+        name  = "__terraform_dependency_anchor"
+        value = terraform_data.gate_domain_dep_anchor[each.key].id
+      }
+    ],
+    each.value.needs_crds && local.has_crds ? [{ name = "__terraform_gate_crds", value = kubernetes_job_v1.wait_crds[0].id }] : [],
+  )
 }
 
 resource "kubernetes_job_v1" "wait_crds" {
@@ -245,7 +295,7 @@ resource "kubernetes_job_v1" "wait_crds" {
 
           command = ["sh", "-c", <<-EOT
             set -eu
-            app="argocd-crds-apps"
+            app="crds-apps"
             while true; do
               sync=$(kubectl get application "$app" -n argocd -o jsonpath='{.status.sync.status}' 2>/dev/null || true)
               health=$(kubectl get application "$app" -n argocd -o jsonpath='{.status.health.status}' 2>/dev/null || true)
@@ -268,7 +318,7 @@ resource "kubernetes_job_v1" "wait_crds" {
           # domain pool below.
           env {
             name  = "REVISION_TRIGGER"
-            value = helm_release.gate_domain["crds-apps"].metadata[0].revision
+            value = helm_release.crds_domain["crds-apps"].metadata.revision
           }
         }
       }
@@ -314,7 +364,7 @@ resource "kubernetes_job_v1" "wait_secrets" {
 
           command = ["sh", "-c", <<-EOT
             set -eu
-            app="argocd-secrets-apps"
+            app="secrets-apps"
             while true; do
               sync=$(kubectl get application "$app" -n argocd -o jsonpath='{.status.sync.status}' 2>/dev/null || true)
               health=$(kubectl get application "$app" -n argocd -o jsonpath='{.status.health.status}' 2>/dev/null || true)
@@ -330,7 +380,7 @@ resource "kubernetes_job_v1" "wait_secrets" {
 
           env {
             name  = "REVISION_TRIGGER"
-            value = helm_release.gate_domain["secrets-apps"].metadata[0].revision
+            value = helm_release.gate_domain["secrets-apps"].metadata.revision
           }
         }
       }
@@ -373,7 +423,7 @@ resource "kubernetes_job_v1" "wait_backups" {
 
           command = ["sh", "-c", <<-EOT
             set -eu
-            app="argocd-backups-apps"
+            app="backups-apps"
             while true; do
               sync=$(kubectl get application "$app" -n argocd -o jsonpath='{.status.sync.status}' 2>/dev/null || true)
               health=$(kubectl get application "$app" -n argocd -o jsonpath='{.status.health.status}' 2>/dev/null || true)
@@ -389,7 +439,7 @@ resource "kubernetes_job_v1" "wait_backups" {
 
           env {
             name  = "REVISION_TRIGGER"
-            value = helm_release.gate_domain["backups-apps"].metadata[0].revision
+            value = helm_release.gate_domain["backups-apps"].metadata.revision
           }
         }
       }
@@ -432,7 +482,7 @@ resource "kubernetes_job_v1" "wait_dex" {
 
           command = ["sh", "-c", <<-EOT
             set -eu
-            app="argocd-dex-apps"
+            app="dex-apps"
             while true; do
               sync=$(kubectl get application "$app" -n argocd -o jsonpath='{.status.sync.status}' 2>/dev/null || true)
               health=$(kubectl get application "$app" -n argocd -o jsonpath='{.status.health.status}' 2>/dev/null || true)
@@ -448,7 +498,7 @@ resource "kubernetes_job_v1" "wait_dex" {
 
           env {
             name  = "REVISION_TRIGGER"
-            value = helm_release.gate_domain["dex-apps"].metadata[0].revision
+            value = helm_release.gate_domain["dex-apps"].metadata.revision
           }
         }
       }
@@ -491,7 +541,7 @@ resource "kubernetes_job_v1" "wait_networking_controllers" {
 
           command = ["sh", "-c", <<-EOT
             set -eu
-            app="argocd-networking-controllers-apps"
+            app="networking-controllers-apps"
             while true; do
               sync=$(kubectl get application "$app" -n argocd -o jsonpath='{.status.sync.status}' 2>/dev/null || true)
               health=$(kubectl get application "$app" -n argocd -o jsonpath='{.status.health.status}' 2>/dev/null || true)
@@ -507,7 +557,7 @@ resource "kubernetes_job_v1" "wait_networking_controllers" {
 
           env {
             name  = "REVISION_TRIGGER"
-            value = helm_release.gate_domain["networking-controllers-apps"].metadata[0].revision
+            value = helm_release.gate_domain["networking-controllers-apps"].metadata.revision
           }
         }
       }
@@ -550,7 +600,7 @@ resource "kubernetes_job_v1" "wait_grafana" {
 
           command = ["sh", "-c", <<-EOT
             set -eu
-            app="argocd-grafana-apps"
+            app="grafana-apps"
             while true; do
               sync=$(kubectl get application "$app" -n argocd -o jsonpath='{.status.sync.status}' 2>/dev/null || true)
               health=$(kubectl get application "$app" -n argocd -o jsonpath='{.status.health.status}' 2>/dev/null || true)
@@ -566,7 +616,7 @@ resource "kubernetes_job_v1" "wait_grafana" {
 
           env {
             name  = "REVISION_TRIGGER"
-            value = helm_release.gate_domain["grafana-apps"].metadata[0].revision
+            value = helm_release.gate_domain["grafana-apps"].metadata.revision
           }
         }
       }
@@ -646,8 +696,9 @@ resource "terraform_data" "wait_all_anchor" {
   count = var.wait_all_domains_healthy ? 1 : 0
 
   input = concat(
-    [for key, d in local.gate_domains : helm_release.gate_domain[key].metadata[0].revision],
-    [for key, d in local.regular_domains : helm_release.domain[key].metadata[0].revision],
+    [for key, d in local.crds_domain : helm_release.crds_domain[key].metadata.revision],
+    [for key, d in local.gate_domains : helm_release.gate_domain[key].metadata.revision],
+    [for key, d in local.regular_domains : helm_release.domain[key].metadata.revision],
   )
 }
 
@@ -680,7 +731,7 @@ resource "kubernetes_job_v1" "wait_all" {
 
           command = ["sh", "-c", <<-EOT
             set -eu
-            apps="${join(" ", [for key, d in var.domains : "argocd-${key}"])}"
+            apps="${join(" ", keys(var.domains))}"
             while true; do
               all_healthy=true
               for app in $apps; do
