@@ -23,5 +23,13 @@
 # (which share the identical secrets-apps-only dependency profile):
 # argo-workflows-apps' own wait-gate needs to check specifically "is Dex
 # ready", not a bundle diluted by unrelated apps' health.
+#
+# valueParams (hostSuffix): infra#113 SSO-fix -- Dex's own issuer/
+# redirectURI config (gitops repo, services/platform/dex/chart) needs the
+# SAME hostSuffix its own gateway hostname already gets from
+# values-networking-resources.yaml's dex-gateway entry, so an ephemeral
+# cluster's OIDC login resolves against ITS OWN Dex instead of
+# production's. See argocd.tf's domain_extra_parameters (dex-apps entry)
+# for where this value actually comes from.
 apps:
-  - {name: dex, namespace: gateway, chartPath: services/platform/dex/chart, valueFile: values-scaleway.yaml, wave: "0", syncWaveLabelPaths: ['dex.podLabels.scalepack\.fr/sync-wave']}
+  - {name: dex, namespace: gateway, chartPath: services/platform/dex/chart, valueFile: values-scaleway.yaml, wave: "0", syncWaveLabelPaths: ['dex.podLabels.scalepack\.fr/sync-wave'], valueParams: [{name: hostSuffix, valueFrom: hostSuffix}]}
