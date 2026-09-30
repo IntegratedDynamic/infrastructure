@@ -148,25 +148,26 @@ convention, not automation.
 
 ## Credentials
 
-- **`var.vault_auth_method`** (`"approle"` default / `"kubernetes"` /
-  `"token"`, see `version.tf`'s own comment): which identity this root's
-  applier logs into OpenBao as.
-  - `"approle"`: the `terraform` AppRole from `11-secrets/openbao/bootstrap`,
-    read straight from that root's remote state — portable, the only one
-    that works outside a trusted cluster (an admin's laptop, CI), but a
-    static `secret_id` someone has to remember to rotate before its TTL
-    lapses (infra#115 follow-up, 2026-09-30: confirmed live that nobody had,
-    and OpenBao had already purged it).
+- **`var.vault_auth_method`** (`"oidc"` default / `"kubernetes"`, see
+  `version.tf`'s own comment): which identity this root's applier logs
+  into OpenBao as. AppRole was removed entirely (infra#115 follow-up,
+  2026-09-30) — see that comment for the full incident.
+  - `"oidc"`: a human admin's interactive browser login via Dex, as the
+    `terraform-cli` role (this file, below `admin`) — deliberately
+    narrower than `admin`'s full `sys/*` sudo. For an admin's laptop, the
+    only non-in-cluster execution context this root has.
   - `"kubernetes"`: for the in-cluster Crossplane Workspace only (gitops
     repo `services/platform/crossplane/config`) — logs in as
-    `vault_kubernetes_auth_backend_role.crossplane` (main.tf), bound to
-    `provider-opentofu`'s own ServiceAccount. No secret to manage; the pod's
-    projected ServiceAccount token is minted and rotated by Kubernetes
-    itself.
-  - `"token"`: `var.root_token` (`TF_VAR_root_token`, never a CLI flag) for
-    a one-off bootstrap apply (e.g. this root didn't exist yet the first
-    time, or the AppRole `secret_id` needs rotating) or `kubectl
-    port-forward` debugging.
+    `vault_kubernetes_auth_backend_role.crossplane`, which lives in
+    `11-secrets/openbao/bootstrap/main.tf`, NOT this root (a deliberate
+    chicken-and-egg fix — see that root's own README). No secret to
+    manage; the pod's projected ServiceAccount token is minted and rotated
+    by Kubernetes itself.
+  - **`var.root_token`** is a separate override, not a third method — set
+    it (`TF_VAR_root_token`, never a CLI flag) and it takes priority
+    regardless of `vault_auth_method`, for a one-off bootstrap apply (e.g.
+    this root's very first apply, before `terraform-cli` exists) or
+    `kubectl port-forward` debugging.
 
 - **`var.dex_github_connector`**, **`var.secrets_sync_github_eso_private_key`**:
   external credentials this identity's policy can't read back on its own

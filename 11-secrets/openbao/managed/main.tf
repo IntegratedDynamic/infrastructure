@@ -56,23 +56,24 @@ resource "vault_mount" "kv" {
 }
 
 # --- Kubernetes auth: lets in-cluster ServiceAccounts log in via their
-# projected JWT. Mounted + configured manually 2026-07-15 for the snapshot
-# agent, reused since 2026-07-20 for ESO.
-resource "vault_auth_backend" "kubernetes" {
-  type = "kubernetes"
-  path = "kubernetes"
-}
-
-resource "vault_kubernetes_auth_backend_config" "kubernetes" {
-  backend                = vault_auth_backend.kubernetes.path
-  kubernetes_host        = "https://kubernetes.default.svc"
-  disable_iss_validation = true
-}
-
+# projected JWT. The mount itself, its config, and the "crossplane" role
+# live in 11-secrets/openbao/bootstrap instead of here (infra#115
+# follow-up, 2026-09-30, part 3) — see that root's own main.tf for the full
+# "why": Crossplane's provider-opentofu Workspace is THIS root's own
+# unattended applier, so if its trust anchor lived here too, it would need
+# to already be applied to authenticate in order to apply it — the exact
+# chicken-and-egg AppRole used to solve, just re-created with a different
+# artifact. bootstrap/ breaks that loop the same way AppRole used to,
+# applied once by a human (or root_token) instead. backend = "kubernetes"
+# below is a literal string, not a resource reference, since that mount is
+# a different root's resource now — same "reference an existing object by
+# its stable name/path, not a cross-state Terraform reference" pattern this
+# root already used for the AppRole identity before infra#115.
+#
 # openbao-snapshot/openbao — the raft snapshot agent bundled in the openbao
 # Helm chart (gitops repo platform/scaleway/openbao.yml, snapshotAgent).
 resource "vault_kubernetes_auth_backend_role" "snapshot" {
-  backend                          = vault_auth_backend.kubernetes.path
+  backend                          = "kubernetes"
   role_name                        = "snapshot"
   bound_service_account_names      = ["openbao-snapshot"]
   bound_service_account_namespaces = ["openbao"]
@@ -92,39 +93,11 @@ resource "vault_kubernetes_auth_backend_role" "snapshot" {
 # and its own tradeoff note (secrets-sync isn't a perfectly clean home
 # either — see that file's comment).
 resource "vault_kubernetes_auth_backend_role" "external_secrets" {
-  backend                          = vault_auth_backend.kubernetes.path
+  backend                          = "kubernetes"
   role_name                        = "external-secrets"
   bound_service_account_names      = ["external-secrets"]
   bound_service_account_namespaces = ["external-secrets"]
   token_policies                   = [vault_policy.eso_read.name]
-  token_ttl                        = 3600
-}
-
-# provider-opentofu/crossplane-system — Crossplane's own Workspace controller
-# (gitops repo services/platform/crossplane/chart's DeploymentRuntimeConfig
-# pins the ServiceAccount name "provider-opentofu" deterministically, not
-# revision-hashed, specifically so this binding survives a provider
-# upgrade), running THIS root's own `tofu apply` unattended on its own
-# reconcile loop (issue #101). token_policies reuses the SAME "terraform"
-# policy this root's own OIDC role (vault_jwt_auth_backend_role.terraform_cli,
-# below) also gets — same permission scope, a different way to prove
-# identity, not a narrower or broader grant.
-#
-# infra#115 follow-up (2026-09-30, part 1): added after confirming live that
-# the AppRole secret_id this Workspace used to authenticate with (back when
-# this root's applier had only one auth mechanism) had been purged by
-# OpenBao itself on a restored ephemeral-cluster snapshot. Kubernetes auth
-# needs nothing this repo has to manage at all — the pod's own
-# ServiceAccount token is minted and rotated by Kubernetes itself. Part 2
-# (see version.tf's own vault_auth_method comment) removed AppRole
-# entirely, including the 11-secrets/openbao/bootstrap root that used to
-# mint it — vault_policy.terraform below is what that root used to own.
-resource "vault_kubernetes_auth_backend_role" "crossplane" {
-  backend                          = vault_auth_backend.kubernetes.path
-  role_name                        = "crossplane"
-  bound_service_account_names      = ["provider-opentofu"]
-  bound_service_account_namespaces = ["crossplane-system"]
-  token_policies                   = [vault_policy.terraform.name]
   token_ttl                        = 3600
 }
 
@@ -181,7 +154,10 @@ resource "vault_jwt_auth_backend_role" "admin" {
 # only ever needs the same "terraform" policy AppRole used to grant before
 # infra#115 removed it — reusing `admin` here would silently widen every
 # routine apply's blast radius from "structure + kv/apps" to "everything,
-# with sudo".
+# with sudo". token_policies references "terraform" by literal name, not a
+# resource — that policy lives in 11-secrets/openbao/bootstrap now (see
+# this file's own kubernetes-auth comment above for the full "why" it
+# moved there), a different root/state.
 resource "vault_jwt_auth_backend_role" "terraform_cli" {
   backend   = vault_jwt_auth_backend.oidc.path
   role_name = "terraform-cli"
@@ -199,65 +175,11 @@ resource "vault_jwt_auth_backend_role" "terraform_cli" {
     "http://localhost:8250/oidc/callback",
   ]
 
-  token_policies = [vault_policy.terraform.name]
+  token_policies = ["terraform"]
   token_ttl      = 3600
 }
 
 # --- Policies ---
-
-# Migrated from 11-secrets/openbao/bootstrap (infra#115 follow-up,
-# 2026-09-30, part 2 — that root deleted entirely along with the AppRole it
-# existed solely to mint, see version.tf's own vault_auth_method comment for
-# the full "why"). Content unchanged from that root's own vault_policy.terraform
-# — scoped to structure (mounts, auth methods, roles, policies) and
-# kv/apps/* secret content, deliberately no "sudo path *" the way the human
-# `admin` policy above has, and no delete on kv/data|metadata/apps/* — this
-# identity creates/reconciles secret content, it doesn't destroy it.
-resource "vault_policy" "terraform" {
-  name = "terraform"
-
-  policy = <<-EOT
-    path "sys/mounts" {
-      capabilities = ["read", "list"]
-    }
-
-    path "sys/mounts/*" {
-      capabilities = ["create", "read", "update", "delete", "list", "sudo"]
-    }
-
-    path "sys/auth" {
-      capabilities = ["read", "list"]
-    }
-
-    path "sys/auth/*" {
-      capabilities = ["create", "read", "update", "delete", "list", "sudo"]
-    }
-
-    # Auth backend config/roles (e.g. auth/kubernetes/role/*, auth/approle/role/*)
-    # — not the unauthenticated login sub-paths, which policies don't gate anyway.
-    path "auth/*" {
-      capabilities = ["create", "read", "update", "delete", "list"]
-    }
-
-    path "sys/policies/acl" {
-      capabilities = ["list"]
-    }
-
-    path "sys/policies/acl/*" {
-      capabilities = ["create", "read", "update", "delete", "list"]
-    }
-
-    # KV v2 secret data this identity owns the lifecycle of. No "delete" —
-    # this identity creates/reconciles secret content, it doesn't destroy it.
-    path "kv/data/apps/*" {
-      capabilities = ["create", "read", "update", "list"]
-    }
-
-    path "kv/metadata/apps/*" {
-      capabilities = ["create", "read", "update", "list"]
-    }
-  EOT
-}
 
 resource "vault_policy" "eso_read" {
   name = "eso-read"
