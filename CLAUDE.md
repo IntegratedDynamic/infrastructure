@@ -144,6 +144,7 @@ tofu -chdir=03-storage/scaleway                providers lock -platform=darwin_a
 tofu -chdir=04-vpn/wireguard-site-to-site      providers lock -platform=darwin_arm64 -platform=linux_amd64
 tofu -chdir=04-vpn/wireguard-exit              providers lock -platform=darwin_arm64 -platform=linux_amd64
 tofu -chdir=10-cluster/scaleway                providers lock -platform=darwin_arm64 -platform=linux_amd64
+tofu -chdir=11-secrets/openbao/bootstrap        providers lock -platform=darwin_arm64 -platform=linux_amd64
 tofu -chdir=11-secrets/openbao/managed          providers lock -platform=darwin_arm64 -platform=linux_amd64
 tofu -chdir=12-monitoring/grafana/managed       providers lock -platform=darwin_arm64 -platform=linux_amd64
 tofu -chdir=13-tailscale/bootstrap              providers lock -platform=darwin_arm64 -platform=linux_amd64
@@ -332,16 +333,24 @@ modules/
 11-secrets/                    # (was 05-secrets/, moved 2026-08-24 to sit
                                #   after 10-cluster — see the numbering note
                                #   above)
-  openbao/                     # domain: OpenBao itself — just managed/ now
-                               #   (see that directory), untouched by the
-                               #   2026-07-30 buckets/IAM consolidation.
-                               #   bootstrap/ (the AppRole identity managed/
-                               #   used to authenticate as) deleted entirely
-                               #   2026-09-30 (infra#115 follow-up) — see
-                               #   managed/version.tf's own vault_auth_method
-                               #   comment for why (OIDC/Kubernetes auth
-                               #   cover every real execution context this
-                               #   root has, with no static secret to rotate)
+  openbao/                     # domain: OpenBao itself (bootstrap/ +
+                               #   managed/, see that directory) —
+                               #   untouched by the 2026-07-30 buckets/IAM
+                               #   consolidation. bootstrap/'s AppRole
+                               #   identity (managed/'s old everyday
+                               #   identity) was deleted entirely 2026-09-30
+                               #   (infra#115 follow-up) once OIDC
+                               #   (laptop)/Kubernetes auth (in-cluster)
+                               #   covered every real execution context
+                               #   with no static secret to rotate — but
+                               #   bootstrap/ itself came back right after,
+                               #   minimal, scoped to just the one
+                               #   Kubernetes-auth role Crossplane's own
+                               #   Workspace needs to self-bootstrap
+                               #   managed/ (its own unattended applier) —
+                               #   see managed/version.tf's own
+                               #   vault_auth_method comment and
+                               #   bootstrap/README.md for the full "why"
 12-monitoring/                 # (was 06-monitoring/, moved 2026-08-24, same
                                #   reason as 11-secrets/ above)
   grafana/                     # domain: Grafana, managed by Terraform

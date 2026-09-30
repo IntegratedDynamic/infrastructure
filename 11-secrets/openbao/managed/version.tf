@@ -79,7 +79,7 @@ terraform {
 # var.root_token as a separate, explicitly-emergency-only escape hatch (see
 # that variable's own comment).
 variable "vault_auth_method" {
-  description = "Which auth_login mechanism below this root's own applier uses. \"oidc\" (default): a human admin's interactive browser login via Dex (auth_login_oidc, role = var.vault_oidc_role) — for an admin's laptop, the only non-in-cluster execution context this root has today. \"kubernetes\": for the in-cluster provider-opentofu Workspace — no long-lived secret at all, the pod's own auto-rotated ServiceAccount token is presented instead (vault_kubernetes_auth_backend_role.crossplane, main.tf)."
+  description = "Which auth_login mechanism below this root's own applier uses. \"oidc\" (default): a human admin's interactive browser login via Dex (auth_login_oidc, role = var.vault_oidc_role) — for an admin's laptop, the only non-in-cluster execution context this root has today. \"kubernetes\": for the in-cluster provider-opentofu Workspace — no long-lived secret at all, the pod's own auto-rotated ServiceAccount token is presented instead (vault_kubernetes_auth_backend_role.crossplane, 11-secrets/openbao/bootstrap/main.tf — a different root, see that variable's own comment below for why)."
   type        = string
   default     = "oidc"
   validation {
@@ -93,9 +93,11 @@ variable "vault_auth_method" {
 # uses, deliberately its OWN, narrower role rather than reusing `admin`:
 # `admin` grants full sys/* sudo (meant for a human doing anything via the
 # UI), while this root's own applies only ever need the same "terraform"
-# policy AppRole used to grant (vault_policy.terraform, main.tf) — reusing
-# `admin` here would silently widen every routine `tofu apply`'s blast
-# radius from "structure + kv/apps" to "everything, with sudo".
+# policy AppRole used to grant (vault_policy.terraform — now
+# 11-secrets/openbao/bootstrap/main.tf, see var.vault_kubernetes_role's own
+# comment below for why) — reusing `admin` here would silently widen every
+# routine `tofu apply`'s blast radius from "structure + kv/apps" to
+# "everything, with sudo".
 variable "vault_oidc_role" {
   description = "OIDC auth role name (auth/oidc/role/<name>, see vault_jwt_auth_backend_role.terraform_cli in main.tf) this root's applier logs in as when vault_auth_method = \"oidc\"."
   type        = string
@@ -103,11 +105,18 @@ variable "vault_oidc_role" {
 }
 
 # Only read when var.vault_auth_method = "kubernetes" — the role_name
-# vault_kubernetes_auth_backend_role.crossplane (main.tf) creates, bound to
+# vault_kubernetes_auth_backend_role.crossplane creates, bound to
 # provider-opentofu's own ServiceAccount (gitops repo
 # services/platform/crossplane/chart's DeploymentRuntimeConfig pins that
 # name deterministically, not revision-hashed, specifically so a binding
-# like this one stays valid across provider upgrades).
+# like this one stays valid across provider upgrades). Lives in
+# 11-secrets/openbao/bootstrap/main.tf, NOT this root, and deliberately so
+# (infra#115 follow-up, 2026-09-30, part 3): Crossplane's provider-opentofu
+# Workspace is this root's OWN unattended applier — if its trust anchor
+# lived here too, it would need to already be applied to authenticate in
+# order to apply it, the exact chicken-and-egg AppRole used to solve before
+# part 2 removed it. bootstrap/ breaks that loop the same way, applied once
+# by a human (var.root_token) instead.
 variable "vault_kubernetes_role" {
   description = "Kubernetes auth role name (auth/kubernetes/role/<name>) this root's applier logs in as when vault_auth_method = \"kubernetes\"."
   type        = string
@@ -117,10 +126,11 @@ variable "vault_kubernetes_role" {
 # Authenticates via var.vault_auth_method's chosen mechanism, UNLESS
 # var.root_token is set (non-null) — that's a separate, explicit emergency
 # override, not a third method: when present it takes priority regardless
-# of vault_auth_method, for a one-off bootstrap apply (e.g. creating
-# vault_jwt_auth_backend_role.terraform_cli / vault_kubernetes_auth_backend_role.crossplane
-# themselves, before either exists to log into) or kubectl-port-forward
-# debugging. Address hardcoded, not read from VAULT_ADDR: OpenBao's own CLI
+# of vault_auth_method, for a one-off bootstrap apply (e.g. this root's own
+# very first apply against a fresh OpenBao, before
+# vault_jwt_auth_backend_role.terraform_cli exists for var.vault_auth_method
+# = "oidc" to log into) or kubectl-port-forward debugging. Address
+# hardcoded, not read from VAULT_ADDR: OpenBao's own CLI
 # populates BAO_ADDR/BAO_TOKEN, not Vault's VAULT_ADDR/VAULT_TOKEN, so
 # relying on the env var is a trap (confirmed live, see git history for the
 # incident this came from).
@@ -175,8 +185,10 @@ provider "vault" {
   # token from the standard in-cluster path -- only ever evaluated when
   # this dynamic block's for_each actually produces the one element, i.e.
   # only inside the provider-opentofu pod where that file exists at all.
-  # See vault_kubernetes_auth_backend_role.crossplane (main.tf) for the
-  # role this logs into. Skipped when var.root_token overrides (below).
+  # See vault_kubernetes_auth_backend_role.crossplane
+  # (11-secrets/openbao/bootstrap/main.tf — a different root, see
+  # var.vault_kubernetes_role's own comment above for why) for the role
+  # this logs into. Skipped when var.root_token overrides (below).
   dynamic "auth_login" {
     for_each = var.root_token == null && var.vault_auth_method == "kubernetes" ? [1] : []
     content {
