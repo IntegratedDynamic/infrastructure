@@ -1,54 +1,63 @@
 # 11-secrets/openbao — OpenBao, managed by Terraform
 
-Two roots, split by who/how they're applied:
+One root: [`managed/`](managed/README.md) — OpenBao's actual structure and
+secret content.
 
-- [`bootstrap/`](bootstrap/README.md) — mints the `terraform` AppRole
-  identity. Human/admin-applied, rare changes.
-- [`managed/`](managed/README.md) — OpenBao's actual structure and secret
-  content, reconciled via that AppRole.
+`bootstrap/` (which used to mint a `terraform` AppRole identity `managed/`
+authenticated as) was deleted entirely 2026-09-30 (infra#115 follow-up —
+see `managed/version.tf`'s own `vault_auth_method` comment for the full
+incident and rationale). Investigating a live break (the AppRole's
+`secret_id`, generated once and never rotated, had been silently purged by
+OpenBao itself) turned up that AppRole's whole justification — "a
+service/pipeline authenticating without a human in the loop" — never
+actually matched either of `managed/`'s real execution contexts: the
+in-cluster Crossplane Workspace (a real pod, now authenticated via
+Kubernetes auth — no secret to manage at all) and an admin's laptop (a
+real human, now authenticated via OIDC through Dex — the same pattern
+already used everywhere else in this platform). No static, easy-to-forget
+credential was actually needed anywhere.
 
-## The self-init pattern
+## Auth methods `managed/` authenticates with
 
-Both roots exist because of OpenBao's own [self-init RFC](https://openbao.org/community/rfcs/self-init/):
-on a fresh OpenBao, nothing but the root token (minted once at `bao operator
-init`) can create auth methods or policies — but the root token should never
-be a standing credential anything ongoing authenticates with. So: spend the
-root token **once**, in `bootstrap/`, to mint a proper machine identity (the
-`terraform` AppRole) scoped to "manage OpenBao's own structure" — then
-`managed/` (and any later root here) authenticates via that AppRole, never
-the root token again.
+See `managed/README.md`'s own "Credentials" section and
+`managed/version.tf`'s `var.vault_auth_method` for the full detail:
 
-## The CI feedback loop
+- **`"oidc"`** (default) — an admin's laptop, interactive browser login via
+  Dex. Its own role (`terraform-cli`), deliberately narrower than the human
+  `admin` OIDC role (full `sys/*` sudo) — same `terraform` policy scope
+  AppRole used to grant.
+- **`"kubernetes"`** — the in-cluster Crossplane Workspace
+  (`provider-opentofu`'s own ServiceAccount).
+- **`var.root_token`** — an explicit emergency/bootstrap override (not a
+  third "method"): takes priority over `vault_auth_method` whenever set.
+  Needed for the genuine chicken-and-egg moments the retired self-init RFC
+  pattern used to solve with the AppRole dance below — e.g. the very first
+  `tofu apply` of `managed/` against a fresh OpenBao, before either the
+  `terraform-cli` OIDC role or the `crossplane` Kubernetes role exists for
+  anything to log into.
 
-`managed/` is meant to run from CI (GitHub Actions), same as every other root
-— but CI needs the AppRole `role_id`/`secret_id` from `bootstrap/` to
-authenticate, and those credentials have to come from *somewhere*. This is a
-second chicken-and-egg, on top of self-init, and it's worth spelling out
-because it spans two repos:
+## What used to live here (historical, for context)
 
-1. **Human, once**: apply `bootstrap/` (mints the AppRole).
-2. **Human, once**: apply `managed/` manually, via `kubectl port-forward` to
-   OpenBao directly — not through the public gateway, since at this point
-   OpenBao holds no secrets yet and there's nothing worth protecting behind
-   OIDC/TLS. This first apply should also merge the AppRole `role_id`/
-   `secret_id` into `kv/apps/secrets-sync/github/infrastructure-scaleway`
-   (alongside whatever else that KV object holds) — **not yet wired**: today
-   `secrets_sync_github_infrastructure_scaleway` in `managed/main.tf` only
-   merges `SCW_ACCESS_KEY`/`SCW_SECRET_KEY`.
-3. **From then on, automatic**: the gitops repo's `apps/secrets-sync` (ESO)
-   reads that KV path from OpenBao and pushes it to
-   `github.com/IntegratedDynamic/infrastructure`'s `scaleway` environment
-   secrets. CI can now authenticate to OpenBao on its own — the credentials
-   it needs were themselves sourced from OpenBao, round-tripped through ESO
-   and GitHub.
+Both roots used to exist because of OpenBao's own [self-init
+RFC](https://openbao.org/community/rfcs/self-init/): on a fresh OpenBao,
+nothing but the root token can create auth methods or policies, but the
+root token shouldn't be a standing credential anything ongoing
+authenticates with — so `bootstrap/` spent the root token once to mint a
+proper machine identity (`terraform` AppRole), and `managed/` authenticated
+via that AppRole from then on. `managed/` was also meant to run from CI
+(GitHub Actions) someday — "the CI feedback loop" this README used to
+document was a second chicken-and-egg on top of that: CI would need the
+AppRole's own `role_id`/`secret_id`, round-tripped out to GitHub Actions
+secrets via OpenBao KV + ESO. That loop was never actually finished being
+wired (confirmed 2026-09-30: no GitHub Actions workflow applies this root
+today, and the KV object the plan named never actually got the AppRole
+credentials merged into it) — moot now that there's no AppRole to
+round-trip in the first place.
 
-The loop only needs closing by hand once per environment. If it ever breaks
-(AppRole `secret_id` rotated/expired with nothing to push a fresh one), it's
-the same manual sequence again: port-forward, apply by hand, let ESO
-re-propagate.
-
-This isn't OpenBao-specific — any future `11-secrets/<service>/managed` root
-that CI is meant to run needs the same loop: a human bootstraps it once
-through a direct connection, and whatever credential CI needs to run it going
-forward gets fed back out to CI through ESO, sourced from the secret manager
-itself.
+If CI ever does need to run `managed/` directly, the right mechanism is
+GitHub Actions' own OIDC federation straight to OpenBao (a new
+`vault_jwt_auth_backend_role` bound to `token.actions.githubusercontent.com`,
+mirroring `13-tailscale/bootstrap`'s and `00-foundation/aws`'s existing
+GitHub OIDC trust) — not reviving AppRole. Same reasoning as the laptop/
+in-cluster cases above: a self-rotating identity CI already has natively,
+not a new static secret for this repo to manage.

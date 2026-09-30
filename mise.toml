@@ -197,7 +197,6 @@ tofu -chdir=03-storage/scaleway                providers lock -platform=darwin_a
 tofu -chdir=04-vpn/wireguard-site-to-site      providers lock -platform=darwin_arm64 -platform=linux_amd64
 tofu -chdir=04-vpn/wireguard-exit              providers lock -platform=darwin_arm64 -platform=linux_amd64
 tofu -chdir=10-cluster/scaleway                providers lock -platform=darwin_arm64 -platform=linux_amd64
-tofu -chdir=11-secrets/openbao/bootstrap        providers lock -platform=darwin_arm64 -platform=linux_amd64
 tofu -chdir=11-secrets/openbao/managed          providers lock -platform=darwin_arm64 -platform=linux_amd64
 tofu -chdir=12-monitoring/grafana/managed       providers lock -platform=darwin_arm64 -platform=linux_amd64
 """

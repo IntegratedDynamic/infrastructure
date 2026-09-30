@@ -1,5 +1,6 @@
-# Everything sensitive (AppRole creds, oidc_client_secret) is in a gitignored
-# local.auto.tfvars instead. This file names the terraform workspace
+# Everything sensitive (oidc_client_secret, var.root_token for an emergency
+# apply) is in a gitignored local.auto.tfvars instead. This file names the
+# terraform workspace
 # ("11-secrets-openbao-managed-dev") and carries the non-secret cross-root
 # state bucket/key config below — see
 # 00-foundation/scaleway/env/00-foundation-scaleway-dev.tfvars for the full
@@ -17,9 +18,6 @@ wireguard_state_key    = "04-vpn/wireguard-site-to-site/04-vpn-wireguard-site-to
 
 wireguard_exit_state_bucket = "id-terraform-state-04-vpn-wireguard-exit"
 wireguard_exit_state_key    = "04-vpn/wireguard-exit/04-vpn-wireguard-exit-dev/terraform.tfstate"
-
-openbao_bootstrap_state_bucket = "id-terraform-state-05-secrets-openbao-bootstrap"
-openbao_bootstrap_state_key    = "11-secrets/openbao/bootstrap/11-secrets-openbao-bootstrap-dev/terraform.tfstate"
 
 foundation_scaleway_state_bucket = "id-terraform-state-00-foundation-scaleway"
 foundation_scaleway_state_key    = "00-foundation/scaleway/00-foundation-scaleway-dev/terraform.tfstate"

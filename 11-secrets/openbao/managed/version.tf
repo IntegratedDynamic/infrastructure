@@ -50,51 +50,56 @@ terraform {
   }
 }
 
-# role_id/secret_id for the `terraform` AppRole — read straight from
-# 11-secrets/openbao/bootstrap's own state instead of a hand-copied variable.
-# Safe to reference from the provider block below: this data source has no
-# dependency on the vault provider itself (it's a plain S3 backend read), so
-# there's no ordering cycle — same category of pattern as
-# 10-cluster/scaleway/version.tf's kubernetes/helm providers reading straight
-# off a resource attribute.
-data "terraform_remote_state" "openbao_bootstrap" {
-  backend = "s3"
-  config = merge(local.scaleway_state_backend, {
-    bucket = var.openbao_bootstrap_state_bucket
-    key    = var.openbao_bootstrap_state_key
-  })
+# infra#115 follow-up (2026-09-30, part 2): AppRole is GONE — removed
+# entirely, along with the 11-secrets/openbao/bootstrap root that used to
+# mint it (see that root's own git-history-final commit message for the
+# full teardown). Confirmed live against a restored ephemeral-cluster
+# OpenBao snapshot that the AppRole `secret_id` (generated once 2026-07-25,
+# "rotate by tainting" never actually run since) had been purged by OpenBao
+# itself — role_id and the `terraform` policy were both still intact and
+# correct, only the secret_id was gone — breaking Crossplane's
+# provider-opentofu Workspace with a 403 on the login call itself.
+#
+# Investigating the fix (this root's own README, "Why AppRole and not
+# OIDC") turned up that AppRole's original justification — "a
+# service/pipeline authenticating without a human in the loop" — never
+# actually applied to this root's OWN non-in-cluster execution context: an
+# admin's laptop is a HUMAN, at an interactive session, for which this
+# repo's OIDC-via-Dex was already the established pattern everywhere else
+# (ArgoCD, Grafana, human OpenBao UI login) — this root's provider config
+# was simply the one place still wired to a static machine credential for a
+# case that never needed one. No CI workflow applies this root today either
+# (confirmed: no real reference to it in .github/workflows/, only an
+# unrelated comment) — the "portable, no cluster context" property that WAS
+# AppRole's genuine advantage over Kubernetes auth has no current consumer.
+#
+# Two auth mechanisms remain, picked by var.vault_auth_method (never more
+# than one at once — each dynamic block below is empty, i.e. entirely
+# absent from the rendered config, unless it's the selected method), plus
+# var.root_token as a separate, explicitly-emergency-only escape hatch (see
+# that variable's own comment).
+variable "vault_auth_method" {
+  description = "Which auth_login mechanism below this root's own applier uses. \"oidc\" (default): a human admin's interactive browser login via Dex (auth_login_oidc, role = var.vault_oidc_role) — for an admin's laptop, the only non-in-cluster execution context this root has today. \"kubernetes\": for the in-cluster provider-opentofu Workspace — no long-lived secret at all, the pod's own auto-rotated ServiceAccount token is presented instead (vault_kubernetes_auth_backend_role.crossplane, main.tf)."
+  type        = string
+  default     = "oidc"
+  validation {
+    condition     = contains(["oidc", "kubernetes"], var.vault_auth_method)
+    error_message = "vault_auth_method must be \"oidc\" or \"kubernetes\" — \"approle\" was removed (infra#115 follow-up, 2026-09-30). For a one-off bootstrap/emergency apply, set var.root_token (TF_VAR_root_token) instead — it overrides whichever method is selected here, see provider \"vault\" block's own comment."
+  }
 }
 
-# Three ways this root's own applier can authenticate to OpenBao — which one
-# is live is picked by var.vault_auth_method, never more than one at once
-# (each dynamic block below is empty, i.e. entirely absent from the
-# rendered config, unless it's the selected method).
-#
-# infra#115 follow-up (2026-09-30): "approle" used to be the only option.
-# Confirmed live against a restored ephemeral-cluster OpenBao snapshot that
-# the AppRole `secret_id` (11-secrets/openbao/bootstrap, generated once
-# 2026-07-25, "rotate by tainting" never actually run since) had been purged
-# by OpenBao itself (`bao list auth/approle/role/terraform/secret-id` came
-# back empty — role_id and the `terraform` policy were both still intact and
-# correct, only the secret_id was gone), breaking Crossplane's
-# provider-opentofu Workspace (this root's in-cluster, unattended applier)
-# with a 403 on the login call itself. AppRole's whole shape requires
-# SOMETHING to mint and hand out that secret_id out-of-band, with no
-# automatic renewal — exactly the kind of static, easy-to-forget credential
-# Kubernetes auth doesn't have at all: the Workspace pod's own projected
-# ServiceAccount token is auto-rotated by Kubernetes itself, nothing for
-# this repo to remember to rotate. AppRole stays the default (and stays
-# needed) because it's the only one of the three that works from OUTSIDE a
-# trusted cluster at all (an admin's laptop, CI) — Kubernetes auth only
-# works from a pod OpenBao's kubernetes auth backend config already trusts.
-variable "vault_auth_method" {
-  description = "Which of the three auth_login mechanisms below this root's own applier uses. \"approle\" (default): the AppRole identity from 11-secrets/openbao/bootstrap — portable, the only one that works from an admin's laptop or CI with no cluster context, but a static secret_id someone has to remember to rotate (see vault_kubernetes_auth_backend_role.crossplane's own comment in main.tf for the incident this follows up on). \"kubernetes\": for the in-cluster provider-opentofu Workspace — no long-lived secret at all, the pod's own auto-rotated ServiceAccount token is presented instead. \"token\": a root/admin token (var.root_token) for a one-off bootstrap apply (e.g. creating the \"crossplane\" Kubernetes-auth role itself, before it exists, or rotating a dead AppRole secret_id) or debugging via kubectl port-forward."
+# Only read when var.vault_auth_method = "oidc" — a role on the SAME `oidc`
+# auth backend (auth_backend.oidc, main.tf) the human `admin` role already
+# uses, deliberately its OWN, narrower role rather than reusing `admin`:
+# `admin` grants full sys/* sudo (meant for a human doing anything via the
+# UI), while this root's own applies only ever need the same "terraform"
+# policy AppRole used to grant (vault_policy.terraform, main.tf) — reusing
+# `admin` here would silently widen every routine `tofu apply`'s blast
+# radius from "structure + kv/apps" to "everything, with sudo".
+variable "vault_oidc_role" {
+  description = "OIDC auth role name (auth/oidc/role/<name>, see vault_jwt_auth_backend_role.terraform_cli in main.tf) this root's applier logs in as when vault_auth_method = \"oidc\"."
   type        = string
-  default     = "approle"
-  validation {
-    condition     = contains(["approle", "kubernetes", "token"], var.vault_auth_method)
-    error_message = "vault_auth_method must be \"approle\", \"kubernetes\", or \"token\"."
-  }
+  default     = "terraform-cli"
 }
 
 # Only read when var.vault_auth_method = "kubernetes" — the role_name
@@ -109,11 +114,16 @@ variable "vault_kubernetes_role" {
   default     = "crossplane"
 }
 
-# Authenticates as one of three identities depending on var.vault_auth_method
-# — see that variable's own comment. Address hardcoded, not read from
-# VAULT_ADDR: OpenBao's own CLI populates BAO_ADDR/BAO_TOKEN, not Vault's
-# VAULT_ADDR/VAULT_TOKEN, so relying on the env var is a trap (see the
-# bootstrap root's version.tf/README for the incident this came from).
+# Authenticates via var.vault_auth_method's chosen mechanism, UNLESS
+# var.root_token is set (non-null) — that's a separate, explicit emergency
+# override, not a third method: when present it takes priority regardless
+# of vault_auth_method, for a one-off bootstrap apply (e.g. creating
+# vault_jwt_auth_backend_role.terraform_cli / vault_kubernetes_auth_backend_role.crossplane
+# themselves, before either exists to log into) or kubectl-port-forward
+# debugging. Address hardcoded, not read from VAULT_ADDR: OpenBao's own CLI
+# populates BAO_ADDR/BAO_TOKEN, not Vault's VAULT_ADDR/VAULT_TOKEN, so
+# relying on the env var is a trap (confirmed live, see git history for the
+# incident this came from).
 provider "vault" {
   # Defaults to the same internal Service address Argo Workflows already
   # uses in-cluster (http://openbao.openbao.svc:8200, matches
@@ -123,8 +133,8 @@ provider "vault" {
   # "Internal cluster DNS" section) instead of the public route. Bring the tunnel up
   # first (`wg-quick up <peer_conf_paths output>`).
   #
-  # Overridden via -var for the other real execution contexts this root
-  # runs in: the in-cluster Crossplane Workspace (gitops repo
+  # Overridden via -var for the other real execution context this root runs
+  # in: the in-cluster Crossplane Workspace (gitops repo
   # services/platform/crossplane/config) passes this same address directly
   # (redundant with the default now, kept explicit since it's the whole
   # reason that Workspace exists: OpenBao not being reachable from outside
@@ -132,34 +142,43 @@ provider "vault" {
   # ever changing back). A direct port-forward (`kubectl port-forward -n
   # openbao openbao-0 8200:8200`, requires Kubernetes permissions) is for
   # when the tunnel itself is the thing being debugged, or for a one-off
-  # `-var vault_auth_method=token` bootstrap apply:
-  # -var vault_address=http://127.0.0.1:8200/. The public route
-  # (https://openbao.scalepack.fr/) still works too — that's still there for
-  # human OIDC/UI login — just isn't the default anymore.
+  # var.root_token bootstrap apply: -var vault_address=http://127.0.0.1:8200/.
+  # The public route (https://openbao.scalepack.fr/) still works too —
+  # that's still there for human OIDC/UI login — just isn't the default
+  # anymore.
   address = var.vault_address
 
-  dynamic "auth_login" {
-    for_each = var.vault_auth_method == "approle" ? [1] : []
+  # Human admin, interactive browser login via Dex — dedicated block (unlike
+  # kubernetes below, hashicorp/vault ~> 5.0 DOES ship auth_login_oidc,
+  # confirmed against the installed 5.10.1 provider's own schema): opens a
+  # local listener + browser tab itself, same flow `bao login -method=oidc`
+  # uses under the hood (same underlying SDK) — not expressible via the
+  # generic auth_login block at all, since this is a real interactive
+  # redirect/callback dance, not a single synchronous POST. Against the SAME
+  # already-registered redirect URI (gitops repo
+  # services/platform/dex/chart's staticClients.openbao already lists
+  # http://localhost:8250/oidc/callback — that's the CLI's own default local
+  # callback, confirmed present since before this change, no new Dex config
+  # needed). Skipped when var.root_token overrides (below).
+  dynamic "auth_login_oidc" {
+    for_each = var.root_token == null && var.vault_auth_method == "oidc" ? [1] : []
     content {
-      path = "auth/approle/login"
-      parameters = {
-        role_id   = data.terraform_remote_state.openbao_bootstrap.outputs.role_id
-        secret_id = data.terraform_remote_state.openbao_bootstrap.outputs.secret_id
-      }
+      role  = var.vault_oidc_role
+      mount = "oidc"
     }
   }
 
   # No dedicated auth_login_kubernetes block in hashicorp/vault ~> 5.0
   # (confirmed against this provider version's own schema, 5.10.1) — plain
-  # auth_login against auth/kubernetes/login, same shape as the approle
-  # block above. file() reads the pod's own projected ServiceAccount token
-  # from the standard in-cluster path -- only ever evaluated when this
-  # dynamic block's for_each actually produces the one element, i.e. only
-  # inside the provider-opentofu pod where that file exists at all. See
-  # vault_kubernetes_auth_backend_role.crossplane (main.tf) for the role
-  # this logs into.
+  # auth_login against auth/kubernetes/login instead, same shape as the
+  # oidc block above. file() reads the pod's own projected ServiceAccount
+  # token from the standard in-cluster path -- only ever evaluated when
+  # this dynamic block's for_each actually produces the one element, i.e.
+  # only inside the provider-opentofu pod where that file exists at all.
+  # See vault_kubernetes_auth_backend_role.crossplane (main.tf) for the
+  # role this logs into. Skipped when var.root_token overrides (below).
   dynamic "auth_login" {
-    for_each = var.vault_auth_method == "kubernetes" ? [1] : []
+    for_each = var.root_token == null && var.vault_auth_method == "kubernetes" ? [1] : []
     content {
       path = "auth/kubernetes/login"
       parameters = {
@@ -169,11 +188,11 @@ provider "vault" {
     }
   }
 
-  token = var.vault_auth_method == "token" ? var.root_token : null
+  token = var.root_token
 }
 
 variable "root_token" {
-  description = "OpenBao root/admin token — only read when vault_auth_method = \"token\" (a one-off bootstrap apply or kubectl-port-forward debugging session). Pass via TF_VAR_root_token, never a CLI flag, to keep it out of shell history."
+  description = "OpenBao root/admin token — an explicit emergency/bootstrap override, NOT a normal execution path (see provider \"vault\" block's own comment): when set, takes priority over var.vault_auth_method entirely. Pass via TF_VAR_root_token, never a CLI flag, to keep it out of shell history."
   default     = null
   type        = string
   sensitive   = true
