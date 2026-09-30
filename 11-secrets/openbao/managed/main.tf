@@ -106,27 +106,25 @@ resource "vault_kubernetes_auth_backend_role" "external_secrets" {
 # revision-hashed, specifically so this binding survives a provider
 # upgrade), running THIS root's own `tofu apply` unattended on its own
 # reconcile loop (issue #101). token_policies reuses the SAME "terraform"
-# policy the AppRole identity (11-secrets/openbao/bootstrap) already has —
-# same permission scope, a different way to prove identity, not a narrower
-# or broader grant.
+# policy this root's own OIDC role (vault_jwt_auth_backend_role.terraform_cli,
+# below) also gets — same permission scope, a different way to prove
+# identity, not a narrower or broader grant.
 #
-# infra#115 follow-up (2026-09-30): added after confirming live that the
-# AppRole secret_id this Workspace used to authenticate with had been
-# purged by OpenBao itself on a restored ephemeral-cluster snapshot (role_id
-# and the `terraform` policy were both still intact — see
-# version.tf's own vault_auth_method comment for the full incident). AppRole
-# requires a static secret_id someone has to remember to rotate before its
-# TTL lapses; Kubernetes auth needs nothing this repo has to manage at all —
-# the pod's own ServiceAccount token is minted and rotated by Kubernetes
-# itself. AppRole stays the default for this root's OTHER execution
-# contexts (an admin's laptop, CI) that aren't a trusted in-cluster pod —
-# this role is additive, not a replacement.
+# infra#115 follow-up (2026-09-30, part 1): added after confirming live that
+# the AppRole secret_id this Workspace used to authenticate with (back when
+# this root's applier had only one auth mechanism) had been purged by
+# OpenBao itself on a restored ephemeral-cluster snapshot. Kubernetes auth
+# needs nothing this repo has to manage at all — the pod's own
+# ServiceAccount token is minted and rotated by Kubernetes itself. Part 2
+# (see version.tf's own vault_auth_method comment) removed AppRole
+# entirely, including the 11-secrets/openbao/bootstrap root that used to
+# mint it — vault_policy.terraform below is what that root used to own.
 resource "vault_kubernetes_auth_backend_role" "crossplane" {
   backend                          = vault_auth_backend.kubernetes.path
   role_name                        = "crossplane"
   bound_service_account_names      = ["provider-opentofu"]
   bound_service_account_namespaces = ["crossplane-system"]
-  token_policies                   = ["terraform"]
+  token_policies                   = [vault_policy.terraform.name]
   token_ttl                        = 3600
 }
 
@@ -173,7 +171,93 @@ resource "vault_jwt_auth_backend_role" "admin" {
   token_ttl      = 3600
 }
 
+# Same backend, same Dex client (staticClients.openbao already lists
+# http://localhost:8250/oidc/callback — the CLI/Terraform's own default
+# local callback, confirmed present since before infra#115's AppRole
+# removal, no new Dex config needed for this role) — but its OWN, narrower
+# role rather than reusing `admin` above: `admin` grants full sys/* sudo
+# (meant for a human doing anything via the UI), while this root's own
+# `tofu apply` (version.tf's provider "vault", vault_auth_method = "oidc")
+# only ever needs the same "terraform" policy AppRole used to grant before
+# infra#115 removed it — reusing `admin` here would silently widen every
+# routine apply's blast radius from "structure + kv/apps" to "everything,
+# with sudo".
+resource "vault_jwt_auth_backend_role" "terraform_cli" {
+  backend   = vault_jwt_auth_backend.oidc.path
+  role_name = "terraform-cli"
+  role_type = "oidc"
+
+  user_claim        = "email"
+  groups_claim      = "groups"
+  oidc_scopes       = ["groups", "email"]
+  bound_claims_type = "string"
+  bound_claims = {
+    groups = "IntegratedDynamic:Admin"
+  }
+  allowed_redirect_uris = [
+    "https://openbao.scalepack.fr/ui/vault/auth/oidc/oidc/callback",
+    "http://localhost:8250/oidc/callback",
+  ]
+
+  token_policies = [vault_policy.terraform.name]
+  token_ttl      = 3600
+}
+
 # --- Policies ---
+
+# Migrated from 11-secrets/openbao/bootstrap (infra#115 follow-up,
+# 2026-09-30, part 2 — that root deleted entirely along with the AppRole it
+# existed solely to mint, see version.tf's own vault_auth_method comment for
+# the full "why"). Content unchanged from that root's own vault_policy.terraform
+# — scoped to structure (mounts, auth methods, roles, policies) and
+# kv/apps/* secret content, deliberately no "sudo path *" the way the human
+# `admin` policy above has, and no delete on kv/data|metadata/apps/* — this
+# identity creates/reconciles secret content, it doesn't destroy it.
+resource "vault_policy" "terraform" {
+  name = "terraform"
+
+  policy = <<-EOT
+    path "sys/mounts" {
+      capabilities = ["read", "list"]
+    }
+
+    path "sys/mounts/*" {
+      capabilities = ["create", "read", "update", "delete", "list", "sudo"]
+    }
+
+    path "sys/auth" {
+      capabilities = ["read", "list"]
+    }
+
+    path "sys/auth/*" {
+      capabilities = ["create", "read", "update", "delete", "list", "sudo"]
+    }
+
+    # Auth backend config/roles (e.g. auth/kubernetes/role/*, auth/approle/role/*)
+    # — not the unauthenticated login sub-paths, which policies don't gate anyway.
+    path "auth/*" {
+      capabilities = ["create", "read", "update", "delete", "list"]
+    }
+
+    path "sys/policies/acl" {
+      capabilities = ["list"]
+    }
+
+    path "sys/policies/acl/*" {
+      capabilities = ["create", "read", "update", "delete", "list"]
+    }
+
+    # KV v2 secret data this identity owns the lifecycle of. No "delete" —
+    # this identity creates/reconciles secret content, it doesn't destroy it.
+    path "kv/data/apps/*" {
+      capabilities = ["create", "read", "update", "list"]
+    }
+
+    path "kv/metadata/apps/*" {
+      capabilities = ["create", "read", "update", "list"]
+    }
+  EOT
+}
 
 resource "vault_policy" "eso_read" {
   name = "eso-read"
@@ -242,8 +326,8 @@ data "terraform_remote_state" "backup_scaleway" {
 
 # 04-vpn/wireguard-site-to-site's own state — read directly instead of a
 # hand-copied local.auto.tfvars value, same as every other cross-root
-# credential on this page (dns_scaleway/backup_scaleway above,
-# openbao_bootstrap in version.tf). Key is workspace_key_prefix/workspace/key
+# credential on this page (dns_scaleway/backup_scaleway above). Key is
+# workspace_key_prefix/workspace/key
 # from that root's version.tf — left unchanged by both the 04-network ->
 # 04-vpn rename and the later wireguard -> wireguard-site-to-site rename
 # (CLAUDE.md's "backend keys are decoupled from paths"), so this doesn't
