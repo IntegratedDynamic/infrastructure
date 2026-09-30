@@ -100,6 +100,36 @@ resource "vault_kubernetes_auth_backend_role" "external_secrets" {
   token_ttl                        = 3600
 }
 
+# provider-opentofu/crossplane-system — Crossplane's own Workspace controller
+# (gitops repo services/platform/crossplane/chart's DeploymentRuntimeConfig
+# pins the ServiceAccount name "provider-opentofu" deterministically, not
+# revision-hashed, specifically so this binding survives a provider
+# upgrade), running THIS root's own `tofu apply` unattended on its own
+# reconcile loop (issue #101). token_policies reuses the SAME "terraform"
+# policy the AppRole identity (11-secrets/openbao/bootstrap) already has —
+# same permission scope, a different way to prove identity, not a narrower
+# or broader grant.
+#
+# infra#115 follow-up (2026-09-30): added after confirming live that the
+# AppRole secret_id this Workspace used to authenticate with had been
+# purged by OpenBao itself on a restored ephemeral-cluster snapshot (role_id
+# and the `terraform` policy were both still intact — see
+# version.tf's own vault_auth_method comment for the full incident). AppRole
+# requires a static secret_id someone has to remember to rotate before its
+# TTL lapses; Kubernetes auth needs nothing this repo has to manage at all —
+# the pod's own ServiceAccount token is minted and rotated by Kubernetes
+# itself. AppRole stays the default for this root's OTHER execution
+# contexts (an admin's laptop, CI) that aren't a trusted in-cluster pod —
+# this role is additive, not a replacement.
+resource "vault_kubernetes_auth_backend_role" "crossplane" {
+  backend                          = vault_auth_backend.kubernetes.path
+  role_name                        = "crossplane"
+  bound_service_account_names      = ["provider-opentofu"]
+  bound_service_account_namespaces = ["crossplane-system"]
+  token_policies                   = ["terraform"]
+  token_ttl                        = 3600
+}
+
 # --- OIDC auth: human login via Dex (gitops repo platform/scaleway/dex.yml,
 # staticClients.openbao). oidc_client_secret is Terraform-generated (see
 # random_password.openbao_client_secret below) — it's an arbitrary shared
