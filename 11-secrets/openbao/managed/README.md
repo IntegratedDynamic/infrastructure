@@ -148,13 +148,25 @@ convention, not automation.
 
 ## Credentials
 
-- **AppRole** (`var.approle_role_id` / `var.approle_secret_id`): from
-  `11-secrets/openbao/bootstrap`'s outputs —
-
-  ```bash
-  tofu -chdir=../../bootstrap/openbao output -raw role_id
-  tofu -chdir=../../bootstrap/openbao output -raw secret_id
-  ```
+- **`var.vault_auth_method`** (`"approle"` default / `"kubernetes"` /
+  `"token"`, see `version.tf`'s own comment): which identity this root's
+  applier logs into OpenBao as.
+  - `"approle"`: the `terraform` AppRole from `11-secrets/openbao/bootstrap`,
+    read straight from that root's remote state — portable, the only one
+    that works outside a trusted cluster (an admin's laptop, CI), but a
+    static `secret_id` someone has to remember to rotate before its TTL
+    lapses (infra#115 follow-up, 2026-09-30: confirmed live that nobody had,
+    and OpenBao had already purged it).
+  - `"kubernetes"`: for the in-cluster Crossplane Workspace only (gitops
+    repo `services/platform/crossplane/config`) — logs in as
+    `vault_kubernetes_auth_backend_role.crossplane` (main.tf), bound to
+    `provider-opentofu`'s own ServiceAccount. No secret to manage; the pod's
+    projected ServiceAccount token is minted and rotated by Kubernetes
+    itself.
+  - `"token"`: `var.root_token` (`TF_VAR_root_token`, never a CLI flag) for
+    a one-off bootstrap apply (e.g. this root didn't exist yet the first
+    time, or the AppRole `secret_id` needs rotating) or `kubectl
+    port-forward` debugging.
 
 - **`var.dex_github_connector`**, **`var.secrets_sync_github_eso_private_key`**:
   external credentials this identity's policy can't read back on its own
