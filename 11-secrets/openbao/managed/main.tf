@@ -108,7 +108,7 @@ resource "vault_kubernetes_auth_backend_role" "external_secrets" {
 resource "vault_jwt_auth_backend" "oidc" {
   path               = "oidc"
   type               = "oidc"
-  oidc_discovery_url = "https://auth.scalepack.fr"
+  oidc_discovery_url = "https://auth.staging.scalepack.fr"
   oidc_client_id     = "openbao"
   oidc_client_secret = random_password.openbao_client_secret.result
   default_role       = "admin"
@@ -136,7 +136,7 @@ resource "vault_jwt_auth_backend_role" "admin" {
     groups = "IntegratedDynamic:Admin"
   }
   allowed_redirect_uris = [
-    "https://openbao.scalepack.fr/ui/vault/auth/oidc/oidc/callback",
+    "https://openbao.staging.scalepack.fr/ui/vault/auth/oidc/oidc/callback",
     "http://localhost:8250/oidc/callback",
   ]
 
@@ -171,7 +171,7 @@ resource "vault_jwt_auth_backend_role" "terraform_cli" {
     groups = "IntegratedDynamic:Admin"
   }
   allowed_redirect_uris = [
-    "https://openbao.scalepack.fr/ui/vault/auth/oidc/oidc/callback",
+    "https://openbao.staging.scalepack.fr/ui/vault/auth/oidc/oidc/callback",
     "http://localhost:8250/oidc/callback",
   ]
 

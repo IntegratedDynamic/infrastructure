@@ -81,7 +81,7 @@ terraform {
 # pod reaching the cluster's own public ingress from behind it hits a
 # hairpin-NAT gap ("context deadline exceeded"). Grafana's basic-auth API
 # path isn't behind the sso-guard edge policy, so the public route
-# (https://grafana.scalepack.fr/) still works if the tunnel is down — just
+# (https://grafana.staging.scalepack.fr/) still works if the tunnel is down — just
 # isn't the default.
 provider "grafana" {
   url  = var.grafana_url

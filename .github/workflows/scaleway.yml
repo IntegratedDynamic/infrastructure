@@ -114,7 +114,7 @@ jobs:
       - uses: ./.github/actions/terraform
         with:
           root: 10-cluster/scaleway
-          tfvars-file: 10-cluster-scaleway-dev.tfvars
+          tfvars-file: 10-cluster-scaleway-staging.tfvars
           command: ${{ github.event.inputs.command }}
           state-backend: scaleway
           infisical-oidc-audience: '' # this root doesn't consume Infisical

@@ -4,7 +4,7 @@ name: OpenTofu — Scaleway ephemeral cluster
 run-name: "OpenTofu ${{ (github.event.action == 'closed' || github.event.action == 'unlabeled') && 'hard-destroy' || 'apply' }} — Ephemeral Cluster pr-${{ github.event.pull_request.number }} @ ${{ github.event.pull_request.head.ref }}"
 
 # Companion to scaleway.yml's manual workflow_dispatch path (iteration 1,
-# unchanged, still the proven route for main's own 10-cluster-scaleway-dev
+# unchanged, still the proven route for main's own 10-cluster-scaleway-staging
 # workspace). This is iteration 2: a PR on THIS repo, carrying the
 # `ephemeral-cluster` label, gets its own full copy of the homelab cluster in
 # its own OpenTofu workspace (pr-<number>) and a "-pr-<number>" suffix on
@@ -95,7 +95,7 @@ jobs:
           set -euo pipefail
           slug="pr-${PR_NUMBER}"
           tfvars="10-cluster-scaleway-${slug}.tfvars"
-          cp "10-cluster-scaleway-dev.tfvars" "${tfvars}"
+          cp "10-cluster-scaleway-staging.tfvars" "${tfvars}"
           # cluster_name already exists in the dev tfvars (line 1) -- HCL
           # rejects a duplicate attribute, so this overrides it IN PLACE
           # instead of appending a second one (confirmed live 2026-09-16:
@@ -201,7 +201,7 @@ jobs:
           {
             echo "### Ephemeral Dex login (bypasses GitHub SSO)"
             echo ""
-            echo "- URL: https://auth-pr-${{ github.event.pull_request.number }}.scalepack.fr"
+            echo "- URL: https://auth-pr-${{ github.event.pull_request.number }}.staging.scalepack.fr"
             echo "- Username: \`ephemeral\`"
             echo "- Password: \`${password}\`"
             echo ""
