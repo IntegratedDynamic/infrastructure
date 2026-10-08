@@ -47,14 +47,44 @@ variable "gitops_revision" {
 }
 
 # Revision of THIS repo (infrastructure) ArgoCD's secrets-apps/monitoring-apps/
-# backups-apps Applications pull platform-apps/ from — see argocd.tf's
-# argocd_platform_apps helm_release. Same "override on your own branch to
-# test end-to-end, never merge that change" DevX trick as gitops_revision
-# above (same apply-time fallback-to-main too, see argocd.tf's
-# effective_infra_revision); MUST stay "main" on origin/main.
+# backups-apps Applications (AND, same mechanism, Crossplane's own
+# provider-opentofu Workspaces, e.g. 11-secrets/openbao/managed -- see that
+# Workspace's own `module` git ref) pull from — see argocd.tf's
+# argocd_platform_apps helm_release / effective_infra_revision local. Same
+# "override on your own branch, test end-to-end, never merge that change"
+# DevX trick as gitops_revision above (same apply-time fallback-to-main
+# too), but unlike gitops_revision this one defaults to null, not "main" --
+# argocd.tf auto-detects the CURRENT LOCAL git branch of THIS repo (`git
+# rev-parse --abbrev-ref HEAD`, run from this module's own directory, still
+# inside the repo) and uses that instead, so a human running `tofu plan/
+# apply` locally from a feature branch gets this DevX trick for free,
+# without remembering a `-var infra_revision=<branch>` override at all.
+# Confirmed live (2026-10-08) that forgetting that override is a real,
+# silent failure mode: Crossplane's own Workspace kept applying
+# 11-secrets/openbao/managed from main while every OTHER domain (ArgoCD/
+# gitops-sourced) had already been overridden onto the branch under test,
+# reverting OpenBao's OIDC config to the wrong domain with no error anyone
+# would notice until actually trying to log in.
+#
+# An explicit override (CI's generated per-PR tfvars, or a human
+# deliberately testing a DIFFERENT branch than the one checked out) still
+# wins -- this is nullable, not defaulted to "main", specifically so
+# argocd.tf can tell "unset, auto-detect" apart from "explicitly main".
+# MUST stay unset (null) on origin/main -- a committed non-null default
+# would defeat the auto-detection for everyone.
+#
+# In a detached-HEAD checkout (every pull_request-triggered CI run today,
+# e.g. scaleway-ephemeral.yml) `git rev-parse --abbrev-ref HEAD` returns
+# the literal string "HEAD" -- harmless: argocd.tf's existing existence
+# probe never finds a real branch named "HEAD" on origin, so it degrades
+# to "main" exactly like today's CI default already does. A
+# workflow_dispatch-triggered run (scaleway.yml) checks out a real branch
+# non-detached (actions/checkout's own behavior for a branch ref), so this
+# auto-detects correctly there too -- no CI-side change needed for either
+# workflow.
 variable "infra_revision" {
   type    = string
-  default = "main"
+  default = null
 }
 
 variable "update_kubeconfig" {
@@ -68,7 +98,7 @@ variable "update_kubeconfig" {
 # the Let's Encrypt staging root CA (files/letsencrypt-staging-root-ca.pem
 # -- confirmed against Let's Encrypt's own docs that the ROOT, not an
 # intermediate, is the one safe to pin long-term) into every component that
-# makes real server-side HTTPS calls to the public https://auth.scalepack.fr
+# makes real server-side HTTPS calls to the public https://auth.staging.scalepack.fr
 # for OIDC (ArgoCD, Grafana, OpenBao -- confirmed via each one's actual
 # config; argo-workflows and Dex itself confirmed NOT to need this, see
 # argocd.tf's own comments). Exists because staging has a vastly higher
@@ -83,7 +113,7 @@ variable "update_kubeconfig" {
 variable "letsencrypt_staging" {
   type        = bool
   default     = false
-  description = "Use Let's Encrypt staging (higher rate limit, untrusted CA) instead of production for the platform's public wildcard cert. Also injects the staging root CA into ArgoCD/Grafana/OpenBao so their own OIDC calls to auth.scalepack.fr still work."
+  description = "Use Let's Encrypt staging (higher rate limit, untrusted CA) instead of production for the platform's public wildcard cert. Also injects the staging root CA into ArgoCD/Grafana/OpenBao so their own OIDC calls to auth.staging.scalepack.fr still work."
 }
 
 
@@ -92,6 +122,19 @@ variable "letsencrypt_staging" {
 #   default = "main"
 # }
 
+# The platform's own base public domain -- every *-gateway chart (gitops
+# repo) and this root's own Dex/ArgoCD OIDC config (argocd.tf) build their
+# public hostname as "<service>${local.host_suffix}.${var.domain}". Plain
+# required variable, set per workspace's own env/*.tfvars -- "staging.
+# scalepack.fr" today, a future prod workspace's own tfvars would set
+# "prod.scalepack.fr" instead. No default on purpose: every workspace
+# (staging, a future prod, the ephemeral workflow's copy of staging's own
+# tfvars) must say explicitly which domain it serves.
+variable "domain" {
+  description = "The platform's base public domain (e.g. \"staging.scalepack.fr\"). Every service hostname is built as \"<service><hostSuffix>.<domain>\"."
+  type        = string
+}
+
 # Threaded into networking_resources_apps' Application (argocd.tf) as the
 # `hostSuffix` Helm parameter, which every `*-gateway` chart appends to its
 # own hostname (gitops repo). Deliberately generic, not "pr_number" -- in
@@ -99,11 +142,11 @@ variable "letsencrypt_staging" {
 # to "pr-<number>", but nothing here cares what the string actually is,
 # only that it's unique per concurrent ephemeral cluster. Empty by default
 # (main's own workspace): zero behavior change, every hostname stays
-# exactly what it is today (e.g. "argocd.scalepack.fr"). When set, every
-# hostname gets "-${var.env_suffix}" appended (e.g.
-# "argocd-pr-123.scalepack.fr") -- a flat, single-DNS-label suffix, not a
-# nested subdomain, so it stays covered by gateway-config's existing
-# *.scalepack.fr wildcard cert with zero change to that chart.
+# exactly what it is today (e.g. "argocd.staging.scalepack.fr"). When set,
+# every hostname gets "-${var.env_suffix}" appended (e.g.
+# "argocd-pr-123.staging.scalepack.fr") -- a flat, single-DNS-label suffix,
+# not a nested subdomain, so it stays covered by gateway-config's existing
+# *.staging.scalepack.fr wildcard cert with zero change to that chart.
 # nullable = false: argocd.tf's local.host_suffix only tests `!= ""`, which
 # would silently treat an explicit `env_suffix = null` override as non-empty
 # (null != "" is true in Terraform) and then crash deep in a string
@@ -184,7 +227,7 @@ variable "dns_scaleway_state_key" {
 # infra#113: the whole platform-apps DAG this homelab runs, as data -- see
 # modules/platform-apps-dag/variables.tf's own var.domains for the full
 # schema (kept in sync by hand, Terraform has no cross-root shared-type
-# import). Populated by env/10-cluster-scaleway-dev.tfvars; this root's own
+# import). Populated by env/10-cluster-scaleway-staging.tfvars; this root's own
 # argocd.tf only merges in the handful of dynamic values (resolved
 # revision, letsencrypt_staging/env_suffix-derived parameters, main.tf's own
 # Secret dependencies) that can't be expressed as tfvars data before calling

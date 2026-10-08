@@ -30,7 +30,13 @@ iam_bootstrap_scaleway_state_key    = "01-iam/bootstrap/scaleway/01-iam-bootstra
 # gateway/cert-restore restores a staging-issued wildcard cert on every
 # boot, so the whole platform runs on LE staging). This flips OpenBao's own
 # oidc_discovery_ca_pem to the LE staging root so its server-side OIDC
-# discovery call to auth.scalepack.fr trusts the cert envoy-gateway
+# discovery call to auth.staging.scalepack.fr trusts the cert envoy-gateway
 # actually serves, instead of failing "x509: certificate signed by unknown
 # authority". Flip both roots back together if/when moving to prod certs.
 letsencrypt_staging = true
+
+# var.domain -- must match 10-cluster/scaleway's own var.domain for this
+# same cluster (see that root's env tfvars). Kept manually in sync, same
+# pattern letsencrypt_staging above already uses -- no cross-root read for
+# a plain string.
+domain = "staging.scalepack.fr"

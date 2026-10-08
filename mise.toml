@@ -94,7 +94,7 @@ run = 'sudo wg-quick down "$(pwd)/generated/${usage_peer?}.conf"'
 # Mirrors .github/actions/terraform/action.yml's own apply/destroy/
 # hard-destroy commands exactly. Workspace/tfvars hardcoded (not derived
 # like [tasks.local-apply]'s `tofu workspace show`) since this root has
-# exactly one dev environment. Exports AWS_ACCESS_KEY_ID/
+# exactly one staging environment. Exports AWS_ACCESS_KEY_ID/
 # AWS_SECRET_ACCESS_KEY from `scw config get` itself, every task -- see this
 # file's own header comment / CLAUDE.md's Setup section for why the s3
 # backend needs those two literal env var names specifically; `scw config
@@ -107,8 +107,8 @@ run = """
 export AWS_ACCESS_KEY_ID=$(scw config get access-key)
 export AWS_SECRET_ACCESS_KEY=$(scw config get secret-key)
 tofu init
-tofu workspace select -or-create 10-cluster-scaleway-dev
-tofu plan -var-file=env/10-cluster-scaleway-dev.tfvars
+tofu workspace select -or-create 10-cluster-scaleway-staging
+tofu plan -var-file=env/10-cluster-scaleway-staging.tfvars
 """
 
 [tasks.scaleway-apply]
@@ -118,8 +118,8 @@ run = """
 export AWS_ACCESS_KEY_ID=$(scw config get access-key)
 export AWS_SECRET_ACCESS_KEY=$(scw config get secret-key)
 tofu init
-tofu workspace select -or-create 10-cluster-scaleway-dev
-tofu apply -auto-approve -var-file=env/10-cluster-scaleway-dev.tfvars
+tofu workspace select -or-create 10-cluster-scaleway-staging
+tofu apply -auto-approve -var-file=env/10-cluster-scaleway-staging.tfvars
 """
 
 [tasks.scaleway-destroy]
@@ -129,8 +129,8 @@ run = """
 export AWS_ACCESS_KEY_ID=$(scw config get access-key)
 export AWS_SECRET_ACCESS_KEY=$(scw config get secret-key)
 tofu init
-tofu workspace select 10-cluster-scaleway-dev
-tofu destroy -auto-approve -var-file=env/10-cluster-scaleway-dev.tfvars
+tofu workspace select 10-cluster-scaleway-staging
+tofu destroy -auto-approve -var-file=env/10-cluster-scaleway-staging.tfvars
 """
 
 [tasks.scaleway-hard-destroy]
@@ -140,7 +140,7 @@ run = """
 export AWS_ACCESS_KEY_ID=$(scw config get access-key)
 export AWS_SECRET_ACCESS_KEY=$(scw config get secret-key)
 tofu init
-tofu workspace select 10-cluster-scaleway-dev
+tofu workspace select 10-cluster-scaleway-staging
 addrs=$(tofu state list | awk -F. '{ n = NF; type = $(n-1); name = $n; if (type == "helm_release" || type ~ /^kubernetes_/ || (type == "null_resource" && name == "velero_namespace_predelete_cleanup")) print }')
 if [ -z "$addrs" ]; then
   echo "Nothing to strip -- already gone or never created."
@@ -148,7 +148,7 @@ else
   echo "$addrs"
   echo "$addrs" | xargs tofu state rm
 fi
-tofu destroy -auto-approve -var-file=env/10-cluster-scaleway-dev.tfvars
+tofu destroy -auto-approve -var-file=env/10-cluster-scaleway-staging.tfvars
 """
 
 

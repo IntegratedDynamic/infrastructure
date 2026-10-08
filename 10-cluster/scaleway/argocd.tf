@@ -1,5 +1,5 @@
 # infra#113: this homelab's whole platform-apps DAG lives as DATA in
-# env/10-cluster-scaleway-dev.tfvars (var.domains, see
+# env/10-cluster-scaleway-staging.tfvars (var.domains, see
 # modules/platform-apps-dag/variables.tf's own description) -- this file now
 # only holds what's genuinely environment-specific and can't be expressed as
 # tfvars: ArgoCD's own bootstrap (real OIDC/Dex login, public URL, RBAC
@@ -68,11 +68,35 @@ data "external" "gitops_revision_exists" {
   ]
 }
 
-data "external" "infra_revision_exists" {
-  count = var.infra_revision != "main" ? 1 : 0
+# var.infra_revision's own comment: when left unset, auto-detect the
+# CURRENT LOCAL branch of THIS repo instead of hardcoding "main" -- a human
+# running `tofu plan/apply` locally from a feature branch then gets the
+# "override on your own branch" DevX trick for free. `git rev-parse` works
+# from this module's own directory (10-cluster/scaleway), no `-C`/cd needed,
+# since it's still inside the repo working tree. Only run when the var is
+# actually unset -- an explicit override (CI's generated tfvars, or a human
+# deliberately testing a different branch) skips this entirely.
+data "external" "local_infra_branch" {
+  count = var.infra_revision == null ? 1 : 0
 
   program = ["sh", "-c", <<-EOT
-    if git ls-remote --exit-code --heads ${local.platform_apps_source_repo} "${var.infra_revision}" >/dev/null 2>&1; then
+    echo "{\"branch\": \"$(git rev-parse --abbrev-ref HEAD)\"}"
+  EOT
+  ]
+}
+
+locals {
+  # Falls back to "main" if even the git command above somehow produced
+  # nothing usable (try() guards a data source that errored outright, not
+  # just a missing branch -- that's the existence probe's job below).
+  requested_infra_revision = coalesce(var.infra_revision, try(data.external.local_infra_branch[0].result.branch, "main"))
+}
+
+data "external" "infra_revision_exists" {
+  count = local.requested_infra_revision != "main" ? 1 : 0
+
+  program = ["sh", "-c", <<-EOT
+    if git ls-remote --exit-code --heads ${local.platform_apps_source_repo} "${local.requested_infra_revision}" >/dev/null 2>&1; then
       echo '{"exists": "true"}'
     else
       echo '{"exists": "false"}'
@@ -83,14 +107,14 @@ data "external" "infra_revision_exists" {
 
 locals {
   # The revision every targetRevision/gitRef below actually uses -- var.
-  # gitops_revision/var.infra_revision verbatim when that branch exists
-  # upstream (or when it's already "main", never probed), "main" otherwise.
-  # `--heads` only checks branches, matching these vars' documented
-  # "override on your own branch" purpose -- a tag or bare commit SHA would
-  # (incorrectly) fall back to "main" too, but neither is a supported value
-  # for either variable today.
+  # gitops_revision/local.requested_infra_revision verbatim when that branch
+  # exists upstream (or when it's already "main", never probed), "main"
+  # otherwise. `--heads` only checks branches, matching these vars'
+  # documented "override on your own branch" purpose -- a tag or bare commit
+  # SHA would (incorrectly) fall back to "main" too, but neither is a
+  # supported value for either variable today.
   effective_gitops_revision = try(data.external.gitops_revision_exists[0].result.exists, "true") == "true" ? var.gitops_revision : "main"
-  effective_infra_revision  = try(data.external.infra_revision_exists[0].result.exists, "true") == "true" ? var.infra_revision : "main"
+  effective_infra_revision  = try(data.external.infra_revision_exists[0].result.exists, "true") == "true" ? local.requested_infra_revision : "main"
 
   # var.letsencrypt_staging (see that variable's own comment): which
   # ClusterIssuer gateway-config's Gateway actually uses. Threaded into
@@ -132,7 +156,7 @@ resource "kubernetes_secret" "dex_ephemeral_login" {
   data = {
     username = "ephemeral"
     password = local.dex_static_password
-    url      = "https://argocd${local.host_suffix}.scalepack.fr"
+    url      = "https://argocd${local.host_suffix}.${var.domain}"
   }
 }
 
@@ -185,13 +209,13 @@ resource "helm_release" "argocd" {
         # 2026-09-17) that this had NEVER been threaded through here despite
         # every *-gateway chart's own hostname already supporting it --
         # ArgoCD kept generating OAuth callback URLs against the UNSUFFIXED
-        # https://argocd.scalepack.fr even on an ephemeral cluster actually
-        # reachable at https://argocd-pr-123.scalepack.fr, so the OIDC
+        # https://argocd.staging.scalepack.fr even on an ephemeral cluster actually
+        # reachable at https://argocd-pr-123.staging.scalepack.fr, so the OIDC
         # redirect_uri never matched what Dex's own static client (gitops
         # repo, services/platform/dex/chart) whitelisted -- SSO login failed
         # outright. See oidc.config.issuer below for the other half of this
         # fix.
-        url: https://argocd${local.host_suffix}.scalepack.fr
+        url: https://argocd${local.host_suffix}.${var.domain}
 
         # Cuts cluster-cache memory, not just the controller's own
         # footprint -- by default the controller watches every API
@@ -238,12 +262,12 @@ resource "helm_release" "argocd" {
           # var.env_suffix/local.host_suffix -- must match Dex's OWN
           # gateway hostname exactly (gitops repo's
           # services/platform/dex/gateway builds "auth" + hostSuffix +
-          # ".scalepack.fr") and its static "argocd" client's issuer
+          # ".staging.scalepack.fr") and its static "argocd" client's issuer
           # (services/platform/dex/chart). Without this, an ephemeral
           # cluster's ArgoCD talked OIDC discovery against production's
           # real Dex instead of its own -- see cm.url above for the full
           # "why" this was missing.
-          issuer: https://auth${local.host_suffix}.scalepack.fr
+          issuer: https://auth${local.host_suffix}.${var.domain}
           clientID: argocd
           # Resolved from the argocd-oidc-client-secret Secret (gitops repo:
           # apps/argocd-config), not the default argocd-secret — that secret
@@ -264,7 +288,7 @@ resource "helm_release" "argocd" {
     %{if var.letsencrypt_staging~}
           # var.letsencrypt_staging (see that variable's own comment): ArgoCD's
           # native per-provider CA override for OIDC discovery/token calls to
-          # https://auth.scalepack.fr -- no pod/volume/init-container change
+          # https://auth.staging.scalepack.fr -- no pod/volume/init-container change
           # needed, and doesn't touch trust for any other legitimate HTTPS call
           # this pod makes (e.g. GitHub for git repos).
           # https://argo-cd.readthedocs.io/en/stable/operator-manual/user-management/#configuring-a-custom-root-ca-certificate-for-communicating-with-the-oidc-provider

@@ -31,7 +31,7 @@ variable "dex_github_connector" {
 variable "letsencrypt_staging" {
   type        = bool
   default     = false
-  description = "Use Let's Encrypt staging's root CA for OpenBao's own OIDC discovery call to auth.scalepack.fr (vault_jwt_auth_backend.oidc), matching 10-cluster/scaleway's var.letsencrypt_staging when that root's gateway-config runs letsencrypt-staging instead of letsencrypt-prod."
+  description = "Use Let's Encrypt staging's root CA for OpenBao's own OIDC discovery call to auth.staging.scalepack.fr (vault_jwt_auth_backend.oidc), matching 10-cluster/scaleway's var.letsencrypt_staging when that root's gateway-config runs letsencrypt-staging instead of letsencrypt-prod."
 }
 
 # privateKey.pem is the GitHub App's private key, downloaded from GitHub —
@@ -70,6 +70,20 @@ variable "secrets_sync_github" {
     })), {})
   })
   sensitive = true
+}
+
+# Mirrors 10-cluster/scaleway's var.domain -- this root hardcoded
+# auth.staging.scalepack.fr / openbao.staging.scalepack.fr directly in
+# vault_jwt_auth_backend.oidc/vault_jwt_auth_backend_role below until this
+# variable existed. Kept as an independent variable in this root (same
+# "two roots' values kept manually in sync" pattern var.letsencrypt_staging
+# above already uses) rather than a cross-root terraform_remote_state read,
+# since there's no dedicated output in 10-cluster/scaleway for it and this
+# is a plain string, not a secret. No default on purpose, same reasoning as
+# that root's own var.domain.
+variable "domain" {
+  description = "The platform's base public domain (e.g. \"staging.scalepack.fr\") -- must match 10-cluster/scaleway's own var.domain for this cluster."
+  type        = string
 }
 
 # See version.tf's provider "vault" block for the three real addresses this
