@@ -197,11 +197,18 @@ jobs:
         working-directory: 10-cluster/scaleway
         run: |
           set -euo pipefail
+          # Always the same for this workflow -- every ephemeral cluster it
+          # creates derives from 10-cluster-scaleway-staging.tfvars (see
+          # generate-tfvars' own cp above), so its Dex always lives under
+          # staging.scalepack.fr. Plain text var, not threaded from
+          # Terraform output -- this step only prints a URL, it has no
+          # other consumer that would justify a real variable/parameter.
+          domain="staging.scalepack.fr"
           password=$(tofu output -raw dex_static_password)
           {
             echo "### Ephemeral Dex login (bypasses GitHub SSO)"
             echo ""
-            echo "- URL: https://auth-pr-${{ github.event.pull_request.number }}.staging.scalepack.fr"
+            echo "- URL: https://auth-pr-${{ github.event.pull_request.number }}.${domain}"
             echo "- Username: \`ephemeral\`"
             echo "- Password: \`${password}\`"
             echo ""
