@@ -68,11 +68,35 @@ data "external" "gitops_revision_exists" {
   ]
 }
 
-data "external" "infra_revision_exists" {
-  count = var.infra_revision != "main" ? 1 : 0
+# var.infra_revision's own comment: when left unset, auto-detect the
+# CURRENT LOCAL branch of THIS repo instead of hardcoding "main" -- a human
+# running `tofu plan/apply` locally from a feature branch then gets the
+# "override on your own branch" DevX trick for free. `git rev-parse` works
+# from this module's own directory (10-cluster/scaleway), no `-C`/cd needed,
+# since it's still inside the repo working tree. Only run when the var is
+# actually unset -- an explicit override (CI's generated tfvars, or a human
+# deliberately testing a different branch) skips this entirely.
+data "external" "local_infra_branch" {
+  count = var.infra_revision == null ? 1 : 0
 
   program = ["sh", "-c", <<-EOT
-    if git ls-remote --exit-code --heads ${local.platform_apps_source_repo} "${var.infra_revision}" >/dev/null 2>&1; then
+    echo "{\"branch\": \"$(git rev-parse --abbrev-ref HEAD)\"}"
+  EOT
+  ]
+}
+
+locals {
+  # Falls back to "main" if even the git command above somehow produced
+  # nothing usable (try() guards a data source that errored outright, not
+  # just a missing branch -- that's the existence probe's job below).
+  requested_infra_revision = coalesce(var.infra_revision, try(data.external.local_infra_branch[0].result.branch, "main"))
+}
+
+data "external" "infra_revision_exists" {
+  count = local.requested_infra_revision != "main" ? 1 : 0
+
+  program = ["sh", "-c", <<-EOT
+    if git ls-remote --exit-code --heads ${local.platform_apps_source_repo} "${local.requested_infra_revision}" >/dev/null 2>&1; then
       echo '{"exists": "true"}'
     else
       echo '{"exists": "false"}'
@@ -83,14 +107,14 @@ data "external" "infra_revision_exists" {
 
 locals {
   # The revision every targetRevision/gitRef below actually uses -- var.
-  # gitops_revision/var.infra_revision verbatim when that branch exists
-  # upstream (or when it's already "main", never probed), "main" otherwise.
-  # `--heads` only checks branches, matching these vars' documented
-  # "override on your own branch" purpose -- a tag or bare commit SHA would
-  # (incorrectly) fall back to "main" too, but neither is a supported value
-  # for either variable today.
+  # gitops_revision/local.requested_infra_revision verbatim when that branch
+  # exists upstream (or when it's already "main", never probed), "main"
+  # otherwise. `--heads` only checks branches, matching these vars'
+  # documented "override on your own branch" purpose -- a tag or bare commit
+  # SHA would (incorrectly) fall back to "main" too, but neither is a
+  # supported value for either variable today.
   effective_gitops_revision = try(data.external.gitops_revision_exists[0].result.exists, "true") == "true" ? var.gitops_revision : "main"
-  effective_infra_revision  = try(data.external.infra_revision_exists[0].result.exists, "true") == "true" ? var.infra_revision : "main"
+  effective_infra_revision  = try(data.external.infra_revision_exists[0].result.exists, "true") == "true" ? local.requested_infra_revision : "main"
 
   # var.letsencrypt_staging (see that variable's own comment): which
   # ClusterIssuer gateway-config's Gateway actually uses. Threaded into
