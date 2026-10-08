@@ -70,6 +70,15 @@ concurrency:
 permissions:
   contents: read
 
+# Config, not secrets -- which root/workspace this workflow drives. Plain
+# workflow-level env for now (available as both ${{ env.* }} in `with:`
+# blocks and a real shell var in `run:` steps); promote to real repo/org
+# `vars.*` later if more than this one workflow ever needs to agree on
+# them.
+env:
+  TF_ROOT: 10-cluster/scaleway
+  TFVARS_FILE: 10-cluster-scaleway-staging.tfvars
+
 jobs:
   terraform:
     runs-on: ubuntu-latest
@@ -113,8 +122,8 @@ jobs:
 
       - uses: ./.github/actions/terraform
         with:
-          root: 10-cluster/scaleway
-          tfvars-file: 10-cluster-scaleway-staging.tfvars
+          root: ${{ env.TF_ROOT }}
+          tfvars-file: ${{ env.TFVARS_FILE }}
           command: ${{ github.event.inputs.command }}
           state-backend: scaleway
           infisical-oidc-audience: '' # this root doesn't consume Infisical

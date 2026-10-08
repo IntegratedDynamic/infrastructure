@@ -51,6 +51,16 @@ concurrency:
 permissions:
   contents: read
 
+# Config, not secrets -- which root/base-tfvars/domain this workflow derives
+# every ephemeral cluster from. Plain workflow-level env for now (available
+# as both ${{ env.* }} in `with:`/`working-directory:` fields and a real
+# shell var in `run:` steps); promote to real repo/org `vars.*` later if
+# more than this one workflow ever needs to agree on them.
+env:
+  TF_ROOT: 10-cluster/scaleway
+  TFVARS_BASE_FILE: 10-cluster-scaleway-staging.tfvars
+  DOMAIN: staging.scalepack.fr
+
 jobs:
   generate-tfvars:
     # unlabeled's own payload already reflects the label's REMOVAL -- it's
@@ -86,7 +96,7 @@ jobs:
       - name: Generate ephemeral tfvars
         id: vars
         shell: bash
-        working-directory: 10-cluster/scaleway/env
+        working-directory: ${{ env.TF_ROOT }}/env
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
@@ -95,7 +105,7 @@ jobs:
           set -euo pipefail
           slug="pr-${PR_NUMBER}"
           tfvars="10-cluster-scaleway-${slug}.tfvars"
-          cp "10-cluster-scaleway-staging.tfvars" "${tfvars}"
+          cp "$TFVARS_BASE_FILE" "${tfvars}"
           # cluster_name already exists in the dev tfvars (line 1) -- HCL
           # rejects a duplicate attribute, so this overrides it IN PLACE
           # instead of appending a second one (confirmed live 2026-09-16:
@@ -133,7 +143,7 @@ jobs:
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ steps.vars.outputs.tfvars }}
-          path: 10-cluster/scaleway/env/${{ steps.vars.outputs.tfvars }}
+          path: ${{ env.TF_ROOT }}/env/${{ steps.vars.outputs.tfvars }}
           retention-days: 14
 
   terraform:
@@ -165,11 +175,11 @@ jobs:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: ${{ needs.generate-tfvars.outputs.tfvars }}
-          path: 10-cluster/scaleway/env
+          path: ${{ env.TF_ROOT }}/env
 
       - uses: ./.github/actions/terraform
         with:
-          root: 10-cluster/scaleway
+          root: ${{ env.TF_ROOT }}
           tfvars-file: ${{ needs.generate-tfvars.outputs.tfvars }}
           command: ${{ needs.generate-tfvars.outputs.command }}
           state-backend: scaleway
@@ -194,21 +204,17 @@ jobs:
       - name: Surface the ephemeral Dex login
         if: needs.generate-tfvars.outputs.command == 'apply'
         shell: bash
-        working-directory: 10-cluster/scaleway
+        working-directory: ${{ env.TF_ROOT }}
         run: |
           set -euo pipefail
-          # Always the same for this workflow -- every ephemeral cluster it
-          # creates derives from 10-cluster-scaleway-staging.tfvars (see
-          # generate-tfvars' own cp above), so its Dex always lives under
-          # staging.scalepack.fr. Plain text var, not threaded from
-          # Terraform output -- this step only prints a URL, it has no
-          # other consumer that would justify a real variable/parameter.
-          domain="staging.scalepack.fr"
+          # DOMAIN comes from this workflow's own top-level env -- every
+          # ephemeral cluster derives from TFVARS_BASE_FILE (staging), so
+          # its Dex always lives under that same domain.
           password=$(tofu output -raw dex_static_password)
           {
             echo "### Ephemeral Dex login (bypasses GitHub SSO)"
             echo ""
-            echo "- URL: https://auth-pr-${{ github.event.pull_request.number }}.${domain}"
+            echo "- URL: https://auth-pr-${{ github.event.pull_request.number }}.${DOMAIN}"
             echo "- Username: \`ephemeral\`"
             echo "- Password: \`${password}\`"
             echo ""
