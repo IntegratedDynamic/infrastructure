@@ -25,7 +25,7 @@
 # replacing the old "PreSync hook on this chart, fails open" design. See
 # that chart's own README.md for the full history.
 # extraValueFileParam (var.letsencrypt_staging, argocd.tf) -- Grafana does
-# real server-side OIDC calls to https://auth.scalepack.fr (auth_url/
+# real server-side OIDC calls to https://auth.staging.scalepack.fr (auth_url/
 # token_url/api_url in its own values-scaleway.yaml), so it needs to trust
 # the staging CA when that flag flips.
 apps:

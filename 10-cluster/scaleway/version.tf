@@ -11,6 +11,17 @@ terraform {
   # the workspace), so this is a plain state relocation, zero resource
   # impact. Old state object left in place under the old prefix/workspace,
   # orphaned on purpose (never deleted).
+  #
+  # Second rename (staging/prod env split): the workspace itself (not this
+  # backend block -- workspace_key_prefix stays "10-cluster/scaleway")
+  # moved from "10-cluster-scaleway-dev" to "10-cluster-scaleway-staging"
+  # once this cluster's public hostnames actually became real
+  # *.staging.scalepack.fr ones (a future, not-yet-created prod cluster
+  # will get its own "10-cluster-scaleway-prod" workspace under this same
+  # prefix). Unlike the "staging was misleading" note above, this one is
+  # no longer misleading -- the tier is real now. Migrated via `tofu state
+  # pull`/`state push`, same zero-resource-impact procedure; old state
+  # object under the "-dev" workspace left orphaned, never deleted.
   backend "s3" {
     bucket                      = "id-terraform-state-10-cluster-scaleway"
     region                      = "fr-par"

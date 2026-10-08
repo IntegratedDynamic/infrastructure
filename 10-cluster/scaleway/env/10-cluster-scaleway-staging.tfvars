@@ -1,16 +1,23 @@
 cluster_name = "scaleway-homelab"
 node_count   = 2
 
+# "staging" here (var.letsencrypt_staging / letsencrypt-staging ClusterIssuer)
+# is Let's Encrypt's own ACME environment (vs. letsencrypt-prod's tight rate
+# limits) -- an UNRELATED axis from this workspace/cluster now also being
+# named "staging" (this homelab's own environment tier, *.staging.scalepack.fr,
+# vs. a future *.prod.scalepack.fr cluster not yet created). Don't conflate
+# the two: this cluster's own tier can run on EITHER ACME environment.
+#
 # This homelab runs on Let's Encrypt STAGING, not prod, as its standing
 # state (see var.letsencrypt_staging). Two reasons, both confirmed live:
-#  1. gateway/cert-restore restores the scalepack.fr wildcard TLS Secret
-#     from the latest Velero backup on every fresh boot -- and every
+#  1. gateway/cert-restore restores the staging.scalepack.fr wildcard TLS
+#     Secret from the latest Velero backup on every fresh boot -- and every
 #     backup taken so far is from a staging-issued cert. cert-manager
 #     treats the restored Secret as satisfying the Certificate (right
 #     SANs, valid dates) and does NOT re-issue against letsencrypt-prod,
 #     so envoy-gateway ends up serving a staging cert regardless of which
 #     ClusterIssuer is "active". Running the whole platform on staging
-#     keeps ArgoCD/OpenBao's server-side OIDC calls to auth.scalepack.fr
+#     keeps ArgoCD/OpenBao's server-side OIDC calls to auth.staging.scalepack.fr
 #     trusting the right root (their rootCA / oidc_discovery_ca_pem
 #     overrides only kick in when this flag is true) instead of failing
 #     "x509: certificate signed by unknown authority".

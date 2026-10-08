@@ -153,7 +153,7 @@ provider "vault" {
   # openbao openbao-0 8200:8200`, requires Kubernetes permissions) is for
   # when the tunnel itself is the thing being debugged, or for a one-off
   # var.root_token bootstrap apply: -var vault_address=http://127.0.0.1:8200/.
-  # The public route (https://openbao.scalepack.fr/) still works too —
+  # The public route (https://openbao.staging.scalepack.fr/) still works too —
   # that's still there for human OIDC/UI login — just isn't the default
   # anymore.
   address = var.vault_address

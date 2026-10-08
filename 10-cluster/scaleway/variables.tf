@@ -68,7 +68,7 @@ variable "update_kubeconfig" {
 # the Let's Encrypt staging root CA (files/letsencrypt-staging-root-ca.pem
 # -- confirmed against Let's Encrypt's own docs that the ROOT, not an
 # intermediate, is the one safe to pin long-term) into every component that
-# makes real server-side HTTPS calls to the public https://auth.scalepack.fr
+# makes real server-side HTTPS calls to the public https://auth.staging.scalepack.fr
 # for OIDC (ArgoCD, Grafana, OpenBao -- confirmed via each one's actual
 # config; argo-workflows and Dex itself confirmed NOT to need this, see
 # argocd.tf's own comments). Exists because staging has a vastly higher
@@ -83,7 +83,7 @@ variable "update_kubeconfig" {
 variable "letsencrypt_staging" {
   type        = bool
   default     = false
-  description = "Use Let's Encrypt staging (higher rate limit, untrusted CA) instead of production for the platform's public wildcard cert. Also injects the staging root CA into ArgoCD/Grafana/OpenBao so their own OIDC calls to auth.scalepack.fr still work."
+  description = "Use Let's Encrypt staging (higher rate limit, untrusted CA) instead of production for the platform's public wildcard cert. Also injects the staging root CA into ArgoCD/Grafana/OpenBao so their own OIDC calls to auth.staging.scalepack.fr still work."
 }
 
 
@@ -99,11 +99,11 @@ variable "letsencrypt_staging" {
 # to "pr-<number>", but nothing here cares what the string actually is,
 # only that it's unique per concurrent ephemeral cluster. Empty by default
 # (main's own workspace): zero behavior change, every hostname stays
-# exactly what it is today (e.g. "argocd.scalepack.fr"). When set, every
-# hostname gets "-${var.env_suffix}" appended (e.g.
-# "argocd-pr-123.scalepack.fr") -- a flat, single-DNS-label suffix, not a
-# nested subdomain, so it stays covered by gateway-config's existing
-# *.scalepack.fr wildcard cert with zero change to that chart.
+# exactly what it is today (e.g. "argocd.staging.scalepack.fr"). When set,
+# every hostname gets "-${var.env_suffix}" appended (e.g.
+# "argocd-pr-123.staging.scalepack.fr") -- a flat, single-DNS-label suffix,
+# not a nested subdomain, so it stays covered by gateway-config's existing
+# *.staging.scalepack.fr wildcard cert with zero change to that chart.
 # nullable = false: argocd.tf's local.host_suffix only tests `!= ""`, which
 # would silently treat an explicit `env_suffix = null` override as non-empty
 # (null != "" is true in Terraform) and then crash deep in a string
@@ -184,7 +184,7 @@ variable "dns_scaleway_state_key" {
 # infra#113: the whole platform-apps DAG this homelab runs, as data -- see
 # modules/platform-apps-dag/variables.tf's own var.domains for the full
 # schema (kept in sync by hand, Terraform has no cross-root shared-type
-# import). Populated by env/10-cluster-scaleway-dev.tfvars; this root's own
+# import). Populated by env/10-cluster-scaleway-staging.tfvars; this root's own
 # argocd.tf only merges in the handful of dynamic values (resolved
 # revision, letsencrypt_staging/env_suffix-derived parameters, main.tf's own
 # Secret dependencies) that can't be expressed as tfvars data before calling

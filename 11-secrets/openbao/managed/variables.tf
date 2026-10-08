@@ -31,7 +31,7 @@ variable "dex_github_connector" {
 variable "letsencrypt_staging" {
   type        = bool
   default     = false
-  description = "Use Let's Encrypt staging's root CA for OpenBao's own OIDC discovery call to auth.scalepack.fr (vault_jwt_auth_backend.oidc), matching 10-cluster/scaleway's var.letsencrypt_staging when that root's gateway-config runs letsencrypt-staging instead of letsencrypt-prod."
+  description = "Use Let's Encrypt staging's root CA for OpenBao's own OIDC discovery call to auth.staging.scalepack.fr (vault_jwt_auth_backend.oidc), matching 10-cluster/scaleway's var.letsencrypt_staging when that root's gateway-config runs letsencrypt-staging instead of letsencrypt-prod."
 }
 
 # privateKey.pem is the GitHub App's private key, downloaded from GitHub —

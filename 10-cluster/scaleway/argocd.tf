@@ -1,5 +1,5 @@
 # infra#113: this homelab's whole platform-apps DAG lives as DATA in
-# env/10-cluster-scaleway-dev.tfvars (var.domains, see
+# env/10-cluster-scaleway-staging.tfvars (var.domains, see
 # modules/platform-apps-dag/variables.tf's own description) -- this file now
 # only holds what's genuinely environment-specific and can't be expressed as
 # tfvars: ArgoCD's own bootstrap (real OIDC/Dex login, public URL, RBAC
@@ -132,7 +132,7 @@ resource "kubernetes_secret" "dex_ephemeral_login" {
   data = {
     username = "ephemeral"
     password = local.dex_static_password
-    url      = "https://argocd${local.host_suffix}.scalepack.fr"
+    url      = "https://argocd${local.host_suffix}.staging.scalepack.fr"
   }
 }
 
@@ -185,13 +185,13 @@ resource "helm_release" "argocd" {
         # 2026-09-17) that this had NEVER been threaded through here despite
         # every *-gateway chart's own hostname already supporting it --
         # ArgoCD kept generating OAuth callback URLs against the UNSUFFIXED
-        # https://argocd.scalepack.fr even on an ephemeral cluster actually
-        # reachable at https://argocd-pr-123.scalepack.fr, so the OIDC
+        # https://argocd.staging.scalepack.fr even on an ephemeral cluster actually
+        # reachable at https://argocd-pr-123.staging.scalepack.fr, so the OIDC
         # redirect_uri never matched what Dex's own static client (gitops
         # repo, services/platform/dex/chart) whitelisted -- SSO login failed
         # outright. See oidc.config.issuer below for the other half of this
         # fix.
-        url: https://argocd${local.host_suffix}.scalepack.fr
+        url: https://argocd${local.host_suffix}.staging.scalepack.fr
 
         # Cuts cluster-cache memory, not just the controller's own
         # footprint -- by default the controller watches every API
@@ -238,12 +238,12 @@ resource "helm_release" "argocd" {
           # var.env_suffix/local.host_suffix -- must match Dex's OWN
           # gateway hostname exactly (gitops repo's
           # services/platform/dex/gateway builds "auth" + hostSuffix +
-          # ".scalepack.fr") and its static "argocd" client's issuer
+          # ".staging.scalepack.fr") and its static "argocd" client's issuer
           # (services/platform/dex/chart). Without this, an ephemeral
           # cluster's ArgoCD talked OIDC discovery against production's
           # real Dex instead of its own -- see cm.url above for the full
           # "why" this was missing.
-          issuer: https://auth${local.host_suffix}.scalepack.fr
+          issuer: https://auth${local.host_suffix}.staging.scalepack.fr
           clientID: argocd
           # Resolved from the argocd-oidc-client-secret Secret (gitops repo:
           # apps/argocd-config), not the default argocd-secret — that secret
@@ -264,7 +264,7 @@ resource "helm_release" "argocd" {
     %{if var.letsencrypt_staging~}
           # var.letsencrypt_staging (see that variable's own comment): ArgoCD's
           # native per-provider CA override for OIDC discovery/token calls to
-          # https://auth.scalepack.fr -- no pod/volume/init-container change
+          # https://auth.staging.scalepack.fr -- no pod/volume/init-container change
           # needed, and doesn't touch trust for any other legitimate HTTPS call
           # this pod makes (e.g. GitHub for git repos).
           # https://argo-cd.readthedocs.io/en/stable/operator-manual/user-management/#configuring-a-custom-root-ca-certificate-for-communicating-with-the-oidc-provider
