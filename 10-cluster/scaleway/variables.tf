@@ -47,14 +47,44 @@ variable "gitops_revision" {
 }
 
 # Revision of THIS repo (infrastructure) ArgoCD's secrets-apps/monitoring-apps/
-# backups-apps Applications pull platform-apps/ from — see argocd.tf's
-# argocd_platform_apps helm_release. Same "override on your own branch to
-# test end-to-end, never merge that change" DevX trick as gitops_revision
-# above (same apply-time fallback-to-main too, see argocd.tf's
-# effective_infra_revision); MUST stay "main" on origin/main.
+# backups-apps Applications (AND, same mechanism, Crossplane's own
+# provider-opentofu Workspaces, e.g. 11-secrets/openbao/managed -- see that
+# Workspace's own `module` git ref) pull from — see argocd.tf's
+# argocd_platform_apps helm_release / effective_infra_revision local. Same
+# "override on your own branch, test end-to-end, never merge that change"
+# DevX trick as gitops_revision above (same apply-time fallback-to-main
+# too), but unlike gitops_revision this one defaults to null, not "main" --
+# argocd.tf auto-detects the CURRENT LOCAL git branch of THIS repo (`git
+# rev-parse --abbrev-ref HEAD`, run from this module's own directory, still
+# inside the repo) and uses that instead, so a human running `tofu plan/
+# apply` locally from a feature branch gets this DevX trick for free,
+# without remembering a `-var infra_revision=<branch>` override at all.
+# Confirmed live (2026-10-08) that forgetting that override is a real,
+# silent failure mode: Crossplane's own Workspace kept applying
+# 11-secrets/openbao/managed from main while every OTHER domain (ArgoCD/
+# gitops-sourced) had already been overridden onto the branch under test,
+# reverting OpenBao's OIDC config to the wrong domain with no error anyone
+# would notice until actually trying to log in.
+#
+# An explicit override (CI's generated per-PR tfvars, or a human
+# deliberately testing a DIFFERENT branch than the one checked out) still
+# wins -- this is nullable, not defaulted to "main", specifically so
+# argocd.tf can tell "unset, auto-detect" apart from "explicitly main".
+# MUST stay unset (null) on origin/main -- a committed non-null default
+# would defeat the auto-detection for everyone.
+#
+# In a detached-HEAD checkout (every pull_request-triggered CI run today,
+# e.g. scaleway-ephemeral.yml) `git rev-parse --abbrev-ref HEAD` returns
+# the literal string "HEAD" -- harmless: argocd.tf's existing existence
+# probe never finds a real branch named "HEAD" on origin, so it degrades
+# to "main" exactly like today's CI default already does. A
+# workflow_dispatch-triggered run (scaleway.yml) checks out a real branch
+# non-detached (actions/checkout's own behavior for a branch ref), so this
+# auto-detects correctly there too -- no CI-side change needed for either
+# workflow.
 variable "infra_revision" {
   type    = string
-  default = "main"
+  default = null
 }
 
 variable "update_kubeconfig" {
