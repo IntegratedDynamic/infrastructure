@@ -34,3 +34,9 @@ iam_bootstrap_scaleway_state_key    = "01-iam/bootstrap/scaleway/01-iam-bootstra
 # actually serves, instead of failing "x509: certificate signed by unknown
 # authority". Flip both roots back together if/when moving to prod certs.
 letsencrypt_staging = true
+
+# var.domain -- must match 10-cluster/scaleway's own var.domain for this
+# same cluster (see that root's env tfvars). Kept manually in sync, same
+# pattern letsencrypt_staging above already uses -- no cross-root read for
+# a plain string.
+domain = "staging.scalepack.fr"
