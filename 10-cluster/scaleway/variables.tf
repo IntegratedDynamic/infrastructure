@@ -92,6 +92,19 @@ variable "letsencrypt_staging" {
 #   default = "main"
 # }
 
+# The platform's own base public domain -- every *-gateway chart (gitops
+# repo) and this root's own Dex/ArgoCD OIDC config (argocd.tf) build their
+# public hostname as "<service>${local.host_suffix}.${var.domain}". Plain
+# required variable, set per workspace's own env/*.tfvars -- "staging.
+# scalepack.fr" today, a future prod workspace's own tfvars would set
+# "prod.scalepack.fr" instead. No default on purpose: every workspace
+# (staging, a future prod, the ephemeral workflow's copy of staging's own
+# tfvars) must say explicitly which domain it serves.
+variable "domain" {
+  description = "The platform's base public domain (e.g. \"staging.scalepack.fr\"). Every service hostname is built as \"<service><hostSuffix>.<domain>\"."
+  type        = string
+}
+
 # Threaded into networking_resources_apps' Application (argocd.tf) as the
 # `hostSuffix` Helm parameter, which every `*-gateway` chart appends to its
 # own hostname (gitops repo). Deliberately generic, not "pr_number" -- in

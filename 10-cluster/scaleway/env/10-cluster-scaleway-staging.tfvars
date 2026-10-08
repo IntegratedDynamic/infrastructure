@@ -1,6 +1,13 @@
 cluster_name = "scaleway-homelab"
 node_count   = 2
 
+# var.domain -- see that variable's own comment in variables.tf. The
+# ephemeral workflow (scaleway-ephemeral.yml) copies this file verbatim and
+# only appends/overrides cluster_name/infra_revision/env_suffix/
+# wait_all_domains_healthy, so every ephemeral cluster inherits this same
+# value -- "argocd-pr-123.staging.scalepack.fr", not a separate domain.
+domain = "staging.scalepack.fr"
+
 # "staging" here (var.letsencrypt_staging / letsencrypt-staging ClusterIssuer)
 # is Let's Encrypt's own ACME environment (vs. letsencrypt-prod's tight rate
 # limits) -- an UNRELATED axis from this workspace/cluster now also being

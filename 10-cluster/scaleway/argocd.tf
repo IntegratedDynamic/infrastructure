@@ -132,7 +132,7 @@ resource "kubernetes_secret" "dex_ephemeral_login" {
   data = {
     username = "ephemeral"
     password = local.dex_static_password
-    url      = "https://argocd${local.host_suffix}.staging.scalepack.fr"
+    url      = "https://argocd${local.host_suffix}.${var.domain}"
   }
 }
 
@@ -191,7 +191,7 @@ resource "helm_release" "argocd" {
         # repo, services/platform/dex/chart) whitelisted -- SSO login failed
         # outright. See oidc.config.issuer below for the other half of this
         # fix.
-        url: https://argocd${local.host_suffix}.staging.scalepack.fr
+        url: https://argocd${local.host_suffix}.${var.domain}
 
         # Cuts cluster-cache memory, not just the controller's own
         # footprint -- by default the controller watches every API
@@ -243,7 +243,7 @@ resource "helm_release" "argocd" {
           # cluster's ArgoCD talked OIDC discovery against production's
           # real Dex instead of its own -- see cm.url above for the full
           # "why" this was missing.
-          issuer: https://auth${local.host_suffix}.staging.scalepack.fr
+          issuer: https://auth${local.host_suffix}.${var.domain}
           clientID: argocd
           # Resolved from the argocd-oidc-client-secret Secret (gitops repo:
           # apps/argocd-config), not the default argocd-secret — that secret
