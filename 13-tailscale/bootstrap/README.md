@@ -67,7 +67,7 @@ tofu -chdir=13-tailscale/bootstrap apply
 
 ## Wiring into GitHub Actions (automatic, via OpenBao + ESO)
 
-`ci_debug_oauth_client_id` and `ci_debug_audience` are **not secrets** in
+The `federated_identities["ci_debug"]` output's `client_id` and `audience` are **not secrets** in
 the cryptographic sense — a federated identity's client ID can't
 authenticate on its own; it also needs a real GitHub Actions OIDC token
 matching this resource's issuer/subject/audience, which only GitHub itself

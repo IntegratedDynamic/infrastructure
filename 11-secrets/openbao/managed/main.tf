@@ -500,8 +500,8 @@ resource "vault_kv_secret_v2" "secrets_sync_github_infrastructure_scaleway" {
 
       # .github/actions/debug-tailscale's OIDC federation inputs, from
       # 13-tailscale/bootstrap's state (see its data source above).
-      TS_OAUTH_CLIENT_ID = data.terraform_remote_state.tailscale_bootstrap.outputs.ci_debug_oauth_client_id
-      TS_AUDIENCE        = data.terraform_remote_state.tailscale_bootstrap.outputs.ci_debug_audience
+      TS_OAUTH_CLIENT_ID = data.terraform_remote_state.tailscale_bootstrap.outputs.federated_identities["ci_debug"].client_id
+      TS_AUDIENCE        = data.terraform_remote_state.tailscale_bootstrap.outputs.federated_identities["ci_debug"].audience
     }
   ))
 }

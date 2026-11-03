@@ -143,7 +143,7 @@ variable "iam_bootstrap_scaleway_state_key" {
 }
 
 variable "tailscale_bootstrap_state_bucket" {
-  description = "Scaleway bucket holding 13-tailscale/bootstrap's remote state (read for its ci_debug_oauth_client_id/ci_debug_audience outputs, pushed to GitHub via secrets-sync)."
+  description = "Scaleway bucket holding 13-tailscale/bootstrap's remote state (read for its federated_identities output, pushed to GitHub via secrets-sync)."
   type        = string
 }
 variable "tailscale_bootstrap_state_key" {
