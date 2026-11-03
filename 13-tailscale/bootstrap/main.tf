@@ -8,11 +8,20 @@
 # "Live debugging via Tailscale SSH" section for the full picture.
 
 locals {
-  # Free-form and chosen by us (Tailscale's own auto-generated default isn't
-  # readable back through this resource -- `audience` is Optional but NOT
-  # Computed in the provider schema, so leaving it unset would drift). Must
-  # match .github/actions/debug-tailscale's `audience` input exactly.
-  ci_debug_audience = "tailscale-ci-debug"
+  # Every tag any identity assigns must exist in tagOwners before a
+  # federated identity can be scoped to it.
+  all_tags = distinct(flatten([for v in values(var.federated_identities) : v.tags]))
+  # Tags whose nodes tailnet members may reach + SSH into.
+  ssh_tags = distinct(flatten([for v in values(var.federated_identities) : v.tags if v.member_ssh]))
+
+  # Built-in Tailscale ACL groups -- fixed by Tailscale itself, not
+  # configurable.
+  # autogroup:admin (not autogroup:owner) so any tailnet admin -- not just
+  # the account owner specifically -- can hand-tag a device too.
+  tag_owners   = ["autogroup:admin"]
+  members      = ["autogroup:member"]
+  ssh_users    = ["autogroup:nonroot"]
+  members_dest = ["autogroup:member:*"]
 }
 
 # overwrite_existing_content = true means this REPLACES whatever ACL
@@ -25,9 +34,7 @@ resource "tailscale_acl" "this" {
 
   acl = jsonencode({
     tagOwners = {
-      # autogroup:admin (not autogroup:owner) so any tailnet admin -- not
-      # just the account owner specifically -- can hand-tag a device too.
-      "tag:ci-debug" = ["autogroup:admin"]
+      for tag in local.all_tags : tag => local.tag_owners
     }
 
     # Baseline "everything can talk to everything" between member devices
@@ -43,13 +50,13 @@ resource "tailscale_acl" "this" {
     acls = [
       {
         action = "accept"
-        src    = ["autogroup:member"]
-        dst    = ["autogroup:member:*"]
+        src    = local.members
+        dst    = local.members_dest
       },
       {
         action = "accept"
-        src    = ["autogroup:member"]
-        dst    = ["tag:ci-debug:*"]
+        src    = local.members
+        dst    = [for tag in local.ssh_tags : "${tag}:*"]
       },
     ]
 
@@ -60,29 +67,29 @@ resource "tailscale_acl" "this" {
     ssh = [
       {
         action = "accept"
-        src    = ["autogroup:member"]
-        dst    = ["tag:ci-debug"]
-        users  = ["autogroup:nonroot"]
+        src    = local.members
+        dst    = local.ssh_tags
+        users  = local.ssh_users
       },
     ]
   })
 }
 
-# GitHub Actions presents its own workflow-run OIDC token straight to
-# Tailscale (permissions: id-token: write in the calling workflow); no
-# authkey/OAuth-secret ever leaves this state or touches a GitHub secret.
-# `subject` mirrors this repo's existing AWS OIDC trust scope
-# (repo:IntegratedDynamic/infrastructure:*, see 00-foundation/aws's
-# terraform-state-access role) -- repo-wide, any workflow/branch/event.
-resource "tailscale_federated_identity" "ci_debug" {
-  description = "GitHub Actions OIDC for infra110 CI debug"
-  issuer      = "https://token.actions.githubusercontent.com"
-  subject     = "repo:IntegratedDynamic/infrastructure:*"
-  scopes      = ["auth_keys"]
-  tags        = ["tag:ci-debug"]
-  audience    = local.ci_debug_audience
+# Federated identities: the caller (e.g. GitHub Actions, see
+# .github/actions/debug-tailscale) presents its own OIDC token straight to
+# Tailscale; no authkey/OAuth-secret ever leaves this state or touches a
+# GitHub secret. See var.federated_identities.
+resource "tailscale_federated_identity" "this" {
+  for_each = var.federated_identities
 
-  # The tag must exist (tagOwners) before a federated identity can be
-  # scoped to assign it.
+  description = each.value.description
+  issuer      = each.value.issuer
+  subject     = each.value.subject
+  scopes      = each.value.scopes
+  tags        = each.value.tags
+  audience    = each.value.audience
+
+  # The tags must exist (tagOwners) before a federated identity can be
+  # scoped to assign them.
   depends_on = [tailscale_acl.this]
 }
