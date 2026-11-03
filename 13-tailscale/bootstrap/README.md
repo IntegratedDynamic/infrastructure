@@ -65,27 +65,23 @@ tofu -chdir=13-tailscale/bootstrap apply
 > mutates a shared tailnet-wide access policy, not just this root's own
 > resources.
 
-## Wiring the GitHub repo variables (manual)
+## Wiring into GitHub Actions (automatic, via OpenBao + ESO)
 
-`ci_debug_oauth_client_id` and `ci_debug_audience` are **not secrets** — a
-federated identity's client ID can't authenticate on its own; it also
-needs a real GitHub Actions OIDC token matching this resource's
-issuer/subject/audience, which only GitHub itself can mint per job. Same
-reasoning this repo already applies to `AWS_TERRAFORM_ROLE_ARN` (a plain
-repo variable, not a secret). Set them once:
+`ci_debug_oauth_client_id` and `ci_debug_audience` are **not secrets** in
+the cryptographic sense — a federated identity's client ID can't
+authenticate on its own; it also needs a real GitHub Actions OIDC token
+matching this resource's issuer/subject/audience, which only GitHub itself
+can mint per job. But they still reach GitHub as `TS_OAUTH_CLIENT_ID` /
+`TS_AUDIENCE` **secrets** in the `scaleway` environment, because the
+secrets-sync pipeline (ESO `PushSecret`) can only write GitHub secrets.
 
-```bash
-gh variable set TS_OAUTH_CLIENT_ID \
-  --repo IntegratedDynamic/infrastructure \
-  --body "$(tofu -chdir=13-tailscale/bootstrap output -raw ci_debug_oauth_client_id)"
-
-gh variable set TS_AUDIENCE \
-  --repo IntegratedDynamic/infrastructure \
-  --body "$(tofu -chdir=13-tailscale/bootstrap output -raw ci_debug_audience)"
-```
-
-No rotation step needed afterward — there's no bearer secret to expire;
-GitHub mints a fresh, short-lived OIDC token for every job automatically.
+No step to run here: `11-secrets/openbao/managed` reads this root's state
+(`data.terraform_remote_state.tailscale_bootstrap`) and writes both into
+`kv/apps/secrets-sync/github/infrastructure-scaleway`. This root therefore
+needs no OpenBao or GitHub credential. After an apply here, re-apply
+`11-secrets/openbao/managed` (Crossplane does this on its own poll) to
+propagate a changed ID. The old repo variables of the same names can be
+deleted (`gh variable delete TS_OAUTH_CLIENT_ID TS_AUDIENCE`).
 
 ## Connecting to a debugged runner
 

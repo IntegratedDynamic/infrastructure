@@ -289,6 +289,22 @@ data "terraform_remote_state" "iam_bootstrap_scaleway" {
   })
 }
 
+# 13-tailscale/bootstrap's own state -- read for the federated identity's
+# client ID + audience, which .github/actions/debug-tailscale needs in CI.
+# Neither is secret in the cryptographic sense (see that root's README), but
+# secrets-sync (ESO PushSecret) can only write GitHub *secrets*, not
+# variables -- so they ride the same OpenBao -> ESO -> GitHub path as every
+# other CI input instead of a manual `gh variable set`. Read via remote
+# state rather than a vault provider inside 13-tailscale itself: keeps that
+# root free of any OpenBao/GitHub credential or network dependency.
+data "terraform_remote_state" "tailscale_bootstrap" {
+  backend = "s3"
+  config = merge(local.scaleway_state_backend, {
+    bucket = var.tailscale_bootstrap_state_bucket
+    key    = var.tailscale_bootstrap_state_key
+  })
+}
+
 # 00-foundation/scaleway's own state -- read for its access_keys/secret_keys
 # outputs, the per-state-bucket dedicated identities (see that root's README,
 # "Per-bucket identities"). Needed here specifically for
@@ -481,6 +497,11 @@ resource "vault_kv_secret_v2" "secrets_sync_github_infrastructure_scaleway" {
       # github-ci's key doesn't work here.
       SCALEWAY_STATE_ACCESS_KEY = data.terraform_remote_state.foundation_scaleway.outputs.access_keys["cluster_scaleway"]
       SCALEWAY_STATE_SECRET_KEY = data.terraform_remote_state.foundation_scaleway.outputs.secret_keys["cluster_scaleway"]
+
+      # .github/actions/debug-tailscale's OIDC federation inputs, from
+      # 13-tailscale/bootstrap's state (see its data source above).
+      TS_OAUTH_CLIENT_ID = data.terraform_remote_state.tailscale_bootstrap.outputs.ci_debug_oauth_client_id
+      TS_AUDIENCE        = data.terraform_remote_state.tailscale_bootstrap.outputs.ci_debug_audience
     }
   ))
 }
