@@ -21,21 +21,22 @@ inputs:
   oauth-client-id:
     description: >
       The federated identity's client ID (13-tailscale/bootstrap's
-      ci_debug_oauth_client_id output). Not a secret -- store as a repo
-      variable (TS_OAUTH_CLIENT_ID) and pass it as vars.TS_OAUTH_CLIENT_ID
-      from the calling workflow. NOTE: any GitHub Actions expression
-      syntax written in THIS file's own description strings gets parsed
-      by GitHub's template engine too (confirmed live -- `vars` isn't a
-      valid context inside a composite action's own YAML, only in the
-      calling workflow), so this text deliberately spells out
-      "vars.TS_OAUTH_CLIENT_ID" instead of wrapping it in that syntax.
+      ci_debug_oauth_client_id output). Not sensitive on its own, but
+      delivered as the TS_OAUTH_CLIENT_ID GitHub secret (synced from OpenBao
+      via ESO -- see 13-tailscale/bootstrap/README.md); pass it as
+      secrets.TS_OAUTH_CLIENT_ID from the calling workflow. NOTE: any GitHub
+      Actions expression syntax written in THIS file's own description
+      strings gets parsed by GitHub's template engine too (confirmed live --
+      contexts like `vars` aren't valid inside a composite action's own
+      YAML, only in the calling workflow), so this text deliberately spells
+      the name out instead of wrapping it in that syntax.
     required: true
   audience:
     description: >
       Must match the federated identity's own `audience` (13-tailscale/bootstrap's
-      ci_debug_audience output). Not a secret -- store as a repo variable
-      (TS_AUDIENCE) and pass it as vars.TS_AUDIENCE from the calling
-      workflow.
+      ci_debug_audience output). Not sensitive on its own, but
+      delivered as the TS_AUDIENCE GitHub secret (synced from OpenBao via
+      ESO); pass it as secrets.TS_AUDIENCE from the calling workflow.
     required: true
   hostname:
     description: >

@@ -19,6 +19,9 @@ wireguard_state_key    = "04-vpn/wireguard-site-to-site/04-vpn-wireguard-site-to
 wireguard_exit_state_bucket = "id-terraform-state-04-vpn-wireguard-exit"
 wireguard_exit_state_key    = "04-vpn/wireguard-exit/04-vpn-wireguard-exit-dev/terraform.tfstate"
 
+tailscale_bootstrap_state_bucket = "id-terraform-state-13-tailscale-bootstrap"
+tailscale_bootstrap_state_key    = "13-tailscale/bootstrap/13-tailscale-bootstrap-dev/terraform.tfstate"
+
 foundation_scaleway_state_bucket = "id-terraform-state-00-foundation-scaleway"
 foundation_scaleway_state_key    = "00-foundation/scaleway/00-foundation-scaleway-dev/terraform.tfstate"
 

@@ -104,8 +104,8 @@ jobs:
       - uses: ./.github/actions/debug-tailscale
         if: contains(github.event.pull_request.labels.*.name, 'tailscale')
         with:
-          oauth-client-id: ${{ vars.TS_OAUTH_CLIENT_ID }}
-          audience: ${{ vars.TS_AUDIENCE }}
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
 
       - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
         with:
