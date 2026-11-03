@@ -53,4 +53,5 @@ apps:
   - {name: grafana-gateway, namespace: monitoring, chartPath: services/platform/monitoring/grafana-gateway, valueFile: values-scaleway.yaml, wave: "1", valueParams: [{name: hostSuffix, valueFrom: hostSuffix}]}
   - {name: argocd-config-gateway, namespace: argocd, chartPath: services/platform/argocd-config/gateway, valueFile: values-scaleway.yaml, wave: "1", valueParams: [{name: hostSuffix, valueFrom: hostSuffix}]}
   - {name: argo-workflows-gateway, namespace: argo-workflows, chartPath: services/platform/argo-workflows/gateway, valueFile: values.yaml, wave: "1", valueParams: [{name: hostSuffix, valueFrom: hostSuffix}]}
+  - {name: crossview-gateway, namespace: crossview, chartPath: services/platform/crossview/gateway, valueFile: values.yaml, wave: "1", valueParams: [{name: hostSuffix, valueFrom: hostSuffix}]}
   - {name: openbao-gateway, namespace: openbao, chartPath: services/platform/openbao/gateway, valueFile: values-scaleway.yaml, wave: "1", valueParams: [{name: hostSuffix, valueFrom: hostSuffix}]}

@@ -363,6 +363,11 @@ resource "random_password" "argo_workflows_client_secret" {
   special = false
 }
 
+resource "random_password" "crossview_client_secret" {
+  length  = 32
+  special = false
+}
+
 resource "vault_kv_secret_v2" "dex_credentials" {
   mount = vault_mount.kv.path
   name  = "apps/dex/credentials"
@@ -384,6 +389,39 @@ resource "vault_kv_secret_v2" "dex_credentials" {
     # together in one Secret.
     "argo-workflows-client-id"     = "argo-workflows"
     "argo-workflows-client-secret" = random_password.argo_workflows_client_secret.result
+    # Crossview's Dex static client (public id is the literal "crossview" in
+    # the crossview chart's own values -- the secret is the only sensitive
+    # half, consumed by Dex via CROSSVIEW_CLIENT_SECRET and by Crossview via
+    # crossview-secret's ExternalSecret).
+    "crossview-client-secret" = random_password.crossview_client_secret.result
+  })
+}
+
+# Crossview's own non-Dex credentials (kv/apps/crossview/credentials). The
+# upstream chart ships a publicly known admin/password local login; the
+# gitops repo's crossview chart blanks that and takes these instead.
+#  - session-secret: signs Crossview's session cookie. With the database
+#    disabled (SSO-only mode) the cookie IS the user store, so rotating this
+#    just logs everyone out -- no data loss.
+#  - admin-*: local break-glass login, independent of Dex.
+resource "random_password" "crossview_session_secret" {
+  length  = 48
+  special = false
+}
+
+resource "random_password" "crossview_admin_password" {
+  length  = 32
+  special = false
+}
+
+resource "vault_kv_secret_v2" "crossview_credentials" {
+  mount = vault_mount.kv.path
+  name  = "apps/crossview/credentials"
+
+  data_json = jsonencode({
+    "session-secret" = random_password.crossview_session_secret.result
+    "admin-username" = "admin"
+    "admin-password" = random_password.crossview_admin_password.result
   })
 }
 

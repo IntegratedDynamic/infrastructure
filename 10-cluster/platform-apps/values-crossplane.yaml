@@ -22,3 +22,14 @@
 apps:
   - {name: crossplane-core, namespace: crossplane-system, chartPath: services/platform/crossplane/chart, valueFile: values-scaleway.yaml, wave: "0"}
   - {name: crossplane-config, namespace: crossplane-system, chartPath: services/platform/crossplane/config, valueFile: values-scaleway.yaml, wave: "1", valueParams: [{name: gitRef, valueFrom: infraRevision}]}
+  # crossview: read-only-in-spirit web UI for the Workspaces' Synced/Ready
+  # conditions, Providers and events (OIDC login via Dex, no database -- see
+  # gitops services/platform/crossview/chart/values-scaleway.yaml). Wave 1
+  # like crossplane-config: it only reads Crossplane's CRDs, so wave 0
+  # (crossplane-core) being Healthy is its only prerequisite. Its Secret
+  # (crossview-secret, secrets-apps) and HTTPRoute (crossview-gateway,
+  # networking-resources-apps) live in their own domains, like every other
+  # product -- scaleway only, not in the kind tier (kind restores the
+  # production OpenBao snapshot, which has no crossview KV entry until a
+  # production apply of 11-secrets/openbao/managed has run).
+  - {name: crossview, namespace: crossview, chartPath: services/platform/crossview/chart, valueFile: values-scaleway.yaml, wave: "1"}
