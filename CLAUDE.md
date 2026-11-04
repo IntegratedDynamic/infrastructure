@@ -113,6 +113,61 @@ subresources, `kubectl get` on the actual CRs involved) before declaring
 anything fixed. Stopping at the first signal that happens to be convenient
 is not verification.
 
+### Validate on the branch BEFORE asking for a merge
+
+**Never ask the user to merge a PR in order to find out whether it works.**
+A merge-to-validate loop (open PR, user merges, look, find a bug, repeat) is
+the single most disliked workflow here. Any change that reaches the cluster —
+`gitops` chart values, `10-cluster/platform-apps`, a Crossplane-applied root
+(`11-secrets/openbao/managed`, `12-monitoring/grafana/managed`) — is deployed
+from the PR branch first, verified live, and only then handed over for merge.
+
+How, with the override mechanism `10-cluster/scaleway` already has:
+
+1. **State the hypothesis** (see above): what this run proves, and which log or
+   resource confirms it.
+2. **Point ArgoCD at the branch.**
+   - `gitops` change: set `gitops_revision = "<branch>"` in
+     `10-cluster/scaleway/local.auto.tfvars` (gitignored — keep the old values
+     as commented lines). Edit that file rather than passing `-var`: a saved
+     plan made with `-var gitops_revision=…` fails at `apply` with "Mismatch
+     between input and plan variable value" because `local.auto.tfvars` still
+     says `main`.
+   - `infrastructure` change reaching a Crossplane Workspace: do nothing — 
+     `infra_revision` is auto-detected from the **local** checked-out branch
+     of this repo (`git rev-parse --abbrev-ref HEAD`), and drives the
+     Workspaces' `?ref=`. Have the branch checked out (and pushed — an
+     unpushed branch silently falls back to `main`) when you run the plan, and
+     keep it checked out until the apply is done (use a `git worktree` for any
+     unrelated edit).
+3. `tofu plan -var-file=env/10-cluster-scaleway-staging.tfvars -out=…`, then
+   confirm it only changes **revisions** plus the throwaway `wait_*` Jobs
+   (`7 to add, 13–14 to change, 7 to destroy` is the normal shape of a
+   repoint). Anything touching the cluster, node pool or LB is not a repoint.
+4. `tofu apply <planfile>`, in the background. When the domains are healthy the
+   gate Jobs finish in about a minute; a long `wait_all` means some Application
+   is genuinely not Healthy — look at it, don't wait it out.
+5. **Verify from the real resource**, not from aggregate status: the pod's
+   `describe`/logs, the live object, the Workspace's own `status`, Loki. Say
+   plainly what you could *not* check (e.g. the UI rendering) and let the user
+   look at that on the branch.
+6. Only then ask for the merge. After it, **re-point to `main`** (restore
+   `local.auto.tfvars`, check out `main` of this repo, plan + apply again):
+   a cluster left on a deleted branch sits in `ComparisonError`.
+
+Things that bit us doing this (2026-11-03/04, Crossview rollout):
+
+- `kubectl` changes that bypass git (`rollout restart`, pod deletes) are
+  blocked in auto mode and are the user's call; prefer making the workload
+  roll itself (annotation on the pod template, `reloader`).
+- A ConfigMap/Secret change does **not** restart a Deployment that reads it via
+  `envFrom`/`configMapKeyRef` (read at pod start only): Dex kept a pre-rename
+  issuer for hours. Check the pod's *actual* env/args, not the object.
+- ArgoCD polls Git about every 3 minutes; a `refresh=hard` annotation on the
+  Application is the harmless way to skip that wait.
+- Don't size a workload from a guess: measure the burst (`kubectl top`,
+  `describe` → `OOMKilled`, exit 137) before choosing requests/limits.
+
 ## Commands
 
 ```bash
