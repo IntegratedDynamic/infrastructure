@@ -1,0 +1,362 @@
+{
+  "//": "Hand-written (NOT extracted from kube-prometheus-stack like its siblings in this directory): apply logs of the OpenTofu Workspaces Crossplane runs (provider-opentofu), read from Loki.",
+  "uid": "opentofu-workspaces-logs",
+  "title": "OpenTofu Workspaces (apply logs)",
+  "tags": [
+    "crossplane",
+    "opentofu",
+    "logs"
+  ],
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "timezone": "browser",
+  "graphTooltip": 1,
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "refresh": "1m",
+  "templating": {
+    "list": [
+      {
+        "name": "search",
+        "label": "Search",
+        "type": "textbox",
+        "query": "",
+        "current": {
+          "text": "",
+          "value": ""
+        },
+        "options": [
+          {
+            "selected": true,
+            "text": "",
+            "value": ""
+          }
+        ]
+      },
+      {
+        "name": "workspace",
+        "label": "Workspace (steps panel)",
+        "type": "custom",
+        "query": ".*,grafana-managed,openbao-managed",
+        "includeAll": false,
+        "current": {
+          "text": ".*",
+          "value": ".*"
+        },
+        "options": [
+          {
+            "selected": true,
+            "text": ".*",
+            "value": ".*"
+          },
+          {
+            "selected": false,
+            "text": "grafana-managed",
+            "value": "grafana-managed"
+          },
+          {
+            "selected": false,
+            "text": "openbao-managed",
+            "value": "openbao-managed"
+          }
+        ]
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Applies (selected range)",
+      "description": "Number of `Apply complete!` lines tofu printed in the range -- one per state-changing apply, across all Workspaces.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 6,
+        "h": 5
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum(count_over_time({namespace=\"crossplane-system\", container=\"package-runtime\"} |= \"Apply complete!\" [$__range]))",
+          "queryType": "instant",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "0",
+          "unit": "none",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto"
+      }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Applies and errors over time",
+      "description": "Bars: `Apply complete!` lines and error lines (klog watch noise excluded).",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "x": 6,
+        "y": 0,
+        "w": 18,
+        "h": 5
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum(count_over_time({namespace=\"crossplane-system\", container=\"package-runtime\"} |= \"Apply complete!\" [$__interval]))",
+          "legendFormat": "applies",
+          "queryType": "range"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum(count_over_time({namespace=\"crossplane-system\", container=\"package-runtime\"} |~ \"(?i)error|cannot fork|failed\" !~ \"reflector.go|watch ended\" [$__interval]))",
+          "legendFormat": "errors",
+          "queryType": "range"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "stacking": {
+              "mode": "none"
+            }
+          },
+          "noValue": "0",
+          "min": 0
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "errors"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "applies"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "blue"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 3,
+      "type": "logs",
+      "title": "Apply results",
+      "description": "One line per state-changing apply: `Apply complete! Resources: N added, N changed, N destroyed.` The Workspace name is NOT on this line (see the next panel's trailing request line).",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 5,
+        "w": 24,
+        "h": 5
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "{namespace=\"crossplane-system\", container=\"package-runtime\"} |= \"Apply complete!\"",
+          "queryType": "range"
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": false,
+        "enableLogDetails": true,
+        "dedupStrategy": "none",
+        "sortOrder": "Descending"
+      }
+    },
+    {
+      "id": 4,
+      "type": "logs",
+      "title": "tofu CLI output (apply / plan)",
+      "description": "Raw tofu output as logged by provider-opentofu (Refreshing state, Plan, Changes to Outputs, Apply complete). Oldest first so a block reads top to bottom. The Workspace name is only on the `{\"request\": ..., \"operation\": \"apply\"}` line that FOLLOWS each block. Needs the Workspace's forProvider.enableTofuCLILogging: true. Use the Search box to narrow.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 10,
+        "w": 24,
+        "h": 14
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "{namespace=\"crossplane-system\", container=\"package-runtime\"} !~ `DEBUG|INFO|reflector.go|controller-runtime|\"level\"|\"msg\"|unable to retrieve container logs` |~ \"(?i)$search\"",
+          "queryType": "range"
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": false,
+        "enableLogDetails": true,
+        "dedupStrategy": "none",
+        "sortOrder": "Ascending"
+      }
+    },
+    {
+      "id": 5,
+      "type": "logs",
+      "title": "Provider steps per Workspace",
+      "description": "provider-opentofu's own step lines (module re-downloaded, `Checksums don't match so run tofu init`, `External resource is up to date`, `Successfully requested update`). Filterable by Workspace. Only logged with the provider's --debug flag: empty if it was dropped.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 24,
+        "w": 24,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "{namespace=\"crossplane-system\", container=\"package-runtime\"} |~ \"$workspace\" |~ \"Checksums|up to date|Successfully requested|Remote module downloaded\"",
+          "queryType": "range"
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": false,
+        "enableLogDetails": true,
+        "dedupStrategy": "none",
+        "sortOrder": "Descending"
+      }
+    },
+    {
+      "id": 6,
+      "type": "logs",
+      "title": "Errors",
+      "description": "Error lines from the provider/tofu, Kubernetes watch noise excluded. A Workspace in ReconcileError also shows its message in Crossview (Synced condition).",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 32,
+        "w": 24,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "{namespace=\"crossplane-system\", container=\"package-runtime\"} |~ \"(?i)error|cannot fork|failed\" !~ \"reflector.go|watch ended\"",
+          "queryType": "range"
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": false,
+        "enableLogDetails": true,
+        "dedupStrategy": "none",
+        "sortOrder": "Descending"
+      }
+    }
+  ]
+}

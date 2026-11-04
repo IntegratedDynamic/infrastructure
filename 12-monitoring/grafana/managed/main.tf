@@ -273,6 +273,11 @@ import {
 # diff against itself on every plan. If a `terraform plan` ever shows
 # perpetual drift here, that's the first thing to check.
 #
+# EXCEPTION: dashboards/opentofu-workspaces.json is NOT extracted from the
+# chart -- it is hand-written (Loki logs of the OpenTofu Workspaces Crossplane
+# runs, see its own "//" key). The "don't hand-edit" rule above is about the
+# extracted upstream set; edit this one directly.
+#
 # No folder argument — lands in Grafana's default/General folder, matching
 # the sidecar-provisioned behavior this replaces.
 # overwrite = true: safe to re-apply over a dashboard a human tweaked via
