@@ -11,7 +11,7 @@ name: OpenTofu — Scaleway cluster
 # checkout step only ever surfaces a commit hash, not a branch name; only
 # the run list's own branch column shows it otherwise, easy to miss once
 # you're inside a run looking at its logs.
-run-name: "OpenTofu ${{ inputs.command }} — Scaleway cluster (env: ${{ inputs.environment }}) @ ${{ github.ref_name }}"
+run-name: "OpenTofu ${{ inputs.command || 'scheduled up/down' }} — Scaleway cluster (env: ${{ inputs.environment || 'scaleway' }}) @ ${{ github.ref_name }}"
 
 # Drives 10-cluster/scaleway through the .github/actions/terraform composite action.
 #
@@ -21,11 +21,9 @@ run-name: "OpenTofu ${{ inputs.command }} — Scaleway cluster (env: ${{ inputs.
 # exercised in CI before this — it was previously wired to assume a real AWS
 # IAM role for a bucket that has lived on Scaleway since the 2026-08-19 state
 # migration, which 403s (see 00-foundation/scaleway/README.md's "Known
-# follow-up"). pull_request(plan)/push(apply)/schedule(destroy) triggers are
-# deliberately not wired back in yet — no point automating (a PR-driven plan,
-# an unattended merge-apply, a daily unattended destroy) a path that hasn't
-# been proven end to end by hand first. Re-add once a manual plan → apply →
-# destroy cycle has gone green.
+# follow-up"). pull_request(plan)/push(apply) triggers are still deliberately
+# not wired in. The office-hours schedule (see below) now automates up/down
+# once the manual apply/hard-destroy cycle was proven.
 #
 # Scaleway cluster lifecycle uses the CI API key from the dispatched-to
 # GitHub environment (`scaleway` by default -- Kubernetes/VPC/PrivateNetwork/
@@ -39,7 +37,17 @@ run-name: "OpenTofu ${{ inputs.command }} — Scaleway cluster (env: ${{ inputs.
 # creds are set as job env (read by the action) -- never passed as plain
 # action inputs.
 
+# Office-hours schedule (2026-11-04): UP 11:00-18:00 Europe/Paris in winter
+# (cron 10:05 UTC apply, 17:05 UTC hard-destroy); `github.event.schedule`
+# tells the two apart. GitHub cron is UTC-only, so in summer time (CEST) the
+# window shifts to 12:00-19:00 -- shift both crons by -1h at the DST change
+# if that matters. A cold `apply` takes 15-45 min. Out of hours, dispatch
+# manually (apply = up, hard-destroy = down).
+
 on:
+  schedule:
+    - cron: '5 10 * * *'  # up
+    - cron: '5 17 * * *'  # down
   workflow_dispatch:
     inputs:
       command:
@@ -100,7 +108,7 @@ jobs:
     timeout-minutes: 45
     # Fed by the environment input above -- carries SCW_ACCESS_KEY /
     # SCW_SECRET_KEY (and satisfies zizmor's secrets-in-environment audit).
-    environment: ${{ inputs.environment }}
+    environment: ${{ inputs.environment || 'scaleway' }}
     permissions:
       contents: read
     # Provider creds exposed to the composite action via the job env (not inputs).
@@ -124,6 +132,9 @@ jobs:
         with:
           root: ${{ env.TF_ROOT }}
           tfvars-file: ${{ env.TFVARS_FILE }}
-          command: ${{ github.event.inputs.command }}
+          # The cron literal below MUST match the 'up' cron in on.schedule (no
+          # way to reference it from an expression); a mismatch makes the up
+          # run fall through to hard-destroy.
+          command: ${{ github.event_name == 'schedule' && (github.event.schedule == '5 10 * * *' && 'apply' || 'hard-destroy') || inputs.command }}
           state-backend: scaleway
           infisical-oidc-audience: '' # this root doesn't consume Infisical
