@@ -13,13 +13,3 @@ output "mcp_service_account_token" {
   value       = grafana_service_account_token.mcp_claude_code.key
   sensitive   = true
 }
-
-# TEMPORARY canary: a constant output whose only purpose is to make
-# provider-opentofu's `grafana-managed` Workspace run a real `tofu apply` that
-# changes state (an output-only change still does), so we can see whether the
-# CLI output reaches the provider pod logs / Loki. Nothing reads it. Delete once
-# that's settled.
-output "apply_canary" {
-  description = "Temporary: forces a state-changing apply to observe tofu CLI logging. Remove after."
-  value       = "canary-1"
-}
