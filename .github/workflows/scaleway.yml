@@ -89,6 +89,12 @@ env:
 
 jobs:
   terraform:
+    # Pause switch for the office-hours schedule: set the repo variable
+    # SCALEWAY_CLUSTER_SCHEDULE_ENABLED to 'false' to skip scheduled runs
+    # (unset or any other value = enabled). Manual dispatches are never
+    # affected. A pause freezes the cluster as-is (skipping the 18:00 down
+    # leaves it running).
+    if: github.event_name != 'schedule' || vars.SCALEWAY_CLUSTER_SCHEDULE_ENABLED != 'false'
     runs-on: ubuntu-latest
     # A from-scratch apply legitimately needs more than the 20m this started
     # at -- confirmed live 2026-08-25: module.wait_networking_healthy alone
