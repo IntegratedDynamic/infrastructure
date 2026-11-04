@@ -158,7 +158,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "sum(count_over_time({namespace=\"crossplane-system\", container=\"package-runtime\"} |~ \"(?i)error|cannot fork|failed\" !~ \"reflector.go|watch ended\" [$__interval]))",
+          "expr": "sum(count_over_time({namespace=\"crossplane-system\", container=\"package-runtime\"} |~ `Error:|ERROR|cannot fork|ReconcileError|Failed|failed to` !~ `reflector.go|watch ended|^\\s*[+~-]\\s` [$__interval]))",
           "legendFormat": "errors",
           "queryType": "range"
         }
@@ -257,7 +257,7 @@
       "id": 4,
       "type": "logs",
       "title": "tofu CLI output (apply / plan)",
-      "description": "Raw tofu output as logged by provider-opentofu (Refreshing state, Plan, Changes to Outputs, Apply complete). Oldest first so a block reads top to bottom. The Workspace name is only on the `{\"request\": ..., \"operation\": \"apply\"}` line that FOLLOWS each block. Needs the Workspace's forProvider.enableTofuCLILogging: true. Use the Search box to narrow.",
+      "description": "Raw tofu output as logged by provider-opentofu (Refreshing state, Plan, Changes to Outputs, Apply complete). Oldest first so a block reads top to bottom. The Workspace name is only on the `{\"request\": ..., \"operation\": \"apply\"}` line that FOLLOWS each block. Needs the Workspace's forProvider.enableTofuCLILogging: true. Empty lines are dropped. Use the Search box to narrow.",
       "datasource": {
         "type": "loki",
         "uid": "loki"
@@ -275,7 +275,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "{namespace=\"crossplane-system\", container=\"package-runtime\"} !~ `DEBUG|INFO|reflector.go|controller-runtime|\"level\"|\"msg\"|unable to retrieve container logs` |~ \"(?i)$search\"",
+          "expr": "{namespace=\"crossplane-system\", container=\"package-runtime\"} !~ `DEBUG|INFO|reflector.go|controller-runtime|\"level\"|\"msg\"|unable to retrieve container logs` |~ `\\S` |~ \"(?i)$search\"",
           "queryType": "range"
         }
       ],
@@ -292,7 +292,7 @@
       "id": 5,
       "type": "logs",
       "title": "Provider steps per Workspace",
-      "description": "provider-opentofu's own step lines (module re-downloaded, `Checksums don't match so run tofu init`, `External resource is up to date`, `Successfully requested update`). Filterable by Workspace. Only logged with the provider's --debug flag: empty if it was dropped.",
+      "description": "provider-opentofu's own step lines, one short line each: `<workspace>  <what happened>` (module re-downloaded, `Checksums don't match so run tofu init`, `External resource is up to date`, `Successfully requested update`). Filterable by Workspace. Only logged with the provider's --debug flag: empty if it was dropped.",
       "datasource": {
         "type": "loki",
         "uid": "loki"
@@ -310,7 +310,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "{namespace=\"crossplane-system\", container=\"package-runtime\"} |~ \"$workspace\" |~ \"Checksums|up to date|Successfully requested|Remote module downloaded\"",
+          "expr": "{namespace=\"crossplane-system\", container=\"package-runtime\"} |~ \"$workspace\" |~ \"Checksums|up to date|Successfully requested|Remote module downloaded\" !~ `DEBUG\\s+events` | regexp `DEBUG\\s+\\S+\\s+(?P<msg>[^\\t{]+)` | regexp `\"request\": ?(?:\\{\"name\":)?\"(?P<ws>[a-z-]+)\"` | line_format \"{{.ws}}  {{.msg}}\"",
           "queryType": "range"
         }
       ],
@@ -327,7 +327,7 @@
       "id": 6,
       "type": "logs",
       "title": "Errors",
-      "description": "Error lines from the provider/tofu, Kubernetes watch noise excluded. A Workspace in ReconcileError also shows its message in Crossview (Synced condition).",
+      "description": "Real errors only: tofu `Error:` blocks, provider ERROR lines, `cannot fork`, ReconcileError. Plan diff lines (`+ \u2026`) and Kubernetes watch noise are excluded. A Workspace in ReconcileError also shows its message in Crossview (Synced condition).",
       "datasource": {
         "type": "loki",
         "uid": "loki"
@@ -345,7 +345,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "{namespace=\"crossplane-system\", container=\"package-runtime\"} |~ \"(?i)error|cannot fork|failed\" !~ \"reflector.go|watch ended\"",
+          "expr": "{namespace=\"crossplane-system\", container=\"package-runtime\"} |~ `Error:|ERROR|cannot fork|ReconcileError|Failed|failed to` !~ `reflector.go|watch ended|^\\s*[+~-]\\s`",
           "queryType": "range"
         }
       ],
