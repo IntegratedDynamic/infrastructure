@@ -51,3 +51,49 @@ is CI-appliable in principle from day one (export the same env var), same
 "designed for it, not yet wired to an actual workflow" status
 `11-secrets/openbao/managed` itself currently has (no `.github/workflows/*`
 references for this root today — applied by hand for now).
+
+## Reading the logs of the OpenTofu Workspaces (Crossplane `tofu apply`)
+
+Both Workspaces this domain and `11-secrets/openbao/managed` rely on
+(`grafana-managed`, `openbao-managed`) are applied by provider-opentofu, not by
+a CI job, so there is no job log to open. Where to look instead:
+
+- **Grafana dashboard "OpenTofu Workspaces (apply logs)"**
+  (`/d/opentofu-workspaces-logs`, `managed/dashboards/opentofu-workspaces.json`):
+  the provider pod's logs from Loki (`namespace="crossplane-system",
+  container="package-runtime"`) — applies count, applies/errors over time, the
+  `Apply complete! Resources: N added, N changed, N destroyed.` lines, the raw
+  `tofu` output, the provider's own steps per Workspace, and real errors. This
+  one dashboard is **hand-written**, unlike its siblings in the same directory
+  (which are lifted verbatim from kube-prometheus-stack).
+- **Crossview** does *not* show these logs. It shows the Workspace's `Synced` /
+  `Ready` conditions (an apply failure's message is the `Synced` message), its
+  events (`UpdatedExternalResource` = an update was requested; Kubernetes keeps
+  events ~1 h) and `status.atProvider` (`checksum`, and the module's
+  non-sensitive `outputs`). So Crossview tells you *that* and *when*; the
+  dashboard tells you *what*.
+
+What the logs do and don't contain (checked live 2026-11-04):
+
+- `tofu`'s own output (`Refreshing state…`, `Changes to Outputs` / the plan,
+  `Apply complete!`) is logged **only when a reconcile actually applies a
+  change**. A reconcile that finds nothing to do logs just the provider's step
+  lines (`Checksums match`, `External resource is up to date`) — and those step
+  lines only exist with the provider's `--debug` flag.
+- The `tofu` lines carry no Workspace name. It appears only on the
+  `{"request": "<workspace>", "operation": "apply"}` line that *follows* each
+  block, so only the provider-steps panel can be filtered per Workspace.
+- Sensitive values are masked by `tofu` itself (`<sensitive>`).
+- It relies on `forProvider.enableTofuCLILogging: true`, set on both Workspaces
+  in the gitops repo (`services/platform/crossplane/config/templates/`).
+
+To make a Workspace re-run now instead of waiting for its ~10 minute poll
+(e.g. right after pointing it at a branch, see the repo `CLAUDE.md`):
+
+```bash
+kubectl annotate workspace.opentofu.upbound.io <name> \
+  scalepack.fr/force-reconcile="$(date -u +%s)" --overwrite
+```
+
+Any annotation change triggers an immediate reconcile (observed < 1 s). It
+changes nothing real and ArgoCD does not prune annotations absent from Git.

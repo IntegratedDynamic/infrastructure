@@ -165,6 +165,12 @@ Things that bit us doing this (2026-11-03/04, Crossview rollout):
   issuer for hours. Check the pod's *actual* env/args, not the object.
 - ArgoCD polls Git about every 3 minutes; a `refresh=hard` annotation on the
   Application is the harmless way to skip that wait.
+- A Crossplane Workspace polls about every 10 minutes; to make it pick up a
+  branch now, annotate it
+  (`kubectl annotate workspace.opentofu.upbound.io <name> scalepack.fr/force-reconcile="$(date -u +%s)" --overwrite`,
+  reconciles in under a second). Its `tofu` output is in Loki / the Grafana
+  dashboard "OpenTofu Workspaces (apply logs)" — see
+  `12-monitoring/grafana/README.md` for what is and isn't logged.
 - Don't size a workload from a guess: measure the burst (`kubectl top`,
   `describe` → `OOMKilled`, exit 137) before choosing requests/limits.
 
@@ -418,6 +424,10 @@ modules/
                                #   since 11-secrets/ is scoped to OpenBao's
                                #   own config specifically, not any tool
                                #   that happens to need IaC.
+                               #   Also holds the hand-written dashboard
+                               #   "OpenTofu Workspaces (apply logs)" (Loki
+                               #   logs of the Crossplane-run `tofu apply`s,
+                               #   see its README).
 13-tailscale/                  # domain: live GitHub Actions debugging
                                #   (infra#110) — the tailnet ACL + OIDC
                                #   federation trust any workflow's debug
