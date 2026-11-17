@@ -425,6 +425,28 @@ resource "vault_kv_secret_v2" "crossview_credentials" {
   })
 }
 
+# GitHub push-webhook HMAC secret (kv/apps/workspace-webhook/credentials).
+# The workspace-webhook relay (gitops services/platform/crossplane/webhook)
+# verifies X-Hub-Signature-256 with it, then annotates the Crossplane
+# Workspaces so a push to this repo reconciles them immediately instead of
+# waiting for provider-opentofu's poll. The same value is pasted ONCE into the
+# GitHub repo webhook's "Secret" field (`tofu output -raw workspace_webhook_secret`).
+# To rotate: `-replace=random_password.workspace_webhook_secret`, then update
+# the GitHub webhook secret too.
+resource "random_password" "workspace_webhook_secret" {
+  length  = 48
+  special = false
+}
+
+resource "vault_kv_secret_v2" "workspace_webhook" {
+  mount = vault_mount.kv.path
+  name  = "apps/workspace-webhook/credentials"
+
+  data_json = jsonencode({
+    "hmac-secret" = random_password.workspace_webhook_secret.result
+  })
+}
+
 # admin-password is arbitrary (previously openssl rand, per gitops commit
 # 97aec22) — Terraform generates and owns it outright, same as the Dex client
 # secrets above. admin-user stays a hardcoded literal, not a secret at all.

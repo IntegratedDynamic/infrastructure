@@ -33,3 +33,8 @@ apps:
   # production OpenBao snapshot, which has no crossview KV entry until a
   # production apply of 11-secrets/openbao/managed has run).
   - {name: crossview, namespace: crossview, chartPath: services/platform/crossview/chart, valueFile: values-scaleway.yaml, wave: "1", scaledByKeda: true}
+  # workspace-webhook: GitHub push webhook -> annotates the Workspaces so a push
+  # to this repo reconciles them now instead of at provider-opentofu's next poll.
+  # Own Secret (ExternalSecret) and HTTPRoute (hooks.<domain>) live in the chart
+  # itself, like crossplane-config's ExternalSecrets. Scaleway only (public route).
+  - {name: workspace-webhook, namespace: crossplane-system, chartPath: services/platform/crossplane/webhook, valueFile: values-scaleway.yaml, wave: "1", valueParams: [{name: hostSuffix, valueFrom: hostSuffix}, {name: gitRef, valueFrom: infraRevision}]}
