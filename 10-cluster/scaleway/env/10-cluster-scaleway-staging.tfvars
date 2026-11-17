@@ -15,25 +15,21 @@ domain = "staging.scalepack.fr"
 # vs. a future *.prod.scalepack.fr cluster not yet created). Don't conflate
 # the two: this cluster's own tier can run on EITHER ACME environment.
 #
-# This homelab runs on Let's Encrypt STAGING, not prod, as its standing
-# state (see var.letsencrypt_staging). Two reasons, both confirmed live:
-#  1. gateway/cert-restore restores the staging.scalepack.fr wildcard TLS
-#     Secret from the latest Velero backup on every fresh boot -- and every
-#     backup taken so far is from a staging-issued cert. cert-manager
-#     treats the restored Secret as satisfying the Certificate (right
-#     SANs, valid dates) and does NOT re-issue against letsencrypt-prod,
-#     so envoy-gateway ends up serving a staging cert regardless of which
-#     ClusterIssuer is "active". Running the whole platform on staging
-#     keeps ArgoCD/OpenBao's server-side OIDC calls to auth.staging.scalepack.fr
-#     trusting the right root (their rootCA / oidc_discovery_ca_pem
-#     overrides only kick in when this flag is true) instead of failing
-#     "x509: certificate signed by unknown authority".
-#  2. This cluster is rebuilt from scratch often enough that LE's prod
-#     rate limit (5 duplicate certs/week) is a real risk; staging's
-#     limits are far higher.
-# Flip to false only alongside a deliberate move to prod certs (fresh
-# prod-issued backup, or cert-restore disabled).
-letsencrypt_staging = true
+# This homelab now runs on Let's Encrypt PROD certs (switched 2026-11-17).
+# It used to sit on STAGING for two reasons, neither holds anymore:
+#  1. the cluster was rebuilt (up/down) often enough that LE's prod rate limit
+#     (5 duplicate certs/week) was a real risk -- it is no longer torn down
+#     routinely;
+#  2. gateway/cert-restore restores the wildcard TLS Secret from the latest
+#     Velero backup, and every backup then was staging-issued, so the platform
+#     had to trust the staging root. cert-manager re-issues when the Secret's
+#     issuer differs from the active ClusterIssuer, which is what the flip
+#     relies on.
+# Reason to flip back to true: a burst of same-week rebuilds hitting the rate
+# limit again (and then flip it back once the window passes). Public webhooks
+# (GitHub -> hooks.staging.scalepack.fr) need a publicly trusted cert, which is
+# why this moved.
+letsencrypt_staging = false
 
 # Cross-root state reads — see 00-foundation/scaleway/env/00-foundation-scaleway-dev.tfvars
 # for the full bucket list. Keys updated 2026-08-24 (workspace-naming
