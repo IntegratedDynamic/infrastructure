@@ -129,10 +129,4 @@ domains = {
     needs_secrets = true
     needs_backups = true
   }
-
-  argo-workflows-apps = {
-    value_files   = ["values-argo-workflows.yaml"]
-    needs_secrets = true
-    needs_dex     = true
-  }
 }
