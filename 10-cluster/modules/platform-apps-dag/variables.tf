@@ -23,7 +23,7 @@ variable "domains" {
                       var.infra_source_repo/var.infra_source_path/
                       var.infra_revision) or "gitops" (the gitops repo's
                       own var.gitops_source_repo/var.gitops_source_path/
-                      var.gitops_revision). Only "bootstrap" uses "gitops"
+                      var.gitops_revision). Only "bootstrap-products" uses "gitops"
                       today.
       value_files     Helm valueFiles for the rendered Application,
                       relative to the resolved source_path.
@@ -58,6 +58,11 @@ variable "domains" {
                                      shouldn't burn reconcile attempts
                                      before Grafana's own provider target
                                      is reachable.
+      needs_keda                     Same, gated on "keda-apps" -- for
+                                     bootstrap-products, whose `demo` ships an
+                                     HTTPScaledObject (a CRD from KEDA's
+                                     HTTP Add-on) and would fail its
+                                     first sync if it raced ahead of it.
       depends_on_ids                 Opaque values (e.g. a
                                      kubernetes_secret.foo.id from the
                                      calling root's own main.tf) this
@@ -73,7 +78,7 @@ variable "domains" {
 
     Every needs_* flag is a no-op (silently ignored, not an error) if
     var.domains has no entry for the gate's own domain -- a root that
-    genuinely lacks one of these six domains simply never creates that
+    genuinely lacks one of these seven domains simply never creates that
     gate, and nothing can wait on it.
   EOT
   type = map(object({
@@ -86,6 +91,7 @@ variable "domains" {
     needs_dex                    = optional(bool, false)
     needs_networking_controllers = optional(bool, false)
     needs_grafana                = optional(bool, false)
+    needs_keda                   = optional(bool, false)
     depends_on_ids               = optional(list(string), [])
     namespace                    = optional(string, "argocd")
   }))
