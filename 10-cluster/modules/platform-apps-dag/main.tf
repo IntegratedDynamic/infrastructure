@@ -30,15 +30,16 @@
 #
 # What's real about this platform's actual DAG (confirmed against every
 # existing wait_for/depends_on edge across both roots before this rewrite)
-# is that it isn't a deep or wide arbitrary graph -- it reduces to SIX
+# is that it isn't a deep or wide arbitrary graph -- it reduces to SEVEN
 # individually-named, mutually-independent gates: crds-apps, secrets-apps,
-# backups-apps, dex-apps, networking-controllers-apps, grafana-apps. None
-# of these six ever needs another one of the six, so they're pulled into
+# backups-apps, dex-apps, networking-controllers-apps, grafana-apps,
+# keda-apps. None of these seven ever needs another one of them (but
+# crds-apps, see below), so they're pulled into
 # their OWN resource address (helm_release.gate_domain, terraform_data.
 # gate_domain_dep_anchor) entirely separate from every other ("regular")
 # domain's (helm_release.domain). A regular domain can safely reference a
 # gate's wait Job (kubernetes_job_v1.wait_crds/wait_secrets/.../
-# wait_grafana, each a single literally-keyed reference into
+# wait_grafana/wait_keda, each a single literally-keyed reference into
 # helm_release.gate_domain, never `each.key`) because that Job never
 # references back into helm_release.domain -- only into
 # helm_release.gate_domain, a genuinely different resource address. This
@@ -117,12 +118,12 @@ locals {
   # keep singular.
   crds_domain_keys = ["crds-apps"]
 
-  # The five remaining well-known gate domain keys -- hardcoded here, not
+  # The six remaining well-known gate domain keys -- hardcoded here, not
   # data-driven, for the same reason crds-apps is split out above. A future
   # seventh gate needs a real edit here, not a tfvars change -- a
   # genuinely rare, structural change, not per-environment config. None of
-  # these five may EVER set needs_secrets/needs_backups/needs_dex/
-  # needs_networking_controllers/needs_grafana on each other (that would
+  # these six may EVER set needs_secrets/needs_backups/needs_dex/
+  # needs_networking_controllers/needs_grafana/needs_keda on each other (that would
   # reproduce the same cycle) -- needs_crds is the one exception, safe
   # because crds-apps lives in the separate resource address above.
   gate_domain_keys = [
@@ -131,6 +132,7 @@ locals {
     "dex-apps",
     "networking-controllers-apps",
     "grafana-apps",
+    "keda-apps",
   ]
 
   crds_domain     = { for k in local.crds_domain_keys : k => var.domains[k] if contains(keys(var.domains), k) }
@@ -143,6 +145,7 @@ locals {
   has_dex                    = contains(keys(local.gate_domains), "dex-apps")
   has_networking_controllers = contains(keys(local.gate_domains), "networking-controllers-apps")
   has_grafana                = contains(keys(local.gate_domains), "grafana-apps")
+  has_keda                   = contains(keys(local.gate_domains), "keda-apps")
 }
 
 # ── Shared RBAC for every wait Job below (ex-argocd-wait-rbac) ──────────────
@@ -630,6 +633,65 @@ resource "kubernetes_job_v1" "wait_grafana" {
   }
 }
 
+resource "kubernetes_job_v1" "wait_keda" {
+  count = local.has_keda ? 1 : 0
+
+  metadata {
+    name      = "wait-keda-apps-healthy"
+    namespace = "argocd"
+  }
+
+  spec {
+    active_deadline_seconds = 1800
+    backoff_limit           = 0
+
+    template {
+      metadata {
+        labels = {
+          "app.kubernetes.io/name" = "wait-keda-apps-healthy"
+        }
+      }
+
+      spec {
+        service_account_name = kubernetes_service_account.wait.metadata[0].name
+        restart_policy       = "Never"
+
+        container {
+          name  = "wait"
+          image = "alpine/kubectl:1.35.3"
+
+          command = ["sh", "-c", <<-EOT
+            set -eu
+            app="keda-apps"
+            while true; do
+              sync=$(kubectl get application "$app" -n argocd -o jsonpath='{.status.sync.status}' 2>/dev/null || true)
+              health=$(kubectl get application "$app" -n argocd -o jsonpath='{.status.health.status}' 2>/dev/null || true)
+              if [ "$sync" = "Synced" ] && [ "$health" = "Healthy" ]; then
+                echo "Application/$app is Synced and Healthy."
+                exit 0
+              fi
+              echo "Application/$app: sync=$${sync:-<none yet>} health=$${health:-<none yet>}"
+              sleep 5
+            done
+          EOT
+          ]
+
+          env {
+            name  = "REVISION_TRIGGER"
+            value = helm_release.gate_domain["keda-apps"].metadata.revision
+          }
+        }
+      }
+    }
+  }
+
+  wait_for_completion = true
+
+  timeouts {
+    create = "35m"
+  }
+}
+
 # ── Every other ("regular") domain's own Application ────────────────────────
 #
 # May reference any of the six gate Jobs above (each a single, literally-
@@ -679,6 +741,7 @@ resource "helm_release" "domain" {
     each.value.needs_dex && local.has_dex ? [{ name = "__terraform_gate_dex", value = kubernetes_job_v1.wait_dex[0].id }] : [],
     each.value.needs_networking_controllers && local.has_networking_controllers ? [{ name = "__terraform_gate_networking_controllers", value = kubernetes_job_v1.wait_networking_controllers[0].id }] : [],
     each.value.needs_grafana && local.has_grafana ? [{ name = "__terraform_gate_grafana", value = kubernetes_job_v1.wait_grafana[0].id }] : [],
+    each.value.needs_keda && local.has_keda ? [{ name = "__terraform_gate_keda", value = kubernetes_job_v1.wait_keda[0].id }] : [],
   )
 }
 
@@ -765,4 +828,20 @@ resource "kubernetes_job_v1" "wait_all" {
   timeouts {
     create = "35m"
   }
+}
+
+# keda-apps was a "regular" domain until it became the seventh gate (bootstrap's
+# `demo` needs its HTTPScaledObject CRD, see variables.tf's needs_keda). Same
+# helm release name either way (argocd-keda-apps), so without these the plan
+# would create the gate's release before destroying the old one and collide on
+# the name. Safe to delete once every root's state has been applied past it
+# (a no-op for roots with no keda-apps, e.g. 10-cluster/kind).
+moved {
+  from = helm_release.domain["keda-apps"]
+  to   = helm_release.gate_domain["keda-apps"]
+}
+
+moved {
+  from = terraform_data.domain_dep_anchor["keda-apps"]
+  to   = terraform_data.gate_domain_dep_anchor["keda-apps"]
 }

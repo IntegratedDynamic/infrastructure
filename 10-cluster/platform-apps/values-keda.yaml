@@ -1,0 +1,6 @@
+# keda -- event-driven autoscaler (ScaledObject/ScaledJob). Own domain: no
+# ESO Secret, no Gateway/HTTPRoute, and KEDA ships and manages its own CRDs.
+# It IS gated on crds-apps (needs_crds), though: its chart creates
+# ServiceMonitors, which need the monitoring.coreos.com CRDs. Scaleway only.
+apps:
+  - {name: keda, namespace: keda, chartPath: services/platform/keda/chart, valueFile: values-scaleway.yaml, wave: "0"}

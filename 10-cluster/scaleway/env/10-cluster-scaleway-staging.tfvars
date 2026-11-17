@@ -137,6 +137,17 @@ domains = {
     needs_secrets = true
   }
 
+  # KEDA (event-driven autoscaler + HTTP Add-on): ships its own CRDs and needs
+  # no Secret, but its chart generates ServiceMonitors (values-scaleway.yaml
+  # in gitops), so the monitoring.coreos.com CRDs from crds-apps must be
+  # Established first. A GATE (the seventh, see platform-apps-dag/main.tf):
+  # bootstrap's `demo` ships an HTTPScaledObject (CRD from the HTTP Add-on)
+  # and its first sync would fail if it raced ahead of this domain.
+  keda-apps = {
+    value_files = ["values-keda.yaml"]
+    needs_crds  = true
+  }
+
   # ── dex/argocd-config/grafana, extracted from gitops repo (infra#84 follow-up) ──
   #
   # Each of these three domains shares the identical dependency profile on
@@ -196,16 +207,22 @@ domains = {
     needs_grafana = true
   }
 
-  # gitops repo's own app-of-apps (now just `demo`, every other domain
+  # gitops repo's PRODUCT app-of-apps (not the cluster bootstrap; now just
+  # `demo`, every other domain
   # migrated into the platform-apps domains above). Fits the SAME
   # Application shape (finalizers/project/destination/syncPolicy) even
   # though its source is the gitops repo, not this one, and it's driven
-  # entirely by parameters (no valueFiles). No needs_* flags: the final
-  # wait-all-domains-healthy gate polls every domain's own Application
-  # directly (bootstrap included), so it already subsumes what a dedicated
-  # gate would have covered.
-  bootstrap = {
-    source = "gitops"
+  # entirely by parameters (no valueFiles). Only needs_keda: `demo` ships an
+  # InterceptorRoute/ScaledObject (charts/cold-start), whose CRDs come from
+  # keda-apps' HTTP Add-on, and a first sync that races ahead of them fails
+  # (automated sync does not retry the same commit). The final
+  # wait-all-domains-healthy gate does NOT cover this: it only checks health
+  # at the end, it does not delay when bootstrap is created. Every other
+  # dependency of `demo` (Gateway API CRDs, secrets) is left to ArgoCD's own
+  # convergence, as before.
+  bootstrap-products = {
+    source     = "gitops"
+    needs_keda = true
     parameters = [
       { name = "env", value = "scaleway" },
     ]
