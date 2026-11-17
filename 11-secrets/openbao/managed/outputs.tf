@@ -15,3 +15,11 @@ output "grafana_admin_password" {
   sensitive   = true
   value       = random_password.grafana_admin_password.result
 }
+
+# GitHub webhook secret for the workspace-webhook relay (see main.tf). Needed
+# once, to paste into the repo's webhook settings.
+output "workspace_webhook_secret" {
+  description = "HMAC secret of the GitHub push webhook (kv/apps/workspace-webhook/credentials)."
+  sensitive   = true
+  value       = random_password.workspace_webhook_secret.result
+}
