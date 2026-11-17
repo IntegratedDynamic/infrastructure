@@ -32,4 +32,4 @@ apps:
   # product -- scaleway only, not in the kind tier (kind restores the
   # production OpenBao snapshot, which has no crossview KV entry until a
   # production apply of 11-secrets/openbao/managed has run).
-  - {name: crossview, namespace: crossview, chartPath: services/platform/crossview/chart, valueFile: values-scaleway.yaml, wave: "1"}
+  - {name: crossview, namespace: crossview, chartPath: services/platform/crossview/chart, valueFile: values-scaleway.yaml, wave: "1", scaledByKeda: true}

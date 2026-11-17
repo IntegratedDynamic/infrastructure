@@ -29,4 +29,4 @@
 # token_url/api_url in its own values-scaleway.yaml), so it needs to trust
 # the staging CA when that flag flips.
 apps:
-  - {name: grafana, namespace: monitoring, chartPath: services/platform/monitoring/grafana-chart, valueFile: values-scaleway.yaml, wave: "0", extraValueFileParam: values-letsencrypt-staging-ca.yaml}
+  - {name: grafana, namespace: monitoring, chartPath: services/platform/monitoring/grafana-chart, valueFile: values-scaleway.yaml, wave: "0", extraValueFileParam: values-letsencrypt-staging-ca.yaml, scaledByKeda: true}

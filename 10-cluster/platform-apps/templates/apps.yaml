@@ -142,6 +142,16 @@ spec:
       kind: Job
       jsonPointers:
         - /status
+    {{- if .scaledByKeda }}
+    # Opt-in per app (`scaledByKeda: true`): the app's Deployment is scaled
+    # 0<->N by a KEDA ScaledObject (gitops charts/cold-start), and a few
+    # upstream charts always render spec.replicas (crossview, grafana). Without
+    # this, selfHeal resets it to the git value and fights KEDA forever.
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/replicas
+    {{- end }}
 
   destination:
     server: https://kubernetes.default.svc
@@ -154,4 +164,9 @@ spec:
     syncOptions:
       - CreateNamespace=true
       - ServerSideApply=true
+      {{- if .scaledByKeda }}
+      # Without it a sync (any change) would still apply git's spec.replicas;
+      # the ignore above only silences the diff.
+      - RespectIgnoreDifferences=true
+      {{- end }}
 {{- end }}
