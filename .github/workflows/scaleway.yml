@@ -11,7 +11,7 @@ name: OpenTofu — Scaleway cluster
 # checkout step only ever surfaces a commit hash, not a branch name; only
 # the run list's own branch column shows it otherwise, easy to miss once
 # you're inside a run looking at its logs.
-run-name: "OpenTofu ${{ inputs.command || 'scheduled up/down' }} — Scaleway cluster (env: ${{ inputs.environment || 'scaleway' }}) @ ${{ github.ref_name }}"
+run-name: "OpenTofu ${{ inputs.command || (github.event_name == 'push' && 'apply (merge to main)' || 'scheduled up/down') }} — Scaleway cluster (env: ${{ inputs.environment || 'scaleway' }}) @ ${{ github.ref_name }}"
 
 # Drives 10-cluster/scaleway through the .github/actions/terraform composite action.
 #
@@ -43,8 +43,16 @@ run-name: "OpenTofu ${{ inputs.command || 'scheduled up/down' }} — Scaleway cl
 # window shifts to 12:00-19:00 -- shift both crons by -1h at the DST change
 # if that matters. A cold `apply` takes 15-45 min. Out of hours, dispatch
 # manually (apply = up, hard-destroy = down).
+#
+# Merge to main (push): always `apply`. A cluster deployed from a feature
+# branch (gitops_revision / the auto-detected infra_revision) is left pointing
+# at a branch that the merge deletes, i.e. in ComparisonError; re-applying from
+# main puts every ref back on main with no manual step. Note this runs
+# whatever state the cluster is in: with the cluster down, a merge brings it up.
 
 on:
+  push:
+    branches: [main]
   schedule:
     - cron: '5 10 * * *'  # up
     - cron: '5 17 * * *'  # down
@@ -141,6 +149,6 @@ jobs:
           # The cron literal below MUST match the 'up' cron in on.schedule (no
           # way to reference it from an expression); a mismatch makes the up
           # run fall through to hard-destroy.
-          command: ${{ github.event_name == 'schedule' && (github.event.schedule == '5 10 * * *' && 'apply' || 'hard-destroy') || inputs.command }}
+          command: ${{ github.event_name == 'schedule' && (github.event.schedule == '5 10 * * *' && 'apply' || 'hard-destroy') || github.event_name == 'push' && 'apply' || inputs.command }}
           state-backend: scaleway
           infisical-oidc-audience: '' # this root doesn't consume Infisical
