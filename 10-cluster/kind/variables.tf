@@ -63,13 +63,22 @@ variable "openbao_unseal_aws_state_key" {
 # comment) before calling the module.
 variable "domains" {
   type = map(object({
-    source         = optional(string, "infra")
-    value_files    = optional(list(string), [])
-    parameters     = optional(list(object({ name = string, value = string })), [])
-    needs_crds     = optional(bool, false)
-    needs_secrets  = optional(bool, false)
-    needs_backups  = optional(bool, false)
-    depends_on_ids = optional(list(string), [])
-    namespace      = optional(string, "argocd")
+    source        = optional(string, "infra")
+    value_files   = optional(list(string), [])
+    parameters    = optional(list(object({ name = string, value = string })), [])
+    needs_crds    = optional(bool, false)
+    needs_secrets = optional(bool, false)
+    needs_backups = optional(bool, false)
+    # Keep in sync with modules/platform-apps-dag/variables.tf: an attribute
+    # missing from this object type is silently DROPPED on conversion (no
+    # error), turning its needs_* gate into a no-op. That is exactly how
+    # needs_dex/needs_networking_controllers/needs_grafana were inert from
+    # d2cbdbc (2026-09-17) until this fix.
+    needs_dex                    = optional(bool, false)
+    needs_networking_controllers = optional(bool, false)
+    needs_grafana                = optional(bool, false)
+    needs_keda                   = optional(bool, false)
+    depends_on_ids               = optional(list(string), [])
+    namespace                    = optional(string, "argocd")
   }))
 }
