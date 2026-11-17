@@ -182,17 +182,6 @@ domains = {
     needs_backups = true
   }
 
-  # ── argo-workflows, extracted from gitops repo (infra#84 follow-up) ─────
-  #
-  # argo-workflows/chart eager-dials Dex's OIDC issuer at pod startup and
-  # crash-loops if Dex isn't reachable -- a real hard dependency, unlike
-  # ESO's self-heal tolerance.
-  argo-workflows-apps = {
-    value_files   = ["values-argo-workflows.yaml"]
-    needs_secrets = true
-    needs_dex     = true
-  }
-
   # ── crossplane, extracted from gitops repo (infra#84 follow-up; issue #101) ──
   #
   # Crossplane core + upbound/provider-opentofu -- the unattended
