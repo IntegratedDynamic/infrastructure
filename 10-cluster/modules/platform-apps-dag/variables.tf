@@ -23,8 +23,12 @@ variable "domains" {
                       var.infra_source_repo/var.infra_source_path/
                       var.infra_revision) or "gitops" (the gitops repo's
                       own var.gitops_source_repo/var.gitops_source_path/
-                      var.gitops_revision). Only "bootstrap-products" uses "gitops"
-                      today.
+                      var.gitops_revision) or "personal" (the personal
+                      homelab-apps repo, var.personal_source_repo/
+                      var.personal_source_path/var.personal_revision --
+                      kept apart from this platform's own repos). Only
+                      "bootstrap-products" uses "gitops" and
+                      "personal-apps" uses "personal" today.
       value_files     Helm valueFiles for the rendered Application,
                       relative to the resolved source_path.
       parameters      Extra Helm parameters beyond the "revision" one
@@ -129,6 +133,24 @@ variable "gitops_source_path" {
 variable "gitops_revision" {
   description = "Already-resolved targetRevision for every domain with source = \"gitops\", AND the value auto-injected as every domain's own \"revision\" Helm parameter regardless of its own source -- every domain, including \"infra\"-sourced ones, ultimately renders a chart whose OWN child Applications should track the gitops repo at this revision."
   type        = string
+}
+
+variable "personal_source_repo" {
+  description = "Git URL of the personal homelab-apps repo, for every domain with source = \"personal\"."
+  type        = string
+  default     = "https://github.com/nbrieussel/homelab-apps.git"
+}
+
+variable "personal_source_path" {
+  description = "Path within var.personal_source_repo (its app-of-apps chart), for every domain with source = \"personal\"."
+  type        = string
+  default     = "bootstrap"
+}
+
+variable "personal_revision" {
+  description = "targetRevision for every domain with source = \"personal\" (also its \"revision\" Helm parameter)."
+  type        = string
+  default     = "main"
 }
 
 variable "wait_all_domains_healthy" {
