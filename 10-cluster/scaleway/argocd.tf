@@ -479,7 +479,6 @@ module "platform_apps" {
   infra_revision           = local.effective_infra_revision
   gitops_revision          = local.effective_gitops_revision
   gitops_source_repo       = local.gitops_source_repo
-  personal_revision        = var.personal_revision
   wait_all_domains_healthy = var.wait_all_domains_healthy
 
   depends_on = [helm_release.argocd]

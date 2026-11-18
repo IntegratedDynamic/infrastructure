@@ -212,15 +212,4 @@ domains = {
       { name = "env", value = "scaleway" },
     ]
   }
-
-  # Personal apps (Firefly III, ...): the homelab-apps repo's own app-of-apps,
-  # kept out of gitops so personal and platform stay separate. Needs the
-  # secrets (ExternalSecret -> OpenBao) and, for the HTTPRoute, the
-  # networking controllers; the Gateway CRDs come from crds-apps.
-  personal-apps = {
-    source                       = "personal"
-    needs_crds                   = true
-    needs_secrets                = true
-    needs_networking_controllers = true
-  }
 }

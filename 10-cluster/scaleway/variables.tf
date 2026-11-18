@@ -46,15 +46,6 @@ variable "gitops_revision" {
   default = "main"
 }
 
-# Branch of the personal homelab-apps repo (nbrieussel/homelab-apps) the
-# personal-apps domain tracks. Same "override on your own branch to test,
-# never merge the flip" trick as gitops_revision, but WITHOUT an apply-time
-# existence fallback: point it at a branch that is pushed.
-variable "personal_revision" {
-  type    = string
-  default = "main"
-}
-
 # Revision of THIS repo (infrastructure) ArgoCD's secrets-apps/monitoring-apps/
 # backups-apps Applications (AND, same mechanism, Crossplane's own
 # provider-opentofu Workspaces, e.g. 11-secrets/openbao/managed -- see that
