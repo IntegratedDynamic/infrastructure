@@ -52,18 +52,16 @@
 locals {
   domain_specs = {
     for key, d in var.domains : key => {
-      source_repo     = d.source == "gitops" ? var.gitops_source_repo : d.source == "personal" ? var.personal_source_repo : var.infra_source_repo
-      source_path     = d.source == "gitops" ? var.gitops_source_path : d.source == "personal" ? var.personal_source_path : var.infra_source_path
-      target_revision = d.source == "gitops" ? var.gitops_revision : d.source == "personal" ? var.personal_revision : var.infra_revision
+      source_repo     = d.source == "gitops" ? var.gitops_source_repo : var.infra_source_repo
+      source_path     = d.source == "gitops" ? var.gitops_source_path : var.infra_source_path
+      target_revision = d.source == "gitops" ? var.gitops_revision : var.infra_revision
       namespace       = d.namespace
       value_files     = d.value_files
       # Every domain gets "revision" automatically -- even a "gitops"-sourced
       # one (bootstrap): it's the gitops repo revision every rendered
       # chart's OWN child Applications should track, independent of which
       # repo this Application's own chart happens to be pulled from.
-      # A "personal"-sourced domain's chart tracks the personal repo itself,
-      # so its "revision" is that repo's, not gitops'.
-      parameters = concat([{ name = "revision", value = d.source == "personal" ? var.personal_revision : var.gitops_revision }], d.parameters)
+      parameters = concat([{ name = "revision", value = var.gitops_revision }], d.parameters)
     }
   }
 
