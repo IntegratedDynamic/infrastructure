@@ -425,6 +425,31 @@ resource "vault_kv_secret_v2" "crossview_credentials" {
   })
 }
 
+# Firefly III (kv/apps/firefly/credentials), consumed by the personal
+# homelab-apps repo's firefly-iii chart via ExternalSecret.
+#  - app-key: Laravel APP_KEY, exactly 32 chars. Do NOT rotate casually:
+#    Firefly encrypts stored data with it, a new key makes it unreadable.
+#  - db-password: the PostgreSQL password of the in-namespace firefly-db.
+resource "random_password" "firefly_app_key" {
+  length  = 32
+  special = false
+}
+
+resource "random_password" "firefly_db_password" {
+  length  = 32
+  special = false
+}
+
+resource "vault_kv_secret_v2" "firefly_credentials" {
+  mount = vault_mount.kv.path
+  name  = "apps/firefly/credentials"
+
+  data_json = jsonencode({
+    "app-key"     = random_password.firefly_app_key.result
+    "db-password" = random_password.firefly_db_password.result
+  })
+}
+
 # GitHub push-webhook HMAC secret (kv/apps/workspace-webhook/credentials).
 # The workspace-webhook relay (gitops services/platform/crossplane/webhook)
 # verifies X-Hub-Signature-256 with it, then annotates the Crossplane
