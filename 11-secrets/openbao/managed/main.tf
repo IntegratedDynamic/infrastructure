@@ -447,6 +447,28 @@ resource "vault_kv_secret_v2" "workspace_webhook" {
   })
 }
 
+# Slack bot token (xoxb-..., scope chat:write) for the workspace-events Sensor's
+# Slack notification on a push. Issued by Slack, so it can't be generated: the
+# value comes from var.slack_event_bot_token, set in the gitignored
+# local.auto.tfvars of whoever applies this root by hand. The unattended Crossplane
+# Workspace applies the same root WITHOUT it (placeholder default), and its
+# reconciles -- now triggered by every push -- must never revert the real token:
+# hence ignore_changes. A fresh cluster gets the path with the placeholder; push
+# the real token with a local
+#   tofu apply -replace=vault_kv_secret_v2.workspace_events_slack
+resource "vault_kv_secret_v2" "workspace_events_slack" {
+  mount = vault_mount.kv.path
+  name  = "apps/workspace-events/slack"
+
+  data_json = jsonencode({
+    token = var.slack_event_bot_token
+  })
+
+  lifecycle {
+    ignore_changes = [data_json]
+  }
+}
+
 # admin-password is arbitrary (previously openssl rand, per gitops commit
 # 97aec22) — Terraform generates and owns it outright, same as the Dex client
 # secrets above. admin-user stays a hardcoded literal, not a secret at all.
