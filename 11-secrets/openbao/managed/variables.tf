@@ -42,6 +42,19 @@ variable "secrets_sync_github_eso_private_key" {
   sensitive   = true
 }
 
+# Slack bot token (xoxb-...) for the workspace-events Sensor's Slack notification
+# (kv/apps/workspace-events/slack). Issued by Slack, so not generatable. Set in the
+# gitignored local.auto.tfvars of whoever applies this root by hand. It has a
+# placeholder default on purpose: the unattended Crossplane Workspace applies this
+# same root without it, and must keep working (the resource ignores later changes,
+# see main.tf -- push a new value with `-replace=vault_kv_secret_v2.workspace_events_slack`).
+variable "slack_event_bot_token" {
+  description = "Slack bot token (xoxb-...) written to kv/apps/workspace-events/slack."
+  type        = string
+  sensitive   = true
+  default     = "REPLACE_ME"
+}
+
 # Structured so the scope of each secret is explicit in code, not just
 # encoded as an opaque KV path string — a GitHub repo/environment rename is a
 # map-key rename here, not a hunt through hardcoded path segments.
