@@ -1,8 +1,8 @@
 # infra#110 + infra#113: this tier's whole platform-apps DAG lives as DATA
 # in env/10-cluster-kind-github-pr.tfvars (var.domains, see
 # modules/platform-apps-dag/variables.tf's own description) -- this file now
-# only holds ArgoCD's own bootstrap (helm_release.argocd, no OIDC/Dex login
-# here, unlike 10-cluster/scaleway's shared Dex -- every access here is
+# only holds ArgoCD's own bootstrap (helm_release.argocd, no OIDC login
+# here, unlike 10-cluster/scaleway's authentik login -- every access here is
 # already the CI job's own kubeconfig admin) and the handful of Secret
 # dependencies (main.tf) that can't be expressed as tfvars data, merged onto
 # var.domains right before the single module.platform_apps call. See that
@@ -35,8 +35,8 @@ resource "helm_release" "argocd" {
     <<-EOF
     configs:
       rbac:
-        # No OIDC/Dex login wired up for this ephemeral, single-use tier
-        # (unlike 10-cluster/scaleway's shared Dex) -- every access here is
+        # No OIDC login wired up for this ephemeral, single-use tier
+        # (unlike 10-cluster/scaleway's authentik login) -- every access here is
         # already the CI job's own kubeconfig admin, so there's no separate
         # audience to restrict.
         policy.default: role:admin

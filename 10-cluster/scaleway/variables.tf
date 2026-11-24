@@ -185,7 +185,7 @@ variable "wait_all_domains_healthy" {
 variable "argocd_admin_password_hash" {
   description = "Pre-computed bcrypt hash of the ArgoCD admin password. When set, Infisical is not consulted."
   type        = string
-  # Dead as of the switch to OIDC-via-Dex login (argocd.tf sets admin.enabled:
+  # Dead as of the switch to OIDC login (argocd.tf sets admin.enabled:
   # "false" and comments out the Infisical fetch) -- nothing consumes this value
   # anymore. Default restored so a plain `-var-file` apply (CI included) doesn't
   # fail on "no value for required variable" for a variable no resource reads.
@@ -243,9 +243,8 @@ variable "domains" {
     # Keep in sync with modules/platform-apps-dag/variables.tf: an attribute
     # missing from this object type is silently DROPPED on conversion (no
     # error), turning its needs_* gate into a no-op. That is exactly how
-    # needs_dex/needs_networking_controllers/needs_grafana were inert from
+    # needs_networking_controllers/needs_grafana were inert from
     # d2cbdbc (2026-09-17) until this fix.
-    needs_dex                    = optional(bool, false)
     needs_networking_controllers = optional(bool, false)
     needs_grafana                = optional(bool, false)
     needs_keda                   = optional(bool, false)

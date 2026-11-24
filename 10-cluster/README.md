@@ -23,7 +23,7 @@ responsibility, not this domain's.
   provision a genuinely different cluster (a throwaway `kind` cluster
   created by a CI step vs. a real Scaleway-managed Kapsule cluster + node
   pool) and wire ArgoCD to a genuinely different login/exposure story (none
-  vs. a real shared Dex/OIDC), so those parts stay separate, independent
+  vs. a real OIDC login through authentik), so those parts stay separate, independent
   code. But the platform-apps DAG itself — which ArgoCD Applications exist,
   gated by what — used to be hand-duplicated Terraform between the two
   roots (`argocd.tf` in particular), then (infra#113, first pass) extracted
@@ -32,15 +32,15 @@ responsibility, not this domain's.
   `modules/platform-apps-dag`, driven entirely by a `domains` map each
   root declares — mostly sourced straight from `env/*.tfvars` — so a root's
   own `argocd.tf` only has to state genuinely environment-specific config
-  (provider/cluster bootstrapping, OIDC/Dex vs. none, the handful of truly
+  (provider/cluster bootstrapping, OIDC (authentik) vs. none, the handful of truly
   dynamic values no tfvars literal could express) and call the module
   once. A fully free-form named cross-domain graph turned out not to be
   expressible this way at all (confirmed live 2026-09-17: a self-
   referencing `for_each` is a real OpenTofu cycle) — see
   `modules/platform-apps-dag/main.tf`'s own header comment for why this
   platform's real DAG instead reduces to six independently-named gates
-  (`crds-apps`/`secrets-apps`/`backups-apps`/`dex-apps`/
-  `networking-controllers-apps`/`grafana-apps`), each its own resource
+  (`crds-apps`/`secrets-apps`/`backups-apps`/
+  `networking-controllers-apps`/`grafana-apps`/`keda-apps`), each its own resource
   address so the graph stays acyclic while every domain that doesn't need
   a gate still runs in full parallel. See `platform-apps/README.md`
   for the platform-wide DAG this wiring encodes.

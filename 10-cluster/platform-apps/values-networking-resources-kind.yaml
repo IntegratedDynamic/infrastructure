@@ -27,7 +27,6 @@ apps:
   - {name: gateway-config, namespace: gateway, chartPath: services/platform/gateway/config, valueFile: values-scaleway.yaml, wave: "0", valueParams: [{name: activeClusterIssuer, valueFrom: activeClusterIssuer}]}
   - {name: external-dns, namespace: external-dns, chartPath: services/platform/external-dns/chart, valueFile: values-kind.yaml, wave: "0", syncWaveLabelPaths: ['external-dns.podLabels.scalepack\.fr/sync-wave']}
   # ── wave 1 ──────────────────────────────────────────────────────────────
-  - {name: dex-gateway, namespace: gateway, chartPath: services/platform/dex/gateway, valueFile: values.yaml, wave: "1", valueParams: [{name: hostSuffix, valueFrom: hostSuffix}]}
   - {name: grafana-gateway, namespace: monitoring, chartPath: services/platform/monitoring/grafana-gateway, valueFile: values-scaleway.yaml, wave: "1", valueParams: [{name: hostSuffix, valueFrom: hostSuffix}]}
   - {name: argocd-config-gateway, namespace: argocd, chartPath: services/platform/argocd-config/gateway, valueFile: values-scaleway.yaml, wave: "1", valueParams: [{name: hostSuffix, valueFrom: hostSuffix}]}
   - {name: openbao-gateway, namespace: openbao, chartPath: services/platform/openbao/gateway, valueFile: values-scaleway.yaml, wave: "1", valueParams: [{name: hostSuffix, valueFrom: hostSuffix}]}

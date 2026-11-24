@@ -2,7 +2,7 @@
 # env/10-cluster-scaleway-staging.tfvars (var.domains, see
 # modules/platform-apps-dag/variables.tf's own description) -- this file now
 # only holds what's genuinely environment-specific and can't be expressed as
-# tfvars: ArgoCD's own bootstrap (real OIDC/Dex login, public URL, RBAC
+# tfvars: ArgoCD's own bootstrap (OIDC login through authentik, public URL, RBAC
 # policy), the git-existence-probing DevX trick that resolves
 # var.gitops_revision/var.infra_revision at apply time, and the handful of
 # dynamic parameter/dependency values (main.tf's own Secrets,
@@ -12,24 +12,6 @@
 # wait gate (soft vs. hard cross-domain dependencies would otherwise
 # collapse into always-hard), and 10-cluster/platform-apps/README.md for the
 # platform-wide DAG this wiring encodes.
-
-# infra#113 SSO-fix follow-up (2026-09-18): ephemeral clusters bypass the
-# real GitHub OAuth connector entirely instead of threading hostSuffix into
-# it -- GitHub's OAuth App requires an exact, manually pre-registered
-# redirect_uri per host, which doesn't scale to one new hostname per
-# ephemeral cluster (confirmed live testing cluster pr-114: "Be careful!
-# The redirect_uri is not associated with this application", GitHub's own
-# error page, not Dex's). Only generated for an ephemeral workspace
-# (var.env_suffix != "") -- the stable workspace's Dex never enables its
-# password DB at all (gitops repo's config-secret.yaml `ne hostSuffix ""`
-# guard), so there's nothing for this to protect there. A fresh random
-# password every apply, never a fixed value committed anywhere -- see
-# local.dex_static_password below for where it's threaded through.
-resource "random_password" "dex_static_password" {
-  count   = var.env_suffix != "" ? 1 : 0
-  length  = 24
-  special = false
-}
 
 locals {
   # Both ArgoCD Applications' own `targetRevision` (evaluated by ArgoCD's
@@ -131,33 +113,6 @@ locals {
   # appends this local verbatim instead of each reimplementing the
   # empty-vs-non-empty branch.
   host_suffix = var.env_suffix != "" ? "-${var.env_suffix}" : ""
-
-  # Empty on the stable workspace, matching random_password.dex_static_password's
-  # own count = 0 there -- see that resource's header comment.
-  dex_static_password = var.env_suffix != "" ? random_password.dex_static_password[0].result : ""
-}
-
-# infra#113 SSO-fix follow-up: also materialize the ephemeral login as a
-# plain kubectl-readable Secret -- scaleway-ephemeral.yml's job summary is
-# the primary path, but that's tied to one CI run's own retention; this
-# survives independently and needs nothing but cluster access
-# (`kubectl get secret dex-ephemeral-login -n default -o jsonpath=...`) to
-# read back. Only created for an ephemeral workspace, same guard as the
-# password itself -- the stable workspace never has a real GitHub-bypass
-# login to expose.
-resource "kubernetes_secret" "dex_ephemeral_login" {
-  count = var.env_suffix != "" ? 1 : 0
-
-  metadata {
-    name      = "dex-ephemeral-login"
-    namespace = "default"
-  }
-
-  data = {
-    username = "ephemeral"
-    password = local.dex_static_password
-    url      = "https://argocd${local.host_suffix}.${var.domain}"
-  }
 }
 
 module "argocd_base_values" {
@@ -211,10 +166,9 @@ resource "helm_release" "argocd" {
         # ArgoCD kept generating OAuth callback URLs against the UNSUFFIXED
         # https://argocd.staging.scalepack.fr even on an ephemeral cluster actually
         # reachable at https://argocd-pr-123.staging.scalepack.fr, so the OIDC
-        # redirect_uri never matched what Dex's own static client (gitops
-        # repo, services/platform/dex/chart) whitelisted -- SSO login failed
-        # outright. See oidc.config.issuer below for the other half of this
-        # fix.
+        # redirect_uri never matched what the IdP's client whitelisted (it was
+        # Dex's static client then) -- SSO login failed outright. See
+        # oidc.config.issuer below for the other half of this fix.
         url: https://argocd${local.host_suffix}.${var.domain}
 
         # Cuts cluster-cache memory, not just the controller's own
@@ -248,47 +202,45 @@ resource "helm_release" "argocd" {
             kinds:
             - "*"
 
-        # Local admin login is redundant now that OIDC via Dex is working —
+        # Local admin login is redundant now that OIDC via authentik is working —
         # one login path, no separate password to rotate/leak.
         admin.enabled: "false"
 
-        # Native OIDC against our own shared Dex (platform/scaleway/dex.yml in
-        # the gitops repo, staticClients.argocd) instead of the chart's built-in
-        # Dex (disabled by module.argocd_base_values) — one Dex instance for
-        # the whole platform, one place the GitHub org/team restriction is
-        # defined.
+        # Native OIDC against authentik (14-sso/managed/oidc.tf in this repo,
+        # client `argocd`; was the shared Dex) instead of the chart's built-in
+        # Dex (disabled by module.argocd_base_values) — one IdP for the whole
+        # platform, one place who may log in is defined (GitHub org/team ->
+        # authentik groups, see 14-sso/managed/github.tf).
         oidc.config: |
-          name: Dex
-          # var.env_suffix/local.host_suffix -- must match Dex's OWN
-          # gateway hostname exactly (gitops repo's
-          # services/platform/dex/gateway builds "auth" + hostSuffix +
-          # ".staging.scalepack.fr") and its static "argocd" client's issuer
-          # (services/platform/dex/chart). Without this, an ephemeral
-          # cluster's ArgoCD talked OIDC discovery against production's
-          # real Dex instead of its own -- see cm.url above for the full
-          # "why" this was missing.
-          issuer: https://auth${local.host_suffix}.${var.domain}
+          name: authentik
+          # var.env_suffix/local.host_suffix -- must match authentik's OWN
+          # gateway hostname (gitops repo's services/platform/authentik/gateway
+          # builds "sso" + hostSuffix + ".staging.scalepack.fr"). The issuer is
+          # PER APPLICATION in authentik: .../application/o/<slug>/ (slug
+          # `argocd`), with the trailing slash -- it must equal the `iss` claim
+          # and the discovery document's issuer exactly.
+          issuer: https://sso${local.host_suffix}.${var.domain}/application/o/argocd/
           clientID: argocd
-          # Resolved from the argocd-oidc-client-secret Secret (gitops repo:
-          # apps/argocd-config), not the default argocd-secret — that secret
-          # carries the app.kubernetes.io/part-of: argocd label ArgoCD requires
-          # for custom secret references.
-          clientSecret: $argocd-oidc-client-secret:oidc.clientSecret
-          # `argocd login --sso` talks to Dex directly (PKCE, no client
-          # secret) rather than through argocd-server's own /auth/callback —
-          # it can't use the confidential `argocd` client above, so it gets
-          # its own public client (gitops repo: platform/scaleway/dex.yml,
-          # staticClients.argocd-cli).
-          cliClientID: argocd-cli
+          # PUBLIC client, no clientSecret: one authentik provider serves both
+          # the web UI and `argocd login --sso` (the CLI then uses this same
+          # clientID, cliClientID omitted), PKCE protecting the code exchange.
+          # A separate CLI client cannot work: authentik's issuer is per
+          # application, so a CLI client's tokens carry another `iss` and
+          # argocd-server rejects them ("id token issued by a different
+          # provider", seen live). redirect URIs (14-sso/managed/oidc.tf):
+          # https://argocd.<domain>/auth/callback and
+          # http://localhost:8085/auth/callback.
+          enablePKCEAuthentication: true
+          # `profile` carries the `groups` claim in authentik (no separate
+          # `groups` scope; an unknown scope is silently dropped).
           requestedScopes:
             - openid
             - profile
             - email
-            - groups
     %{if var.letsencrypt_staging~}
           # var.letsencrypt_staging (see that variable's own comment): ArgoCD's
           # native per-provider CA override for OIDC discovery/token calls to
-          # https://auth.staging.scalepack.fr -- no pod/volume/init-container change
+          # https://sso.staging.scalepack.fr -- no pod/volume/init-container change
           # needed, and doesn't touch trust for any other legitimate HTTPS call
           # this pod makes (e.g. GitHub for git repos).
           # https://argo-cd.readthedocs.io/en/stable/operator-manual/user-management/#configuring-a-custom-root-ca-certificate-for-communicating-with-the-oidc-provider
@@ -298,7 +250,7 @@ resource "helm_release" "argocd" {
 
       rbac:
         policy.csv: |
-          g, IntegratedDynamic:Admin, role:admin
+          g, platform-admins, role:admin
         policy.default: role:readonly
 
     # Sized from `kubectl top pods -n argocd` on the live cluster
@@ -355,7 +307,7 @@ resource "helm_release" "argocd" {
       # ApplicationSet does nothing — each generated Application is created and
       # auto-synced independently, with no ordering across them. Needed by
       # gitops's services-app-scaleway ApplicationSet (bootstrap/templates/scaleway.yaml),
-      # whose RollingSync strategy groups Velero/external-dns/Dex/Grafana after
+      # whose RollingSync strategy groups Velero/external-dns/Grafana after
       # the OpenBao-backed Secrets their own sibling -init/-config apps produce.
       extraArgs:
         - --enable-progressive-syncs
@@ -410,19 +362,9 @@ locals {
     # then follows the infra branch under test.
     crossplane-apps = [
       { name = "infraRevision", value = local.effective_infra_revision },
-    ]
-    # infra#113 SSO-fix: Dex's own issuer/redirectURI config (gitops repo,
-    # services/platform/dex/chart) needs the SAME hostSuffix its own
-    # gateway hostname already gets -- see helm_release.argocd's own
-    # oidc.config.issuer comment above for the confirmed-live symptom
-    # without this (an ephemeral cluster's OIDC login hitting production's
-    # real Dex instead of its own). Picked up by this app's own
-    # valueParams entry in values-dex.yaml (same mechanism
-    # values-networking-resources.yaml already uses for the *-gateway
-    # charts).
-    dex-apps = [
+      # authentik-managed Workspace (14-sso/managed): its hostnames carry the
+      # same per-cluster suffix as the *-gateway charts.
       { name = "hostSuffix", value = local.host_suffix },
-      { name = "dexStaticPassword", value = local.dex_static_password },
     ]
     grafana-apps = [
       { name = "letsEncryptStaging", value = tostring(var.letsencrypt_staging) },

@@ -2,7 +2,7 @@ name: kind — fast platform-apps DAG validation
 
 # infra#110: a fast, free, on-every-PR validation tier for the
 # crds-apps -> secrets-apps -> monitoring/backups/networking-*-apps ->
-# dex/argocd-config/grafana/argo-workflows-apps DAG that 10-cluster/scaleway
+# grafana/argo-workflows-apps DAG that 10-cluster/scaleway
 # drives against a real (billed) Kapsule cluster. Complements, never
 # replaces, that heavier opt-in tier (the `ephemeral-cluster` label,
 # scaleway-ephemeral.yml) -- see 10-cluster/kind/argocd.tf and main.tf for
@@ -18,7 +18,7 @@ name: kind — fast platform-apps DAG validation
 # Not yet a required check (issue's own checklist item) -- promote once a
 # handful of green runs prove this isn't flaky. Known open risk, not yet
 # resolved: the full DAG (OpenBao + kube-prometheus-stack + Loki + Tempo +
-# cert-manager + envoy-gateway + Dex + Grafana + Argo Workflows + Velero)
+# cert-manager + envoy-gateway + Grafana + Argo Workflows + Velero)
 # pushed a local Docker Desktop kind node to 6.4/7.6GiB during live
 # development of this tier -- GitHub's standard ubuntu-latest runner has a
 # similar ~7GB ceiling. If this run is consistently OOM-flaky, the fix is
