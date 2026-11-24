@@ -97,18 +97,21 @@ resource "vault_kubernetes_auth_backend_role" "external_secrets" {
   role_name                        = "external-secrets"
   bound_service_account_names      = ["external-secrets"]
   bound_service_account_namespaces = ["external-secrets"]
-  token_policies                   = [vault_policy.eso_read.name]
+  token_policies                   = [vault_policy.eso_read.name, vault_policy.eso_generate.name]
   token_ttl                        = 3600
 }
 
-# --- OIDC auth: human login via Dex (gitops repo platform/scaleway/dex.yml,
-# staticClients.openbao). oidc_client_secret is Terraform-generated (see
+# --- OIDC auth: human login via authentik (14-sso/managed/oidc.tf, client
+# `openbao`; was Dex). oidc_client_secret is Terraform-generated (see
 # random_password.openbao_client_secret below) — it's an arbitrary shared
-# secret between OpenBao and Dex, nothing external constrains its value.
+# secret between OpenBao and the IdP, nothing external constrains its value,
+# and it is the SAME value the former Dex static client used (authentik's
+# provider was created with it, delivered by the authentik-managed Workspace).
+# The issuer is per application: .../application/o/<slug>/.
 resource "vault_jwt_auth_backend" "oidc" {
   path               = "oidc"
   type               = "oidc"
-  oidc_discovery_url = "https://auth.${var.domain}"
+  oidc_discovery_url = "https://sso.${var.domain}/application/o/openbao/"
   oidc_client_id     = "openbao"
   oidc_client_secret = random_password.openbao_client_secret.result
   default_role       = "admin"
@@ -128,12 +131,15 @@ resource "vault_jwt_auth_backend_role" "admin" {
   role_name = "admin"
   role_type = "oidc"
 
-  user_claim        = "email"
-  groups_claim      = "groups"
-  oidc_scopes       = ["groups", "email"]
+  user_claim   = "email"
+  groups_claim = "groups"
+  # `profile` is what carries the `groups` claim in authentik (no separate
+  # `groups` scope there; an unknown scope is silently dropped).
+  oidc_scopes       = ["profile", "email"]
   bound_claims_type = "string"
   bound_claims = {
-    groups = "IntegratedDynamic:Admin"
+    # The authentik group the GitHub `admin` team maps to (14-sso/managed).
+    groups = "platform-admins"
   }
   allowed_redirect_uris = [
     "https://openbao.${var.domain}/ui/vault/auth/oidc/oidc/callback",
@@ -144,10 +150,10 @@ resource "vault_jwt_auth_backend_role" "admin" {
   token_ttl      = 3600
 }
 
-# Same backend, same Dex client (staticClients.openbao already lists
+# Same backend, same authentik client (the `openbao` provider already lists
 # http://localhost:8250/oidc/callback — the CLI/Terraform's own default
 # local callback, confirmed present since before infra#115's AppRole
-# removal, no new Dex config needed for this role) — but its OWN, narrower
+# removal, no new IdP config needed for this role) — but its OWN, narrower
 # role rather than reusing `admin` above: `admin` grants full sys/* sudo
 # (meant for a human doing anything via the UI), while this root's own
 # `tofu apply` (version.tf's provider "vault", vault_auth_method = "oidc")
@@ -165,10 +171,10 @@ resource "vault_jwt_auth_backend_role" "terraform_cli" {
 
   user_claim        = "email"
   groups_claim      = "groups"
-  oidc_scopes       = ["groups", "email"]
+  oidc_scopes       = ["profile", "email"]
   bound_claims_type = "string"
   bound_claims = {
-    groups = "IntegratedDynamic:Admin"
+    groups = "platform-admins"
   }
   allowed_redirect_uris = [
     "https://openbao.${var.domain}/ui/vault/auth/oidc/oidc/callback",
@@ -194,6 +200,47 @@ resource "vault_policy" "eso_read" {
   EOT
 }
 
+# Internal vs external secrets (two lifecycles, one layout, kv/apps/<app>/...):
+#  - kv/apps/<app>/credentials: EXTERNAL secrets -- someone must supply the
+#    value (a Slack token, a GitHub App key...). Terraform owns them (a
+#    sensitive variable -> vault_kv_secret_v2), and a human apply when one is
+#    first introduced is the expected, unavoidable seed step.
+#  - kv/apps/<app>/eso-generated: INTERNAL secrets -- nothing external is
+#    needed, they are random strings. ESO generates them at the consumer
+#    (Password generator + PushSecret, updatePolicy IfNotExists), so no
+#    Terraform apply / Crossplane Workspace is ever on their critical path.
+#    Terraform never declares an object with that name.
+# Scope: ONLY these two paths -- ESO cannot touch anything under credentials
+# or any other object. `+` is the single-segment wildcard, so one rule covers
+# every app.
+#
+# NOT an ACL guarantee against overwrites: `update` is required on the data
+# path too. ESO's Vault provider first stamps the object with custom metadata
+# (managed-by) via PUT kv/metadata/..., which makes the object "exist", so its
+# data write is an `update` -- a create-only rule 403s (seen live). Overwrites
+# are prevented client-side by the PushSecret's `updatePolicy: IfNotExists`;
+# KV v2 versioning keeps any earlier value recoverable.
+#
+# `read` (and `list` on metadata) MUST be repeated: Vault/OpenBao applies only
+# the MOST SPECIFIC matching rule to a path and does not merge in the
+# capabilities of broader rules, so these rules would otherwise shadow
+# eso-read's `kv/data/apps/*` read for exactly these paths (seen live: 403 on
+# GET of the object being created). The metadata path holds only
+# custom_metadata/max versions, never secret values, and neither capability
+# there can delete or destroy versions.
+resource "vault_policy" "eso_generate" {
+  name = "eso-generate"
+
+  policy = <<-EOT
+    path "kv/data/apps/+/eso-generated" {
+      capabilities = ["create", "read", "update"]
+    }
+    path "kv/metadata/apps/+/eso-generated" {
+      capabilities = ["read", "list", "create", "update"]
+    }
+  EOT
+}
+
 resource "vault_policy" "snapshot" {
   name = "snapshot"
 
@@ -205,7 +252,7 @@ resource "vault_policy" "snapshot" {
 }
 
 # Human OIDC-login admin — full sudo, bound to the `admin` OIDC role above,
-# gated on the IntegratedDynamic:Admin GitHub group via Dex.
+# gated on the platform-admins group via authentik.
 resource "vault_policy" "admin" {
   name = "admin"
 
@@ -331,23 +378,17 @@ data "terraform_remote_state" "wireguard_exit" {
   })
 }
 
-# --- Arbitrary Dex<->client shared secrets: nothing external constrains
-# these values, so Terraform generates and owns them outright — ArgoCD,
-# Grafana, and Dex itself all read the *same* kv/apps/dex/credentials object
-# below via their own ExternalSecret, so a rotation here propagates to every
-# consumer through their existing refresh cycle, no separate copies to sync.
+# --- Arbitrary client<->authentik shared secrets: nothing external constrains
+# these values, so Terraform generates and owns them outright. Grafana,
+# Crossview, OpenBao (its OIDC auth backend, below) and authentik itself all
+# read the *same* value via kv/apps/authentik/oidc-clients, so a rotation here
+# propagates to every consumer through their existing refresh cycle, no
+# separate copies to sync.
 # To rotate: `terraform apply -replace=random_password.<name>` — data_json
 # picks up the new value on the next apply, no separate version bump needed.
-resource "random_password" "argocd_client_secret" {
-  length  = 32
-  special = false
-}
-
-resource "random_password" "envoy_client_secret" {
-  length  = 32
-  special = false
-}
-
+# (ArgoCD, which also logs in through authentik, is a public PKCE client and
+# has no secret. These were the Dex static clients' secrets until Dex was
+# removed, infra issue #135: same values, so nothing rotated.)
 resource "random_password" "grafana_client_secret" {
   length  = 32
   special = false
@@ -358,52 +399,53 @@ resource "random_password" "openbao_client_secret" {
   special = false
 }
 
-resource "random_password" "argo_workflows_client_secret" {
-  length  = 32
-  special = false
-}
-
 resource "random_password" "crossview_client_secret" {
   length  = 32
   special = false
 }
 
-resource "vault_kv_secret_v2" "dex_credentials" {
+# Dex's kv/apps/dex/credentials object is no longer managed here (Dex was
+# removed, infra issue #135), but Terraform must NOT delete it: the `terraform`
+# policy (11-secrets/openbao/bootstrap) deliberately has no `delete` on
+# kv/data/apps/*, so a plain removal fails with 403 permission denied (seen
+# live). `destroy = false` just drops it from state. The object itself (it
+# still holds Dex's old GitHub OAuth App credentials) is left for an admin to
+# delete by hand: `bao kv metadata delete kv/apps/dex/credentials`.
+removed {
+  from = vault_kv_secret_v2.dex_credentials
+
+  lifecycle {
+    destroy = false
+  }
+}
+
+# authentik's OIDC client secrets (kv/apps/authentik/oidc-clients): the secrets
+# of the platform's own clients (Grafana, Crossview, OpenBao) shared between
+# authentik (14-sso/managed/oidc.tf, delivered to the authentik-managed
+# Workspace by one ExternalSecret) and each client's own ExternalSecret. The
+# VALUES are the random_password resources above -- the very ones the Dex
+# static clients used, so nothing rotates and no client needs a new secret --
+# only their home moved off the Dex-named path. (ArgoCD has no entry: it is a
+# public PKCE client.) Internal random strings that predate the
+# eso-generated convention, so Terraform still owns them (see CLAUDE.md).
+resource "vault_kv_secret_v2" "authentik_oidc_clients" {
   mount = vault_mount.kv.path
-  name  = "apps/dex/credentials"
+  name  = "apps/authentik/oidc-clients"
 
   data_json = jsonencode({
-    "argocd-client-secret"  = random_password.argocd_client_secret.result
-    "envoy-client-secret"   = random_password.envoy_client_secret.result
-    "grafana-client-secret" = random_password.grafana_client_secret.result
-    "openbao-client-secret" = random_password.openbao_client_secret.result
-    "github-client-id"      = var.dex_github_connector["github-client-id"]
-    "github-client-secret"  = var.dex_github_connector["github-client-secret"]
-    # Not secret (it's Dex's public staticClients.id, gitops repo's
-    # services/platform/dex/chart/values-scaleway.yaml), but stored
-    # alongside the secret anyway: the argo-workflows Helm chart's
-    # server.sso.clientId only accepts a Secret name/key reference, no
-    # literal-string option (unlike ArgoCD's own cm.oidc.config, which
-    # takes clientID as a literal) -- see argo-workflows/secret's
-    # ExternalSecret in the gitops repo for both properties landing
-    # together in one Secret.
-    "argo-workflows-client-id"     = "argo-workflows"
-    "argo-workflows-client-secret" = random_password.argo_workflows_client_secret.result
-    # Crossview's Dex static client (public id is the literal "crossview" in
-    # the crossview chart's own values -- the secret is the only sensitive
-    # half, consumed by Dex via CROSSVIEW_CLIENT_SECRET and by Crossview via
-    # crossview-secret's ExternalSecret).
+    "grafana-client-secret"   = random_password.grafana_client_secret.result
+    "openbao-client-secret"   = random_password.openbao_client_secret.result
     "crossview-client-secret" = random_password.crossview_client_secret.result
   })
 }
 
-# Crossview's own non-Dex credentials (kv/apps/crossview/credentials). The
+# Crossview's own local credentials (kv/apps/crossview/credentials). The
 # upstream chart ships a publicly known admin/password local login; the
 # gitops repo's crossview chart blanks that and takes these instead.
 #  - session-secret: signs Crossview's session cookie. With the database
 #    disabled (SSO-only mode) the cookie IS the user store, so rotating this
 #    just logs everyone out -- no data loss.
-#  - admin-*: local break-glass login, independent of Dex.
+#  - admin-*: local break-glass login, independent of the SSO.
 resource "random_password" "crossview_session_secret" {
   length  = 48
   special = false
@@ -424,6 +466,34 @@ resource "vault_kv_secret_v2" "crossview_credentials" {
     "admin-password" = random_password.crossview_admin_password.result
   })
 }
+
+# authentik's GitHub login source credentials (kv/apps/authentik/credentials):
+# EXTERNAL secrets -- issued by GitHub, nothing can generate them -- so, unlike
+# authentik's internal random secrets below, they are Terraform-owned. Values
+# come from var.authentik_github_client_id/_secret (gitignored
+# local.auto.tfvars of whoever applies by hand); the unattended Workspace
+# applies this root with the placeholders, so later changes are ignored, same
+# as workspace_events_slack. Push real values with:
+#   tofu apply -replace=vault_kv_secret_v2.authentik_github
+resource "vault_kv_secret_v2" "authentik_github" {
+  mount = vault_mount.kv.path
+  name  = "apps/authentik/credentials"
+
+  data_json = jsonencode({
+    "github-client-id"     = var.authentik_github_client_id
+    "github-client-secret" = var.authentik_github_client_secret
+  })
+
+  lifecycle {
+    ignore_changes = [data_json]
+  }
+}
+
+# authentik's secrets are NOT declared here: they are purely internal random
+# strings, so they are generated in-cluster by ESO (Password generator +
+# PushSecret, gitops repo services/platform/authentik/secret) into
+# kv/apps/authentik/eso-generated -- see vault_policy.eso_generate below and
+# the "internal vs external secrets" note on it.
 
 # Firefly III (kv/apps/firefly/credentials), consumed by the personal
 # homelab-apps repo's firefly-iii chart via ExternalSecret.
@@ -809,10 +879,9 @@ resource "vault_kv_secret_v2" "argo_workflows_scaleway_state_credentials" {
   })
 }
 
-# apps/argo-workflows/openbao-managed-tfvars — a duplicate of the three
+# apps/argo-workflows/openbao-managed-tfvars — a duplicate of the
 # other required, no-default variables this root's own `terraform apply`
-# needs (dex_github_connector, secrets_sync_github_eso_private_key,
-# secrets_sync_github), so the CronWorkflow's unattended apply is the exact
+# needs (secrets_sync_github_eso_private_key, secrets_sync_github), so the CronWorkflow's unattended apply is the exact
 # same apply an admin would run, not a narrower one. Deliberately a
 # duplicate WRITE from the same var, in the same apply, not a read-back of
 # the "real" objects above — Terraform has no way to read one resource's
@@ -831,7 +900,6 @@ resource "vault_kv_secret_v2" "argo_workflows_openbao_managed_tfvars" {
   name  = "apps/argo-workflows/openbao-managed-tfvars"
 
   data_json = jsonencode({
-    TF_VAR_dex_github_connector                = jsonencode(var.dex_github_connector)
     TF_VAR_secrets_sync_github_eso_private_key = jsonencode(var.secrets_sync_github_eso_private_key)
     TF_VAR_secrets_sync_github                 = jsonencode(var.secrets_sync_github)
   })

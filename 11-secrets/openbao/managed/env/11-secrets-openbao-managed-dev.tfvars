@@ -28,15 +28,15 @@ foundation_scaleway_state_key    = "00-foundation/scaleway/00-foundation-scalewa
 iam_bootstrap_scaleway_state_bucket = "id-terraform-state-01-iam-bootstrap-scaleway"
 iam_bootstrap_scaleway_state_key    = "01-iam/bootstrap/scaleway/01-iam-bootstrap-scaleway-dev/terraform.tfstate"
 
-# Standing state, kept in sync with 10-cluster/scaleway's own
-# letsencrypt_staging = true (see that root's env tfvars for the full "why":
-# gateway/cert-restore restores a staging-issued wildcard cert on every
-# boot, so the whole platform runs on LE staging). This flips OpenBao's own
-# oidc_discovery_ca_pem to the LE staging root so its server-side OIDC
-# discovery call to auth.staging.scalepack.fr trusts the cert envoy-gateway
-# actually serves, instead of failing "x509: certificate signed by unknown
-# authority". Flip both roots back together if/when moving to prod certs.
-letsencrypt_staging = true
+# Kept in sync with 10-cluster/scaleway's own letsencrypt_staging (false since the
+# switch to Let's Encrypt PROD certs; see that root's env tfvars). When true,
+# OpenBao's oidc_discovery_ca_pem is the LE staging root and its server-side OIDC
+# discovery call trusts ONLY that, so it rejects the prod certificate the gateway
+# serves with "x509: certificate signed by unknown authority". This root was
+# left at true when the cluster root flipped, which only surfaced when the
+# discovery URL changed to authentik (the config is validated at write time).
+# Flip both roots together when moving between staging and prod certs.
+letsencrypt_staging = false
 
 # var.domain -- must match 10-cluster/scaleway's own var.domain for this
 # same cluster (see that root's env tfvars). Kept manually in sync, same

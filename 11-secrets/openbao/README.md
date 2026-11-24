@@ -22,7 +22,7 @@ itself. Investigating the fix turned up that AppRole's own justification
 ("a service/pipeline authenticating without a human in the loop") never
 matched either of `managed/`'s real execution contexts:
 
-- An admin's laptop is a human, at an interactive session — OIDC via Dex
+- An admin's laptop is a human, at an interactive session — OIDC via authentik
   (`managed/`'s `terraform-cli` role) was already the established pattern
   everywhere else on this platform, just never wired into this specific
   provider config.
