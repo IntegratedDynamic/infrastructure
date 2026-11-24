@@ -1,0 +1,46 @@
+# sso-apps -- authentik, the platform's identity provider and forward-auth
+# decision point (infra issue #135). Replaces Dex + charts/sso-guard's
+# per-app OIDC SecurityPolicy once every client has migrated; for now it runs
+# ALONGSIDE Dex (different hostname, sso.<domain> vs auth.<domain>), and only
+# the demo app is gated by it.
+#
+# This domain holds the product AND its own Secret:
+#  - authentik-secret (wave 0) is NOT in secrets-apps like the other
+#    <product>/secret charts, on purpose: its values are internal random
+#    strings generated in-cluster by ESO (Password generator + PushSecret ->
+#    kv/apps/authentik/eso-generated), so it needs the `eso-generate` policy
+#    that 11-secrets/openbao/managed grants. Inside secrets-apps, a Degraded
+#    authentik-secret (policy/KV not there yet) kept secrets-apps -- and so
+#    argocd.tf's wait_secrets gate -- from ever turning Healthy, while the
+#    Workspace that would apply that policy sits DOWNSTREAM of that gate
+#    (crossplane-apps). Here only sso-apps itself waits.
+#  - authentik-gateway (sso.<domain> HTTPRoute) lives in
+#    networking-resources-apps' wave 1 (values-networking-resources.yaml),
+#    for the same reason dex-gateway does: the product has no Gateway API
+#    dependency, and bundling the route here would make this domain's health
+#    wait on networking-apps' CRDs.
+#  - The CONFIGURATION (groups, applications, tiles, outpost) is Terraform:
+#    14-sso/managed, applied by the authentik-managed Workspace in
+#    crossplane-apps (values-crossplane.yaml), which just retries until
+#    authentik answers.
+#  - The DATA (users, group membership, passkeys, GitHub links) is NOT code: it
+#    lives only in authentik's Postgres volume. A Velero schedule snapshots it
+#    every 4 hours, kept 60 days (gitops, velero chart: `authentik-data`) and authentik-restore (wave 0,
+#    first) puts the latest snapshot back on a fresh cluster BEFORE authentik's own
+#    StatefulSet would create an empty volume. Ordering, and why it cannot deadlock:
+#     - this domain `needs_backups` (10-cluster/scaleway/env/*.tfvars): Velero and its
+#       bucket sync are up before authentik-restore runs. backups-apps NEVER needs
+#       this domain, so the dependency is one-way.
+#     - the restore lives HERE and not in backups-apps (where grafana-restore and
+#       cert-restore are) on purpose: backups-apps is a gate other domains wait on,
+#       and a problem restoring authentik must hold back only authentik, not the
+#       network or Grafana.
+#     - it needs neither authentik, nor the authentik-managed Workspace, nor SSO
+#       login: only Velero. And it is a no-op when the volume already exists.
+#     - authentik's SECRET_KEY and DB password come from OpenBao (the secrets-apps
+#       gate, restored from OpenBao's own hourly raft snapshot), the same values the
+#       database was created with, so the restored volume opens.
+apps:
+  - {name: authentik-restore, namespace: authentik, chartPath: services/platform/authentik/restore, valueFile: values.yaml, wave: "0"}
+  - {name: authentik-secret, namespace: authentik, chartPath: services/platform/authentik/secret, valueFile: values.yaml, wave: "1"}
+  - {name: authentik, namespace: authentik, chartPath: services/platform/authentik/chart, valueFile: values-scaleway.yaml, wave: "2"}

@@ -41,11 +41,6 @@ variable "domains" {
                                      a chart consuming one of Velero's
                                      restore hooks (cert-restore/
                                      grafana-restore).
-      needs_dex                      Same, gated on "dex-apps" -- for a
-                                     chart (argo-workflows-apps) that
-                                     eager-dials Dex's OIDC issuer at pod
-                                     startup and crash-loops if it isn't
-                                     reachable yet.
       needs_networking_controllers   Same, gated on
                                      "networking-controllers-apps" -- for
                                      a chart (networking-resources-apps)
@@ -88,7 +83,6 @@ variable "domains" {
     needs_crds                   = optional(bool, false)
     needs_secrets                = optional(bool, false)
     needs_backups                = optional(bool, false)
-    needs_dex                    = optional(bool, false)
     needs_networking_controllers = optional(bool, false)
     needs_grafana                = optional(bool, false)
     needs_keda                   = optional(bool, false)

@@ -1,6 +1,6 @@
 # Rendered as a single YAML document, meant to be the FIRST entry in
 # helm_release.argocd's own `values` list -- Helm deep-merges multiple
-# values files in order given, so each root's own later entry (OIDC/Dex
+# values files in order given, so each root's own later entry (OIDC
 # login, ArgoCD's public URL, RBAC policy, resource exclusions,
 # metrics/serviceMonitor, ... -- genuinely environment-specific, not
 # duplicated logic) only needs to add/override what it actually differs on.

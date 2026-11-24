@@ -1,3 +1,9 @@
+> **Dex was removed (infra issue #135).** authentik (`sso-apps`, `14-sso/managed`)
+> is now the platform's identity provider. The `dex-apps` and `argocd-config-apps`
+> domains, the `dex-apps` gate (`wait_dex`, `needs_dex`) and every `dex-*` chart
+> are gone; the passages below that discuss Dex describe the design as it was
+> when they were written and are kept as history.
+
 # `platform-apps` — secrets/monitoring/backups/networking, extracted from gitops (infra#84)
 
 ## Why this exists

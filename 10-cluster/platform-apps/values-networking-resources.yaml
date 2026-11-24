@@ -45,12 +45,12 @@ apps:
   # HTTPRoute (see each one's own templates/httproute.yaml), no
   # interdependency between them. Each attaches to the `Gateway` object
   # wave 0's gateway-config creates, so wave 0 being Healthy is their only
-  # prerequisite. Kept OUT of each product's own domain (dex-apps/
-  # grafana-apps/...) so ArgoCD's recursive Application health check
+  # prerequisite. Kept OUT of each product's own domain (grafana-apps/
+  # sso-apps/...) so ArgoCD's recursive Application health check
   # doesn't make the product itself wait on this tier's convergence -- see
   # platform-apps/README.md's "Decoupling gateway routes" section.
-  - {name: dex-gateway, namespace: gateway, chartPath: services/platform/dex/gateway, valueFile: values.yaml, wave: "1", valueParams: [{name: hostSuffix, valueFrom: hostSuffix}]}
   - {name: grafana-gateway, namespace: monitoring, chartPath: services/platform/monitoring/grafana-gateway, valueFile: values-scaleway.yaml, wave: "1", valueParams: [{name: hostSuffix, valueFrom: hostSuffix}]}
   - {name: argocd-config-gateway, namespace: argocd, chartPath: services/platform/argocd-config/gateway, valueFile: values-scaleway.yaml, wave: "1", valueParams: [{name: hostSuffix, valueFrom: hostSuffix}]}
+  - {name: authentik-gateway, namespace: authentik, chartPath: services/platform/authentik/gateway, valueFile: values.yaml, wave: "1", valueParams: [{name: hostSuffix, valueFrom: hostSuffix}]}
   - {name: crossview-gateway, namespace: crossview, chartPath: services/platform/crossview/gateway, valueFile: values.yaml, wave: "1", valueParams: [{name: hostSuffix, valueFrom: hostSuffix}]}
   - {name: openbao-gateway, namespace: openbao, chartPath: services/platform/openbao/gateway, valueFile: values-scaleway.yaml, wave: "1", valueParams: [{name: hostSuffix, valueFrom: hostSuffix}]}

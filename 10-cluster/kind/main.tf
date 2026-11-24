@@ -16,7 +16,7 @@
 # credentials able to call that same KMS key -- there's no narrower-privilege
 # way to make a real snapshot restorable. The alternative (a fresh,
 # throwaway Shamir-sealed instance with no real secret material) was
-# rejected because it can't give dex-apps/grafana-apps/argocd-config-apps/
+# rejected because it can't give grafana-apps/
 # argo-workflows-apps below anything real to consume, defeating the point of
 # validating them at all. Accepted trade-off: this tier's CI needs real
 # AWS KMS decrypt + real Scaleway backup-bucket read access.

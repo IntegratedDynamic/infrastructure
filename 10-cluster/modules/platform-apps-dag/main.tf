@@ -24,16 +24,17 @@
 #      reference exists at all -- so if ANY instance of resource A might
 #      reference resource B, and B references ANY instance of A back, the
 #      whole A<->B pair is flagged as cyclical, even when the underlying
-#      per-instance graph is genuinely acyclic (e.g. "dex-apps" needing
+#      per-instance graph is genuinely acyclic (e.g. "networking-controllers-apps" needing
 #      "crds-apps" is not a self-loop, but OpenTofu can't see that once A
 #      and B reference each other AT ALL).
 #
 # What's real about this platform's actual DAG (confirmed against every
 # existing wait_for/depends_on edge across both roots before this rewrite)
-# is that it isn't a deep or wide arbitrary graph -- it reduces to SEVEN
+# is that it isn't a deep or wide arbitrary graph -- it reduces to SIX
 # individually-named, mutually-independent gates: crds-apps, secrets-apps,
-# backups-apps, dex-apps, networking-controllers-apps, grafana-apps,
-# keda-apps. None of these seven ever needs another one of them (but
+# backups-apps, networking-controllers-apps, grafana-apps, keda-apps
+# (a seventh, dex-apps, went with Dex -- infra issue #135). None of these six
+# ever needs another one of them (but
 # crds-apps, see below), so they're pulled into
 # their OWN resource address (helm_release.gate_domain, terraform_data.
 # gate_domain_dep_anchor) entirely separate from every other ("regular")
@@ -118,18 +119,17 @@ locals {
   # keep singular.
   crds_domain_keys = ["crds-apps"]
 
-  # The six remaining well-known gate domain keys -- hardcoded here, not
+  # The five remaining well-known gate domain keys -- hardcoded here, not
   # data-driven, for the same reason crds-apps is split out above. A future
-  # seventh gate needs a real edit here, not a tfvars change -- a
+  # sixth gate needs a real edit here, not a tfvars change -- a
   # genuinely rare, structural change, not per-environment config. None of
-  # these six may EVER set needs_secrets/needs_backups/needs_dex/
+  # these five may EVER set needs_secrets/needs_backups/
   # needs_networking_controllers/needs_grafana/needs_keda on each other (that would
   # reproduce the same cycle) -- needs_crds is the one exception, safe
   # because crds-apps lives in the separate resource address above.
   gate_domain_keys = [
     "secrets-apps",
     "backups-apps",
-    "dex-apps",
     "networking-controllers-apps",
     "grafana-apps",
     "keda-apps",
@@ -142,7 +142,6 @@ locals {
   has_crds                   = contains(keys(local.crds_domain), "crds-apps")
   has_secrets                = contains(keys(local.gate_domains), "secrets-apps")
   has_backups                = contains(keys(local.gate_domains), "backups-apps")
-  has_dex                    = contains(keys(local.gate_domains), "dex-apps")
   has_networking_controllers = contains(keys(local.gate_domains), "networking-controllers-apps")
   has_grafana                = contains(keys(local.gate_domains), "grafana-apps")
   has_keda                   = contains(keys(local.gate_domains), "keda-apps")
@@ -456,65 +455,6 @@ resource "kubernetes_job_v1" "wait_backups" {
   }
 }
 
-resource "kubernetes_job_v1" "wait_dex" {
-  count = local.has_dex ? 1 : 0
-
-  metadata {
-    name      = "wait-dex-apps-healthy"
-    namespace = "argocd"
-  }
-
-  spec {
-    active_deadline_seconds = 1800
-    backoff_limit           = 0
-
-    template {
-      metadata {
-        labels = {
-          "app.kubernetes.io/name" = "wait-dex-apps-healthy"
-        }
-      }
-
-      spec {
-        service_account_name = kubernetes_service_account.wait.metadata[0].name
-        restart_policy       = "Never"
-
-        container {
-          name  = "wait"
-          image = "alpine/kubectl:1.35.3"
-
-          command = ["sh", "-c", <<-EOT
-            set -eu
-            app="dex-apps"
-            while true; do
-              sync=$(kubectl get application "$app" -n argocd -o jsonpath='{.status.sync.status}' 2>/dev/null || true)
-              health=$(kubectl get application "$app" -n argocd -o jsonpath='{.status.health.status}' 2>/dev/null || true)
-              if [ "$sync" = "Synced" ] && [ "$health" = "Healthy" ]; then
-                echo "Application/$app is Synced and Healthy."
-                exit 0
-              fi
-              echo "Application/$app: sync=$${sync:-<none yet>} health=$${health:-<none yet>}"
-              sleep 5
-            done
-          EOT
-          ]
-
-          env {
-            name  = "REVISION_TRIGGER"
-            value = helm_release.gate_domain["dex-apps"].metadata.revision
-          }
-        }
-      }
-    }
-  }
-
-  wait_for_completion = true
-
-  timeouts {
-    create = "35m"
-  }
-}
-
 resource "kubernetes_job_v1" "wait_networking_controllers" {
   count = local.has_networking_controllers ? 1 : 0
 
@@ -694,7 +634,7 @@ resource "kubernetes_job_v1" "wait_keda" {
 
 # ── Every other ("regular") domain's own Application ────────────────────────
 #
-# May reference any of the six gate Jobs above (each a single, literally-
+# May reference any of the gate Jobs above (each a single, literally-
 # keyed reference into helm_release.gate_domain, a genuinely different
 # resource address -- never a cross-reference back into
 # helm_release.domain itself, which is what keeps this acyclic).
@@ -738,7 +678,6 @@ resource "helm_release" "domain" {
     each.value.needs_crds && local.has_crds ? [{ name = "__terraform_gate_crds", value = kubernetes_job_v1.wait_crds[0].id }] : [],
     each.value.needs_secrets && local.has_secrets ? [{ name = "__terraform_gate_secrets", value = kubernetes_job_v1.wait_secrets[0].id }] : [],
     each.value.needs_backups && local.has_backups ? [{ name = "__terraform_gate_backups", value = kubernetes_job_v1.wait_backups[0].id }] : [],
-    each.value.needs_dex && local.has_dex ? [{ name = "__terraform_gate_dex", value = kubernetes_job_v1.wait_dex[0].id }] : [],
     each.value.needs_networking_controllers && local.has_networking_controllers ? [{ name = "__terraform_gate_networking_controllers", value = kubernetes_job_v1.wait_networking_controllers[0].id }] : [],
     each.value.needs_grafana && local.has_grafana ? [{ name = "__terraform_gate_grafana", value = kubernetes_job_v1.wait_grafana[0].id }] : [],
     each.value.needs_keda && local.has_keda ? [{ name = "__terraform_gate_keda", value = kubernetes_job_v1.wait_keda[0].id }] : [],
@@ -750,7 +689,7 @@ resource "helm_release" "domain" {
 # ArgoCD has no native way to express "wait for these independent top-level
 # Applications" (sync-wave doesn't cross Application boundaries). Polls
 # every domain's own Application directly (both pools), so it subsumes the
-# six gates above -- no separate dependency on those Jobs having already
+# gates above -- no separate dependency on those Jobs having already
 # finished is needed for correctness, only on every Application existing
 # (via terraform_data.wait_all_anchor's own reference to every domain's
 # helm_release, a leaf nothing else depends on, so no cycle risk regardless

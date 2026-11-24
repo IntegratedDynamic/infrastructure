@@ -45,7 +45,7 @@ dns_scaleway_state_key          = "01-iam/workload/scaleway/01-iam-workload-scal
 # 10-cluster/modules/platform-apps-dag/variables.tf's own var.domains for
 # the field meanings, and that module's main.tf header comment for why the
 # cross-domain wiring below is expressed as needs_crds/needs_secrets/
-# needs_backups/needs_dex/needs_networking_controllers/needs_grafana
+# needs_backups/needs_networking_controllers/needs_grafana
 # instead of a free-form named graph (a real OpenTofu limitation:
 # self-referencing for_each is not expressible, confirmed live 2026-09-17
 # -- not a design preference). crds-apps/secrets-apps/backups-apps/
@@ -144,34 +144,23 @@ domains = {
     needs_crds  = true
   }
 
-  # ── dex/argocd-config/grafana, extracted from gitops repo (infra#84 follow-up) ──
+  # authentik (infra issue #135): the identity provider + forward-auth. Needs its
+  # Secret (OpenBao) and Velero: its first wave restores the Postgres volume from
+  # the latest snapshot before authentik creates an empty one (see
+  # values-sso.yaml for the ordering and why it cannot deadlock). Its
+  # configuration is the authentik-managed Workspace in crossplane-apps.
+  sso-apps = {
+    value_files   = ["values-sso.yaml"]
+    needs_secrets = true
+    needs_backups = true
+  }
+
+  # ── grafana, extracted from gitops repo (infra#84 follow-up) ──
   #
-  # Each of these three domains shares the identical dependency profile on
-  # secrets-apps -- but each stays its OWN domain rather than one bundled
-  # Application, since argo-workflows-apps below needs to health-wait on
-  # dex specifically, not a bundle diluted by argocd-config/grafana's
-  # unrelated health.
-  dex-apps = {
-    value_files   = ["values-dex.yaml"]
-    needs_secrets = true
-  }
-
-  # needs_secrets here is load-bearing, not defensive:
-  # services/platform/argocd-config/config's PostSync restart-hook Job
-  # (argocd-config-restart-server) bounces argocd-server so it picks up
-  # argocd-oidc-client-secret's now-resolved $-reference (ArgoCD never
-  # re-reads a $secretName:key substitution live -- only a real pod restart
-  # clears it). Confirmed live (2026-09-14): waiting only for Terraform's
-  # own `helm install` to return, not for secrets-apps to actually sync,
-  # let the hook fire against a not-yet-existing secret and broke every SSO
-  # login for the rest of that cluster's life -- a one-shot PostSync hook
-  # has no self-healing the way dex-apps/wireguard-apps' long-running
-  # Deployments do.
-  argocd-config-apps = {
-    value_files   = ["values-argocd-config.yaml"]
-    needs_secrets = true
-  }
-
+  # (dex-apps and argocd-config-apps used to sit next to it and are gone with
+  # Dex, infra issue #135: argocd-config's only job was a PostSync restart of
+  # argocd-server for the Dex-era `$argocd-oidc-client-secret` reference, a
+  # secret ArgoCD no longer has since it became a public PKCE client.)
   grafana-apps = {
     value_files   = ["values-grafana.yaml"]
     needs_secrets = true
