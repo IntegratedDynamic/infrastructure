@@ -209,6 +209,7 @@ tofu -chdir=11-secrets/openbao/bootstrap        providers lock -platform=darwin_
 tofu -chdir=11-secrets/openbao/managed          providers lock -platform=darwin_arm64 -platform=linux_amd64
 tofu -chdir=12-monitoring/grafana/managed       providers lock -platform=darwin_arm64 -platform=linux_amd64
 tofu -chdir=13-tailscale/bootstrap              providers lock -platform=darwin_arm64 -platform=linux_amd64
+tofu -chdir=14-sso/managed                      providers lock -platform=darwin_arm64 -platform=linux_amd64
 ```
 
 Commit the updated lock files alongside the version change.
@@ -341,7 +342,7 @@ modules/
                                #   values fragment). Each root's own
                                #   argocd.tf keeps only what's genuinely
                                #   environment-specific: provider/cluster
-                               #   bootstrapping, OIDC/Dex login vs. none,
+                               #   bootstrapping, OIDC login (authentik) vs. none,
                                #   and the handful of truly dynamic values
                                #   (resolved revision, root-owned Secret
                                #   dependencies) merged onto that `domains`
@@ -355,7 +356,7 @@ modules/
                                #   comment for why the real DAG instead
                                #   reduces to six independently-named gates
                                #   (crds-apps/secrets-apps/backups-apps/
-                               #   dex-apps/networking-controllers-apps/
+                               #   networking-controllers-apps/
                                #   grafana-apps), each its own resource
                                #   address so the graph stays acyclic while
                                #   every domain that doesn't need a gate
@@ -533,10 +534,10 @@ instance of itself (or of a sibling resource that references it back) via a
 dynamically-chosen key is a real OpenTofu cycle, not a syntax restriction to
 route around. What's real about this platform's own DAG instead reduces to
 **six independently-named gates** — `crds-apps`/`secrets-apps`/
-`backups-apps`/`dex-apps`/`networking-controllers-apps`/`grafana-apps` — each
+`backups-apps`/`networking-controllers-apps`/`grafana-apps`/`keda-apps` — each
 pulled into its own resource address inside the module so a "regular" domain
-can safely opt into `needs_crds`/`needs_secrets`/`needs_backups`/`needs_dex`/
-`needs_networking_controllers`/`needs_grafana` without ever closing a loop
+can safely opt into `needs_crds`/`needs_secrets`/`needs_backups`/
+`needs_networking_controllers`/`needs_grafana`/`needs_keda` without ever closing a loop
 back into itself. See `platform-apps-dag/main.tf`'s own header comment for
 the full "why," and why this is a strict precision improvement over a
 generic topological-level scheme (no domain ever waits on a gate it doesn't
@@ -544,7 +545,7 @@ actually need). Each root's own `argocd.tf` keeps only what's genuinely
 environment-specific: which domains it wires up (a full list for
 `scaleway/`, a trimmed one for `kind/` — see that root's own `argocd.tf`
 header comment for exactly what's dropped and why), and ArgoCD's own
-login/exposure config (OIDC via a shared Dex for `scaleway/`, none for
+login/exposure config (OIDC via authentik for `scaleway/`, none for
 `kind/`'s ephemeral, single-use cluster). `10-cluster/local` (the old
 minikube dev entry) was removed
 entirely (infra#113) — it never shared this structure (deployed only ArgoCD +
@@ -565,14 +566,14 @@ the full "why" and the trade-offs that implies.
 
 ### `10-cluster/scaleway/`
 
-Same bootstrap pattern as `kind/`, but with the Kapsule cluster + node pool (`DEV1-M`, min=0/max=3) instead, ArgoCD wired to a real OIDC login (shared Dex), and every platform-apps domain (`monitoring-apps`/`wireguard-apps`/`crossplane-apps` included).
+Same bootstrap pattern as `kind/`, but with the Kapsule cluster + node pool (`DEV1-M`, min=0/max=3) instead, ArgoCD wired to a real OIDC login (authentik), and every platform-apps domain (`monitoring-apps`/`wireguard-apps`/`crossplane-apps` included).
 
 **Secrets/monitoring/backups/networking (infra#84, 2026-08-24 + scope
 addition 2026-08-25):** OpenBao+ESO, monitoring
 (kube-prometheus-stack/loki/tempo/alloy/otel-collector, NOT Grafana — that
 stays in `gitops`), Velero, and cluster networking (envoy-gateway,
 cert-manager + its Scaleway DNS01 webhook, external-dns, gateway-config —
-NOT the per-product `*-gateway` HTTPRoute charts like `dex-gateway`, which
+NOT the per-product `*-gateway` HTTPRoute charts like `grafana-gateway`, which
 stay in `gitops`) were extracted from `gitops` repo's `bootstrap`
 app-of-apps into the shared `10-cluster/platform-apps/` chart (moved out of
 this root's own directory 2026-09-18, infra#115 — see that domain's own
@@ -701,6 +702,44 @@ Scaleway tool buckets + their scoped identities, each with its own bucket AND it
 
 The Tailscale-side trust anchor for live GitHub Actions debugging (infra#110, see "Live debugging via Tailscale SSH" above) — a `tailscale_acl` with TWO grants for `tag:ci-debug` (confirmed live 2026-09-17 that both are required: the `ssh` block alone governs SSH auth but grants no network reachability, so a general `acls` entry -- `autogroup:member` → `tag:ci-debug:*` -- is what actually gets a tag:ci-debug node into a member device's netmap at all; without it the node doesn't even appear as a peer despite joining successfully) plus a `tailscale_federated_identity` trusting GitHub Actions' own OIDC tokens directly (`issuer = token.actions.githubusercontent.com`, `subject = repo:IntegratedDynamic/infrastructure:*`, mirroring this repo's existing AWS OIDC trust scope) — `.github/actions/debug-tailscale` presents the calling job's own token, no static secret ever stored in GitHub. A `01-iam/bootstrap/`-style trust anchor in spirit (human-applied, rare changes, needs a manually-generated Tailscale API key — same chicken-and-egg every other bootstrap root has) but kept as its own top-level domain since it isn't a Scaleway identity; `13-tailscale/workload/` is a natural place for future scoped per-project Tailscale identities without a restructure. `tailscale_acl`'s `overwrite_existing_content = true` means an apply **replaces** the tailnet's whole policy file, not merges — see the root's own README before ever running `apply` here.
 
+### `14-sso/managed/`
+
+authentik-as-code (infra issue #135), the platform's single identity provider
+(it replaced Dex): groups, forward-auth applications (one proxy provider +
+application + group bindings per app, which also drives each user's per-group
+"My applications" tiles), the OIDC providers of the platform's own apps
+(ArgoCD, Grafana, Crossview, OpenBao: `oidc.tf`), the GitHub login source with
+its org/team -> group mapping (`github.tf`), the login page (`login.tf`),
+passkeys so a user can sign in without GitHub (`passkey.tf`) and the imported
+embedded outpost.
+Users/membership are NOT in code, by design. Applied unattended by the
+`authentik-managed` Crossplane Workspace (`gitops` repo), authenticating with
+authentik's akadmin bootstrap token from OpenBao
+(`kv/apps/authentik/eso-generated`). Own state bucket
+(`00-foundation/scaleway`'s `sso_managed`). authentik itself is the `sso-apps`
+platform-apps domain. ArgoCD is ONE public PKCE client for both its UI and
+`argocd login --sso`: authentik's issuer is per application, so a separate CLI
+client would issue tokens argocd-server rejects. See that root's README.
+
+**What a cluster `down` loses**: the Terraform above is recreated from code, but
+users, group membership, **passkeys** and GitHub links live only in authentik's
+Postgres volume, which a `down` deletes (StorageClass reclaim `Delete`, cluster
+created with `delete_additional_resources`). So the volume is snapshotted every 4
+hours by a Velero schedule (`authentik-data`, gitops `velero` chart, kept 60 days so
+the latest snapshot survives a long downtime: native Velero TTL, no job managing the
+lifecycle; the bucket goes to GLACIER at 90 days, hence not more) and put back
+on a fresh cluster by `authentik-restore`, the FIRST wave of the `sso-apps` domain
+(gitops `services/platform/authentik/restore`, see its README). It is in `sso-apps`
+and not in `backups-apps` on purpose: `backups-apps` is a gate other domains wait on,
+and a problem restoring authentik must hold back only authentik; `sso-apps`
+`needs_backups`, never the reverse, so it cannot deadlock. It never touches an
+existing volume and fails closed rather than starting authentik on an empty database
+when a backup should exist. A snapshot is crash-consistent and up to 4 hours old.
+The restore logic is ONE generic chart in the gitops repo (`charts/velero-pvc-restore`,
+see its README: what it checks, the restore drill), also used for Firefly III's two
+volumes (schedule `firefly-data`, restore entry in the homelab-apps bootstrap), which
+has no domain here: Firefly is deployed after the whole platform, Velero included.
+
 ## Conventions
 
 **Branches**: `<type>/<description>` — lowercase, hyphens only. Types: `feature/`, `bugfix/`, `hotfix/`, `ci/`, `chore/`.
@@ -709,7 +748,9 @@ The Tailscale-side trust anchor for live GitHub Actions debugging (infra#110, se
 
 **PRs**: After each commit + push on a branch, create a draft PR if none exists. Title: `<type>: description`. Body: context, changes, linked issues (`Closes #123`), test instructions. Use [Conventional Comments](https://conventionalcomments.org/) in reviews (`praise`, `nitpick`, `suggestion`, `issue`, `todo`, `question`, `thought`).
 
-**OpenBao content is Terraform, never manual**: anything that must exist in OpenBao (a KV secret, a policy, an auth role...) is declared in `11-secrets/openbao/managed` via Terraform — never a hand-run `bao kv put`/`bao write`, even for a one-off or an externally issued secret (a Slack token, a GitHub App key...). The goal is that a **fresh cluster is reproducible from git with no manual step**. A secret that can't be generated (issued by a third party) still gets its `vault_kv_secret_v2` resource there, fed through a `sensitive` variable, like `secrets_sync_github_eso_private_key`; secrets Terraform can mint itself use `random_password`. If delivering such a value to the Crossplane-applied Workspace is the hard part, solve that (it is the real work) rather than falling back to a manual write. Applying that root is itself done through Crossplane (the unattended `openbao-managed` Workspace), the convenient path — prefer it to a local `tofu apply`.
+**OpenBao content is Terraform, never manual**: anything that must exist in OpenBao (a KV secret, a policy, an auth role...) is declared in `11-secrets/openbao/managed` via Terraform — never a hand-run `bao kv put`/`bao write`, even for a one-off or an externally issued secret (a Slack token, a GitHub App key...).
+
+**Internal vs external secrets (two lifecycles, one layout `kv/apps/<app>/...`)**: an *external* secret (someone must supply the value: a Slack token, a GitHub App key...) lives in `kv/apps/<app>/credentials`, owned by Terraform as described here — a human seed apply when one is first introduced is expected and unavoidable. An *internal* secret (a purely random string nobody outside the cluster needs) lives in `kv/apps/<app>/eso-generated` and is generated in-cluster by ESO, in the consumer's own chart: `Password` generators -> local Secret -> `PushSecret` (`updatePolicy: IfNotExists`, whole Secret in one object) -> OpenBao -> `ExternalSecret`. No Terraform apply or Crossplane Workspace sits on its path, which removes the chicken-and-egg (a Workspace downstream of the secrets gate cannot create a secret that gate waits for). Terraform never declares an object named `eso-generated`. The `eso-generate` policy (`11-secrets/openbao/managed`) scopes ESO to exactly `kv/{data,metadata}/apps/+/eso-generated`; see its comment for why it cannot be create-only (overwrite protection is the PushSecret's `IfNotExists`) and why it repeats `read` (Vault applies only the most specific matching rule). Reference implementation: `gitops` `services/platform/authentik/secret`. Existing random secrets in `11-secrets/openbao/managed` migrate opportunistically, not in bulk. The goal is that a **fresh cluster is reproducible from git with no manual step**. A secret that can't be generated (issued by a third party) still gets its `vault_kv_secret_v2` resource there, fed through a `sensitive` variable, like `secrets_sync_github_eso_private_key`; secrets Terraform can mint itself use `random_password`. If delivering such a value to the Crossplane-applied Workspace is the hard part, solve that (it is the real work) rather than falling back to a manual write. Applying that root is itself done through Crossplane (the unattended `openbao-managed` Workspace), the convenient path — prefer it to a local `tofu apply`.
 
 **OpenTofu workspaces**: a root that runs through CI declares its workspace variables in an `env/` folder — one `env/<name>.tfvars` per workspace. The **filename (without `.tfvars`) is the OpenTofu workspace name** (so state lands at `<workspace_key_prefix>/<name>/<key>`, isolated per root) and the **file contents are that workspace's variable values**. Name it `<root-path-flattened-with-hyphens>-<env>` (e.g. `11-secrets-openbao-bootstrap-dev`) — see "Backend keys are decoupled from paths" above for the full convention and why a rename needs a real state migration, not just a file rename. The reusable **composite action `.github/actions/terraform`** takes `root` + `tfvars-file` + `command` (`plan`/`apply`/`destroy`) + `aws-role-arn` (all non-secret inputs) and runs `workspace select <name>` + the command `-var-file=env/<name>.tfvars`, after minting an Infisical OIDC token (skippable) and assuming the AWS role via OIDC. The action takes **no secret inputs**: provider credentials (`SCW_*`, `INFISICAL_MACHINE_IDENTITY_ID`) are read from the job env. The calling **workflow** owns the trigger→command mapping (push → apply, schedule → destroy, else plan), the `concurrency` guard, and the `environment` that scopes credentials — Scaleway keys live in the `scaleway` environment and are exposed to the action as job `env:` (never as plain inputs). The repo must be checked out before calling the action (it is a local action). This replaces the old reliance on a local, gitignored `.terraform/environment` (invisible to CI — a `default`-workspace run collides on the state key).
 
