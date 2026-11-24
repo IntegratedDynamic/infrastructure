@@ -65,7 +65,7 @@ terraform {
 # service/pipeline authenticating without a human in the loop" — never
 # actually applied to this root's OWN non-in-cluster execution context: an
 # admin's laptop is a HUMAN, at an interactive session, for which this
-# repo's OIDC-via-Dex was already the established pattern everywhere else
+# repo's OIDC login (Dex then, authentik now) was already the established pattern everywhere else
 # (ArgoCD, Grafana, human OpenBao UI login) — this root's provider config
 # was simply the one place still wired to a static machine credential for a
 # case that never needed one. No CI workflow applies this root today either
@@ -79,7 +79,7 @@ terraform {
 # var.root_token as a separate, explicitly-emergency-only escape hatch (see
 # that variable's own comment).
 variable "vault_auth_method" {
-  description = "Which auth_login mechanism below this root's own applier uses. \"oidc\" (default): a human admin's interactive browser login via Dex (auth_login_oidc, role = var.vault_oidc_role) — for an admin's laptop, the only non-in-cluster execution context this root has today. \"kubernetes\": for the in-cluster provider-opentofu Workspace — no long-lived secret at all, the pod's own auto-rotated ServiceAccount token is presented instead (vault_kubernetes_auth_backend_role.crossplane, 11-secrets/openbao/bootstrap/main.tf — a different root, see that variable's own comment below for why)."
+  description = "Which auth_login mechanism below this root's own applier uses. \"oidc\" (default): a human admin's interactive browser login via authentik (auth_login_oidc, role = var.vault_oidc_role) — for an admin's laptop, the only non-in-cluster execution context this root has today. \"kubernetes\": for the in-cluster provider-opentofu Workspace — no long-lived secret at all, the pod's own auto-rotated ServiceAccount token is presented instead (vault_kubernetes_auth_backend_role.crossplane, 11-secrets/openbao/bootstrap/main.tf — a different root, see that variable's own comment below for why)."
   type        = string
   default     = "oidc"
   validation {
@@ -158,7 +158,7 @@ provider "vault" {
   # anymore.
   address = var.vault_address
 
-  # Human admin, interactive browser login via Dex — dedicated block (unlike
+  # Human admin, interactive browser login via authentik — dedicated block (unlike
   # kubernetes below, hashicorp/vault ~> 5.0 DOES ship auth_login_oidc,
   # confirmed against the installed 5.10.1 provider's own schema): opens a
   # local listener + browser tab itself, same flow `bao login -method=oidc`
@@ -166,9 +166,9 @@ provider "vault" {
   # generic auth_login block at all, since this is a real interactive
   # redirect/callback dance, not a single synchronous POST. Against the SAME
   # already-registered redirect URI (gitops repo
-  # services/platform/dex/chart's staticClients.openbao already lists
+  # 14-sso/managed/oidc.tf's `openbao` client already lists
   # http://localhost:8250/oidc/callback — that's the CLI's own default local
-  # callback, confirmed present since before this change, no new Dex config
+  # callback, confirmed present since before this change, no new IdP config
   # needed). Skipped when var.root_token overrides (below).
   dynamic "auth_login_oidc" {
     for_each = var.root_token == null && var.vault_auth_method == "oidc" ? [1] : []

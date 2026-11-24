@@ -33,9 +33,8 @@ destroy it).
 - `vault_kubernetes_auth_backend_role.snapshot` / `.external_secrets` — bound
   to the raft snapshot agent and ESO's `ClusterSecretStore` respectively.
 - `vault_jwt_auth_backend.oidc` + `vault_jwt_auth_backend_role.admin` — human
-  login via Dex (gitops repo `platform/scaleway/dex.yml`,
-  `staticClients.openbao`), gated on the `IntegratedDynamic:Admin` GitHub
-  group.
+  login via authentik (14-sso/managed/oidc.tf, client `openbao`), gated on the
+  `platform-admins` group (the authentik group the GitHub `admin` team maps to).
 - `vault_policy.eso_read` / `.snapshot` / `.admin` — the policies the roles
   above bind to.
 
@@ -49,12 +48,17 @@ changes" while live OpenBao silently drifted from state (hit for real twice
 ends up in state either way, since every value here already originates from
 state (a `random_password.result`, a var, or a `terraform_remote_state`
 output), so `data_json` costs nothing extra and buys real drift detection:
-- `dex_credentials` (`apps/dex/credentials`) — Dex's client secrets for
-  argocd/envoy/grafana/openbao are **Terraform-generated**
-  (`random_password.*`, arbitrary shared secrets, nothing external
-  constrains them) plus `github-client-id`/`github-client-secret` (Dex's
-  GitHub *connector* credentials — external, from GitHub's own OAuth App,
-  supplied via `var.dex_github_connector`).
+- `authentik_oidc_clients` (`apps/authentik/oidc-clients`) — the client
+  secrets of Grafana, Crossview and OpenBao toward authentik are
+  **Terraform-generated** (`random_password.*`, arbitrary shared secrets,
+  nothing external constrains them). They are the secrets the Dex static
+  clients used before Dex was removed, so nothing rotated.
+- `authentik_github` (`apps/authentik/credentials`) — the GitHub OAuth App
+  behind authentik's GitHub login source: **external** secrets (issued by
+  GitHub), supplied via `var.authentik_github_client_id`/`_secret`, a
+  placeholder default + `ignore_changes` so the unattended Workspace keeps
+  applying this root; push real values with
+  `-replace=vault_kv_secret_v2.authentik_github`.
 - `grafana_admin` (`apps/grafana/admin`) — `admin-password` is
   Terraform-generated (`random_password.grafana_admin_password`);
   `admin-user` is the hardcoded literal `"admin"`.
@@ -105,8 +109,8 @@ output), so `data_json` costs nothing extra and buys real drift detection:
   which pod reads it.)
 - `argo_workflows_openbao_managed_tfvars`
   (`apps/argo-workflows/openbao-managed-tfvars`) — a duplicate, JSON-encoded
-  copy of `var.dex_github_connector` /
-  `var.secrets_sync_github_eso_private_key` / `var.secrets_sync_github`, so
+  copy of `var.secrets_sync_github_eso_private_key` /
+  `var.secrets_sync_github`, so
   the in-cluster reconcile's own unattended `tofu apply` of THIS root can
   satisfy those three required variables too (same admin-supplied value,
   written to a second KV path in the same apply — not a read-back of the
@@ -152,7 +156,7 @@ convention, not automation.
   `version.tf`'s own comment): which identity this root's applier logs
   into OpenBao as. AppRole was removed entirely (infra#115 follow-up,
   2026-09-30) — see that comment for the full incident.
-  - `"oidc"`: a human admin's interactive browser login via Dex, as the
+  - `"oidc"`: a human admin's interactive browser login via authentik, as the
     `terraform-cli` role (this file, below `admin`) — deliberately
     narrower than `admin`'s full `sys/*` sudo. For an admin's laptop, the
     only non-in-cluster execution context this root has.
@@ -169,11 +173,11 @@ convention, not automation.
     this root's very first apply, before `terraform-cli` exists) or
     `kubectl port-forward` debugging.
 
-- **`var.dex_github_connector`**, **`var.secrets_sync_github_eso_private_key`**:
+- **`var.secrets_sync_github_eso_private_key`**:
   external credentials this identity's policy can't read back on its own
   (no `kv/data/*` access needed since these are just supplied, not
   round-tripped) — fetch current values from OpenBao directly (an admin
-  OIDC session can read `kv/data/apps/dex/credentials` etc.) and add them to
+  OIDC session can read `kv/data/apps/...` objects) and add them to
   a gitignored `local.auto.tfvars` (matches `*.auto.tfvars` in the repo
   `.gitignore`, same convention as `10-cluster/scaleway/local.auto.tfvars`).
   Never paste secret values into shell history or commit them.
@@ -196,7 +200,7 @@ Resources already existing in OpenBao need one `tofu import` each, once,
 to attach Terraform's state to them without recreating anything — see git
 history for the exact import commands used (mount, auth backends/roles,
 policies, then each `vault_kv_secret_v2` via `<mount>/data/<name>` as the
-import ID, e.g. `kv/data/apps/dex/credentials`).
+import ID, e.g. `kv/data/apps/authentik/oidc-clients`).
 
 ```bash
 tofu -chdir=11-secrets/openbao/managed init
@@ -218,7 +222,7 @@ tofu -chdir=11-secrets/openbao/managed apply
 
 > Never `tofu apply`/`destroy` here **by hand** without explicit approval —
 > this backs live authentication paths (ESO, the snapshot agent, human OIDC
-> login) and live secret content (Dex/ArgoCD/Grafana client secrets,
+> login) and live secret content (the Grafana/Crossview/OpenBao client secrets,
 > Grafana's admin password, GitHub Actions secrets). A bad apply can lock
 > out access to the cluster's own secrets.
 >
@@ -233,7 +237,7 @@ tofu -chdir=11-secrets/openbao/managed apply
 > `random_password`'s underlying trigger, or `-replace` it — `data_json`
 > picks up the new value on the next apply, no separate version bump
 > needed) takes effect live immediately, but downstream consumers
-> (Dex/ArgoCD/Grafana pods reading via `secretKeyRef` env vars) do **not**
+> (Grafana/Crossview pods reading via `secretKeyRef` env vars) do **not**
 > hot-reload — force their `ExternalSecret`s to refresh (e.g. annotate them
 > to trigger reconciliation) and roll out the affected deployments right
 > after, or there's a window where OIDC login fails with

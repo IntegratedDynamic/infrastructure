@@ -17,7 +17,7 @@ follow-up) after a live break: the AppRole's `secret_id` had been silently
 purged by OpenBao, and investigating the fix turned up that AppRole's
 actual justification — "a service/pipeline authenticating without a human
 in the loop" — never matched either of `managed/`'s real execution
-contexts. An admin's laptop is a human (OIDC via Dex, `managed/`'s own
+contexts. An admin's laptop is a human (OIDC via authentik, `managed/`'s own
 `terraform-cli` role, is the same pattern already used everywhere else on
 this platform). Crossplane's Workspace is a real pod in a trusted cluster
 (Kubernetes auth — no secret to manage at all).
