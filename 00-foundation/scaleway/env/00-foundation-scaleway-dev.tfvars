@@ -56,4 +56,7 @@ state_buckets = {
   tailscale_bootstrap = {
     bucket_name = "id-terraform-state-13-tailscale-bootstrap"
   }
+  sso_managed = {
+    bucket_name = "id-terraform-state-14-sso-managed"
+  }
 }
