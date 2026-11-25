@@ -133,6 +133,11 @@ How, with the override mechanism `10-cluster/scaleway` already has:
      plan made with `-var gitops_revision=…` fails at `apply` with "Mismatch
      between input and plan variable value" because `local.auto.tfvars` still
      says `main`.
+     **From CI instead** (a cold start the way the scheduled `up` does it):
+     dispatch `scaleway.yml` with `command = apply` and its `gitops_revision`
+     input set to the branch (the dispatch can come from `main`: only
+     `infra_revision` follows the ref the workflow runs from). Only a manual
+     dispatch can set it; push and schedule always deploy `main`.
    - `infrastructure` change reaching a Crossplane Workspace: do nothing — 
      `infra_revision` is auto-detected from the **local** checked-out branch
      of this repo (`git rev-parse --abbrev-ref HEAD`), and drives the
