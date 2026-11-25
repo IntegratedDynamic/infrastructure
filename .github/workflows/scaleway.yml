@@ -76,6 +76,17 @@ on:
           enumerable ahead of time.
         type: string
         default: scaleway
+      gitops_revision:
+        description: >
+          Branch, tag or SHA of the gitops repo that ArgoCD deploys
+          (var.gitops_revision). Leave as main for a normal run; set it to a
+          gitops branch to test that branch on a real cold start, the CI
+          equivalent of `gitops_revision` in a local local.auto.tfvars. Only a
+          manual dispatch can set it: push and schedule always deploy main.
+          The cluster is then left on that branch -- merging it deletes the
+          branch (ComparisonError); the push-to-main apply above puts it back.
+        type: string
+        default: main
 
 concurrency:
   # Serialize everything that writes this root's state (apply/destroy never
@@ -136,6 +147,10 @@ jobs:
       SCALEWAY_STATE_SECRET_KEY: ${{ secrets.SCALEWAY_STATE_SECRET_KEY }}
       SCW_DEFAULT_ORGANIZATION_ID: ${{ vars.SCW_DEFAULT_ORGANIZATION_ID }}
       SCW_DEFAULT_PROJECT_ID: ${{ vars.SCW_DEFAULT_PROJECT_ID }}
+      # var.gitops_revision, read by OpenTofu from the environment. `inputs` is
+      # empty on push/schedule, so those keep main; never pass an empty string
+      # here (it would override the variable's own "main" default).
+      TF_VAR_gitops_revision: ${{ inputs.gitops_revision || 'main' }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
