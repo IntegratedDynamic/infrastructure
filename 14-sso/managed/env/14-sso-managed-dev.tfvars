@@ -6,9 +6,18 @@ domain = "staging.scalepack.fr"
 
 # Structure only: who is IN these groups is decided in authentik's UI.
 groups = {
-  "platform-admins" = {}
+  # is_superuser: members administer authentik itself (users, groups,
+  # invitations). The GitHub team `admin` maps to this group (below), so that
+  # team is who runs the identity provider.
+  "platform-admins" = { is_superuser = true }
   "platform-users"  = {}
+  # Guests: the demo app and nothing else.
+  "demo" = {}
 }
+
+# Groups someone can be invited into by link (invitations.tf). Any other group is
+# assigned by an admin in authentik's UI.
+invitation_groups = ["demo"]
 
 # Applications behind authentik's forward-auth. `groups` decides both who may
 # launch the app and whose "My applications" page shows its tile.
@@ -16,7 +25,7 @@ applications = {
   demo = {
     name        = "Demo"
     host_prefix = "demo"
-    groups      = ["platform-admins", "platform-users"]
+    groups      = ["platform-admins", "platform-users", "demo"]
     section     = "Products"
   }
 
