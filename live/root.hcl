@@ -60,6 +60,13 @@ locals {
   # cache's .terraform/ — the same exposure as the gitignored -backend-config
   # file this replaces. AWS_* stays free for the AWS provider (aws sso login).
   explicit_state_credentials_roots = ["01-iam/bootstrap/aws", "02-encryption/aws"]
+
+  # Roots with no remote state at all: a disposable cluster whose state dies
+  # with the CI runner (10-cluster/kind). Local backend, the state file sits
+  # next to the unit (gitignored *.tfstate) rather than in the cache.
+  local_state_roots  = ["10-cluster/kind"]
+  is_local_state     = contains(local.local_state_roots, local.root_path)
+  local_state_config = { path = "${get_terragrunt_dir()}/terraform.tfstate" }
   state_credentials = contains(local.explicit_state_credentials_roots, local.root_path) ? {
     access_key = get_env("SCALEWAY_STATE_ACCESS_KEY")
     secret_key = get_env("SCALEWAY_STATE_SECRET_KEY")
@@ -79,6 +86,16 @@ terraform {
   # root's on the next run.
   copy_terraform_lock_file = false
 
+  # `//` copies the whole repo into the cache, gitignored secrets included
+  # (WireGuard keys, other roots' local.auto.tfvars). Drop them from the copy,
+  # keeping only this root's own *.auto.tfvars. The script refuses to run outside
+  # a .terragrunt-cache, so it cannot touch the real tree.
+  after_hook "prune_cache_copy" {
+    commands     = ["init-from-module"]
+    execute      = ["${get_repo_root()}/live/scripts/prune-cache-copy.sh", trimsuffix(get_working_dir(), "/${local.root_path}"), local.root_path]
+    run_on_error = false
+  }
+
   # Reuse each root's existing env/<workspace>.tfvars verbatim: one source of
   # truth while both the classic workflow and Terragrunt exist.
   extra_arguments "env_tfvars" {
@@ -88,7 +105,7 @@ terraform {
 }
 
 remote_state {
-  backend = "s3"
+  backend = local.is_local_state ? "local" : "s3"
 
   # The buckets already exist (00-foundation/scaleway creates them, with their
   # own scoped identity, versioning, lifecycle). Terragrunt's bootstrap would
@@ -100,7 +117,9 @@ remote_state {
     if_exists = "overwrite_terragrunt"
   }
 
-  config = merge({
+  # Both branches go through JSON so the conditional's two results have the same
+  # type (HCL cannot unify two differently-shaped objects).
+  config = jsondecode(local.is_local_state ? jsonencode(local.local_state_config) : jsonencode(merge({
     bucket  = local.bucket
     key     = "${local.root_path}/${local.workspace}/terraform.tfstate"
     region  = "fr-par"
@@ -117,5 +136,5 @@ remote_state {
     endpoints = {
       s3 = "https://s3.fr-par.scw.cloud"
     }
-  }, local.state_credentials)
+  }, local.state_credentials)))
 }
