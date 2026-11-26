@@ -23,9 +23,9 @@ module "buckets" {
   cold_storage_transition_days    = coalesce(each.value.cold_storage_transition_days, var.cold_storage_transition_days)
 
   project_id                        = var.project_id
-  identity_application_name         = "${each.value.identity_app_prefix}-${terraform.workspace}"
-  identity_application_description  = "Kubernetes workload identity for ${terraform.workspace} — ${each.value.identity_purpose}."
-  identity_policy_name              = "${each.value.identity_policy_prefix}-${terraform.workspace}"
+  identity_application_name         = "${each.value.identity_app_prefix}-${var.workspace_name}"
+  identity_application_description  = "Kubernetes workload identity for ${var.workspace_name} — ${each.value.identity_purpose}."
+  identity_policy_name              = "${each.value.identity_policy_prefix}-${var.workspace_name}"
   identity_policy_description       = "Object-level read/write on the ${each.key} project. No bucket-level permissions — cannot delete or reconfigure the bucket."
-  api_key_description                = "${each.value.api_key_purpose} for ${terraform.workspace}. ${each.value.api_key_consumer}."
+  api_key_description                = "${each.value.api_key_purpose} for ${var.workspace_name}. ${each.value.api_key_consumer}."
 }

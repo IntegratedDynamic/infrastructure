@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Setup
 
 ```bash
-mise install          # Install all tools (kubectl, opentofu, helm, argocd, kind, actionlint)
+mise install          # Install all tools (kubectl, opentofu, terragrunt, helm, argocd, kind, actionlint)
 .githooks/install.sh  # Configure git to use local hooks directory
 ```
 
@@ -26,6 +26,22 @@ so `scw config info` showing valid credentials does not mean the backend has
 them. Skipping this fails with an opaque `403 Forbidden` on `ListObjectsV2`
 that looks identical whether credentials are missing, wrong, or real
 (non-Scaleway) AWS credentials are ambient instead.
+
+## Terragrunt (`live/`) — migration in progress
+
+Roots are being moved, one at a time, under Terragrunt (`live/<env>/<root path>/`,
+see `live/README.md`): it generates the s3 backend (no more per-root
+`backend "s3"` block), picks the root's own `env/<workspace>.tfvars`, and runs
+the **default** workspace with `key` set to the former workspace's full state
+path — the same state object, no migration. **A migrated root is run with
+`terragrunt` from its `live/` unit, not bare `tofu`** (bare `tofu` would silently
+use an empty local state). Migrated so far: `03-storage/scaleway` (the spike).
+Every other root still uses the workspace flow described below. Out of scope by
+design: the Crossplane-applied `*/managed` roots and `00-foundation/aws`.
+
+A root that used `terraform.workspace` in resource names takes a
+`workspace_name` variable instead (that value is `"default"` under Terragrunt) —
+migrating one means a `plan` showing **no changes** before anything else.
 
 ## Live debugging via Tailscale SSH
 
