@@ -717,7 +717,10 @@ application + group bindings per app, which also drives each user's per-group
 its org/team -> group mapping (`github.tf`), the login page (`login.tf`),
 passkeys so a user can sign in without GitHub (`passkey.tf`) and the imported
 embedded outpost.
-Users/membership are NOT in code, by design. Applied unattended by the
+Users/membership are NOT in code, by design: `platform-admins` is an authentik
+superuser group (Admin interface), guests join through per-group invitation
+flows (passkey only), and the "who has access to what" page is a Grafana
+dashboard on a read-only database role (see the root's README). Applied unattended by the
 `authentik-managed` Crossplane Workspace (`gitops` repo), authenticating with
 authentik's akadmin bootstrap token from OpenBao
 (`kv/apps/authentik/eso-generated`). Own state bucket

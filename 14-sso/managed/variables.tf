@@ -22,8 +22,27 @@ variable "host_suffix" {
 }
 
 variable "groups" {
-  type        = map(object({}))
+  type = map(object({
+    # Full authentik administration (Admin interface included) for its members.
+    is_superuser = optional(bool, false)
+  }))
   description = "Groups to declare. Membership is NOT managed here: users are added to groups by hand (or invitation), by design -- this root owns the structure, not the people."
+}
+
+variable "invitation_groups" {
+  type        = set(string)
+  default     = []
+  description = "Groups people can join through an invitation link: one enrollment flow `invitation-<group>` each (invitations.tf). Must be declared in var.groups and must not be superuser groups."
+
+  validation {
+    condition     = alltrue([for g in var.invitation_groups : contains(keys(var.groups), g)])
+    error_message = "Every invitation group must be declared in var.groups."
+  }
+
+  validation {
+    condition     = alltrue([for g in var.invitation_groups : !try(var.groups[g].is_superuser, false)])
+    error_message = "An invitation link must never grant a superuser group: whoever holds the link would become an authentik administrator."
+  }
 }
 
 variable "applications" {
@@ -105,3 +124,30 @@ variable "oidc_client_secrets" {
   description = "Client secret of each confidential client in var.oidc_clients, keyed like it. Supplied as TF_VAR_oidc_client_secrets by the Workspace (the same secrets the Dex static clients used), never committed."
 }
 
+# --- access report (reporting.tf) -------------------------------------------
+
+variable "grafana_url" {
+  type        = string
+  default     = "http://grafana-wake.monitoring.svc:8080/"
+  description = "Grafana API the access report is declared into. Defaults to the in-cluster wake-up Service (Grafana scales to zero)."
+}
+
+variable "grafana_admin_password" {
+  type        = string
+  sensitive   = true
+  default     = ""
+  description = "Grafana's admin password (kv/apps/grafana/admin), supplied as TF_VAR_grafana_admin_password. Empty disables the access report."
+}
+
+variable "reporting_db_host" {
+  type        = string
+  default     = "authentik-postgres.authentik.svc:5432"
+  description = "authentik's PostgreSQL, as reached by Grafana."
+}
+
+variable "reporting_db_password" {
+  type        = string
+  sensitive   = true
+  default     = ""
+  description = "Password of the read-only PostgreSQL role `grafana_reader` (kv/apps/authentik-reporting/eso-generated; the role is created by the gitops repo's authentik chart), supplied as TF_VAR_reporting_db_password. Empty disables the access report."
+}

@@ -31,6 +31,15 @@ data "authentik_flow" "invalidation" {
 resource "authentik_group" "groups" {
   for_each = var.groups
   name     = each.key
+  # A superuser group's members get authentik's Admin interface (users, groups,
+  # invitations...) and full rights over the identity provider itself.
+  is_superuser = each.value.is_superuser
+
+  # Membership belongs to authentik (Admin interface, invitations, GitHub
+  # mapping), never to this root: an update of a group must not rewrite it.
+  lifecycle {
+    ignore_changes = [users]
+  }
 }
 
 resource "authentik_provider_proxy" "app" {

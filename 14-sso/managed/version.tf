@@ -33,6 +33,11 @@ terraform {
       source  = "goauthentik/authentik"
       version = "~> 2026.8"
     }
+    # Only for the "who has access to what" dashboard (reporting.tf).
+    grafana = {
+      source  = "grafana/grafana"
+      version = "~> 4.0"
+    }
   }
 }
 
@@ -53,4 +58,11 @@ terraform {
 provider "authentik" {
   url   = var.authentik_url
   token = var.authentik_token
+}
+
+# Only for reporting.tf (the access report), as Grafana's admin -- same
+# credential 12-monitoring/grafana/managed uses.
+provider "grafana" {
+  url  = var.grafana_url
+  auth = "admin:${var.grafana_admin_password}"
 }

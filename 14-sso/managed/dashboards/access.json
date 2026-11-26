@@ -1,0 +1,278 @@
+{
+  "//": "Hand-written (14-sso/managed/reporting.tf): who has access to what in authentik, read from its database as the read-only role grafana_reader. Edit this file directly.",
+  "uid": "sso-access",
+  "title": "Who has access to what (authentik)",
+  "tags": [
+    "authentik",
+    "access"
+  ],
+  "schemaVersion": 39,
+  "editable": false,
+  "refresh": "",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "links": [
+    {
+      "title": "Manage users in authentik",
+      "type": "link",
+      "url": "https://sso.staging.scalepack.fr/if/admin/#/identity/users",
+      "targetBlank": true,
+      "icon": "external link"
+    },
+    {
+      "title": "Invitations",
+      "type": "link",
+      "url": "https://sso.staging.scalepack.fr/if/admin/#/core/invitations",
+      "targetBlank": true,
+      "icon": "external link"
+    }
+  ],
+  "panels": [
+    {
+      "id": 1,
+      "type": "table",
+      "title": "Who can open what",
+      "description": "One row per user, one column per application. '?' = decided by an expression policy, check it in authentik.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "authentik-db"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 10
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "authentik-db"
+          },
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "WITH RECURSIVE\npeople AS (\n  SELECT id, username, name, email, type, is_active, last_login, date_joined\n  FROM authentik_core_user\n  WHERE type IN ('internal', 'external') AND username <> 'AnonymousUser'\n),\nmembership(user_id, group_id) AS (\n  SELECT user_id, group_id FROM authentik_core_user_groups\n  UNION\n  SELECT m.user_id, p.parent_id\n  FROM membership m JOIN authentik_core_groupparentage p ON p.child_id = m.group_id\n),\nchecks AS (\n  SELECT u.id AS user_id, a.slug, a.name AS app, u.is_active, t.policy_engine_mode AS mode,\n    CASE\n      WHEN b.policy_binding_uuid IS NULL THEN true\n      WHEN b.expiring AND b.expires < now() THEN false\n      WHEN b.policy_id IS NOT NULL THEN NULL\n      ELSE (EXISTS (SELECT 1 FROM membership m WHERE m.user_id = u.id AND m.group_id = b.group_id)\n            OR COALESCE(b.user_id = u.id, false)) <> b.negate\n    END AS passes\n  FROM people u\n  CROSS JOIN authentik_core_application a\n  JOIN authentik_policies_policybindingmodel t ON t.pbm_uuid = a.policybindingmodel_ptr_id\n  LEFT JOIN authentik_policies_policybinding b ON b.target_id = a.policybindingmodel_ptr_id AND b.enabled\n),\naccess AS (\n  SELECT user_id, slug, app,\n    CASE\n      WHEN NOT is_active THEN 'no'\n      WHEN mode = 'all' AND bool_or(passes IS FALSE) THEN 'no'\n      WHEN mode = 'all' AND bool_or(passes IS NULL) THEN '?'\n      WHEN mode = 'all' THEN 'yes'\n      WHEN bool_or(passes IS TRUE) THEN 'yes'\n      WHEN bool_or(passes IS NULL) THEN '?'\n      ELSE 'no'\n    END AS access\n  FROM checks\n  GROUP BY user_id, slug, app, is_active, mode\n)\nSELECT u.username AS \"user\", a.app, a.access\nFROM access a JOIN people u ON u.id = a.user_id\nORDER BY u.username, a.app"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "groupingToMatrix",
+          "options": {
+            "rowField": "user",
+            "columnField": "app",
+            "valueField": "access",
+            "emptyValue": "empty"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "center",
+            "cellOptions": {
+              "type": "color-background",
+              "mode": "basic"
+            }
+          },
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "transparent",
+                "value": null
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "yes": {
+                  "text": "yes",
+                  "color": "green",
+                  "index": 0
+                },
+                "no": {
+                  "text": "-",
+                  "color": "transparent",
+                  "index": 1
+                },
+                "?": {
+                  "text": "?",
+                  "color": "orange",
+                  "index": 2
+                }
+              }
+            }
+          ]
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "user\\app"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "auto"
+                }
+              },
+              {
+                "id": "custom.align",
+                "value": "left"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm"
+      }
+    },
+    {
+      "id": 2,
+      "type": "table",
+      "title": "People",
+      "description": "Every account: its groups, what it can open and how it signs in.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "authentik-db"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 10,
+        "w": 24,
+        "h": 10
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "authentik-db"
+          },
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "WITH RECURSIVE\npeople AS (\n  SELECT id, username, name, email, type, is_active, last_login, date_joined\n  FROM authentik_core_user\n  WHERE type IN ('internal', 'external') AND username <> 'AnonymousUser'\n),\nmembership(user_id, group_id) AS (\n  SELECT user_id, group_id FROM authentik_core_user_groups\n  UNION\n  SELECT m.user_id, p.parent_id\n  FROM membership m JOIN authentik_core_groupparentage p ON p.child_id = m.group_id\n),\nchecks AS (\n  SELECT u.id AS user_id, a.slug, a.name AS app, u.is_active, t.policy_engine_mode AS mode,\n    CASE\n      WHEN b.policy_binding_uuid IS NULL THEN true\n      WHEN b.expiring AND b.expires < now() THEN false\n      WHEN b.policy_id IS NOT NULL THEN NULL\n      ELSE (EXISTS (SELECT 1 FROM membership m WHERE m.user_id = u.id AND m.group_id = b.group_id)\n            OR COALESCE(b.user_id = u.id, false)) <> b.negate\n    END AS passes\n  FROM people u\n  CROSS JOIN authentik_core_application a\n  JOIN authentik_policies_policybindingmodel t ON t.pbm_uuid = a.policybindingmodel_ptr_id\n  LEFT JOIN authentik_policies_policybinding b ON b.target_id = a.policybindingmodel_ptr_id AND b.enabled\n),\naccess AS (\n  SELECT user_id, slug, app,\n    CASE\n      WHEN NOT is_active THEN 'no'\n      WHEN mode = 'all' AND bool_or(passes IS FALSE) THEN 'no'\n      WHEN mode = 'all' AND bool_or(passes IS NULL) THEN '?'\n      WHEN mode = 'all' THEN 'yes'\n      WHEN bool_or(passes IS TRUE) THEN 'yes'\n      WHEN bool_or(passes IS NULL) THEN '?'\n      ELSE 'no'\n    END AS access\n  FROM checks\n  GROUP BY user_id, slug, app, is_active, mode\n)\nSELECT u.username AS \"User\", u.name AS \"Name\", u.email AS \"E-mail\",\n  CASE WHEN u.is_active THEN 'active' ELSE 'disabled' END AS \"Status\",\n  (SELECT string_agg(g.name, ', ' ORDER BY g.name)\n     FROM authentik_core_user_groups ug JOIN authentik_core_group g ON g.group_uuid = ug.group_id\n    WHERE ug.user_id = u.id) AS \"Groups\",\n  CASE WHEN EXISTS (SELECT 1 FROM membership m JOIN authentik_core_group g ON g.group_uuid = m.group_id\n                    WHERE m.user_id = u.id AND g.is_superuser) THEN 'yes' ELSE '' END AS \"authentik admin\",\n  (SELECT string_agg(a.app, ', ' ORDER BY a.app) FROM access a WHERE a.user_id = u.id AND a.access = 'yes') AS \"Can open\",\n  concat_ws(', ',\n    (SELECT string_agg(s.name, ', ' ORDER BY s.name)\n       FROM authentik_core_usersourceconnection c\n       JOIN authentik_core_source s ON s.policybindingmodel_ptr_id = c.source_id\n      WHERE c.user_id = u.id),\n    (SELECT 'passkey x' || count(*) FROM authentik_stages_authenticator_webauthn_webauthndevice d\n      WHERE d.user_id = u.id HAVING count(*) > 0)) AS \"Signs in with\",\n  u.last_login AS \"Last login\", u.date_joined AS \"Created\"\nFROM people u\nORDER BY u.username"
+        }
+      ],
+      "transformations": [],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "filterable": true,
+            "cellOptions": {
+              "type": "auto"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm"
+      }
+    },
+    {
+      "id": 3,
+      "type": "table",
+      "title": "Groups",
+      "description": "Members of each group and the applications that name the group (or a parent of it).",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "authentik-db"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 20,
+        "w": 24,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "authentik-db"
+          },
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "WITH RECURSIVE lineage(group_id, ancestor_id) AS (\n  SELECT group_uuid, group_uuid FROM authentik_core_group\n  UNION\n  SELECT l.group_id, p.parent_id\n  FROM lineage l JOIN authentik_core_groupparentage p ON p.child_id = l.ancestor_id\n)\nSELECT g.name AS \"Group\", CASE WHEN g.is_superuser THEN 'yes' ELSE '' END AS \"authentik admin\",\n  (SELECT string_agg(u.username, ', ' ORDER BY u.username)\n     FROM authentik_core_user_groups ug JOIN authentik_core_user u ON u.id = ug.user_id\n    WHERE ug.group_id = g.group_uuid) AS \"Direct members\",\n  (SELECT string_agg(DISTINCT a.name, ', ' ORDER BY a.name)\n     FROM lineage l\n     JOIN authentik_policies_policybinding b ON b.group_id = l.ancestor_id AND b.enabled AND NOT b.negate\n     JOIN authentik_core_application a ON a.policybindingmodel_ptr_id = b.target_id\n    WHERE l.group_id = g.group_uuid) AS \"Bound to applications\"\nFROM authentik_core_group g\nORDER BY g.name"
+        }
+      ],
+      "transformations": [],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "filterable": true,
+            "cellOptions": {
+              "type": "auto"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm"
+      }
+    },
+    {
+      "id": 4,
+      "type": "table",
+      "title": "Pending invitations",
+      "description": "Links not yet used or expired. The link itself is only visible in authentik.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "authentik-db"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 28,
+        "w": 24,
+        "h": 6
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "authentik-db"
+          },
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT i.name AS \"Invitation\", COALESCE(f.slug, '(any invitation flow)') AS \"Flow\",\n  CASE WHEN i.single_use THEN 'yes' ELSE 'no' END AS \"Single use\",\n  CASE WHEN i.expiring THEN i.expires END AS \"Expires\"\nFROM authentik_stages_invitation_invitation i\nLEFT JOIN authentik_flows_flow f ON f.flow_uuid = i.flow_id\nWHERE NOT i.expiring OR i.expires > now()\nORDER BY i.name"
+        }
+      ],
+      "transformations": [],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "filterable": true,
+            "cellOptions": {
+              "type": "auto"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm"
+      }
+    }
+  ]
+}
