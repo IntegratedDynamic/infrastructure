@@ -1,5 +1,9 @@
 # 13-tailscale/bootstrap — Tailscale CI-debug trust anchor
 
+> **Superseded, pending removal.** CI live debugging now joins the platform's own
+> headscale (root `CLAUDE.md`, "headscale"). This root stays until that path has
+> been seen working on `main`; branches that predate it still use it.
+
 Provisions the Tailscale side of live GitHub Actions debugging (infra#110):
 a tailnet ACL granting SSH from this tailnet's own member devices to any
 node tagged `tag:ci-debug`, plus an **OIDC workload identity federation**
