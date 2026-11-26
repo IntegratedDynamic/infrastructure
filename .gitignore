@@ -40,6 +40,9 @@ terraform.rc
 
 *.conf
 
+# Terragrunt cache (per-unit copy of the source + generated backend.tf)
+.terragrunt-cache/
+
 # Python test environments
 .venv-tests/
 __pycache__/

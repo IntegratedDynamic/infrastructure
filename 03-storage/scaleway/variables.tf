@@ -63,3 +63,14 @@ variable "project_id" {
   description = "Scaleway project ID for bucket and IAM resource scoping."
   type        = string
 }
+
+variable "workspace_name" {
+  description = <<-EOT
+    Suffix of every bucket identity's IAM application/policy name, e.g.
+    "03-storage-scaleway-dev". It used to be terraform.workspace; Terragrunt
+    (live/root.hcl) always runs the default workspace, so it passes the name
+    explicitly. Changing it renames the live IAM resources (in place, no key
+    rotation: Scaleway API keys are tied to application_id, not name).
+  EOT
+  type        = string
+}
