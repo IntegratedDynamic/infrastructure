@@ -70,7 +70,7 @@ resource "aws_iam_access_key" "openbao_unseal" {
 # this key permanently bricks OpenBao: it must outlive ephemeral cluster resets.
 # -----------------------------------------------------------------------------
 resource "aws_kms_key" "openbao_unseal" {
-  description             = "OpenBao auto-unseal key (${terraform.workspace}). Wraps OpenBao's root key; destroying it permanently bricks the OpenBao store."
+  description             = "OpenBao auto-unseal key (${var.workspace_name}). Wraps OpenBao's root key; destroying it permanently bricks the OpenBao store."
   deletion_window_in_days = 30
   enable_key_rotation     = true
   policy                  = data.aws_iam_policy_document.openbao_unseal_key.json
