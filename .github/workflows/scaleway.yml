@@ -130,7 +130,11 @@ jobs:
     # metrics captured for that exact window. 45m gives real margin without
     # masking a genuine hang either way; revisit with more data, or use
     # hard-destroy below to iterate faster while investigating.
-    timeout-minutes: 45
+    # 75 since 2026-11-26: a cold start cancelled at 45 min leaves the state
+    # INCOMPLETE (OpenTofu is killed before it records what it just created), and
+    # every later apply fails on "already exists" until the resources are
+    # imported by hand. Better a long run than a cancelled one.
+    timeout-minutes: 75
     # Fed by the environment input above -- carries SCW_ACCESS_KEY /
     # SCW_SECRET_KEY (and satisfies zizmor's secrets-in-environment audit).
     environment: ${{ inputs.environment || 'scaleway' }}
