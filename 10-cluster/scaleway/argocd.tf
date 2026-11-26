@@ -369,6 +369,10 @@ locals {
     grafana-apps = [
       { name = "letsEncryptStaging", value = tostring(var.letsencrypt_staging) },
     ]
+    headscale-apps = [
+      { name = "hostSuffix", value = local.host_suffix },
+      { name = "letsEncryptStaging", value = tostring(var.letsencrypt_staging) },
+    ]
   }
 
   domain_extra_depends_on_ids = {

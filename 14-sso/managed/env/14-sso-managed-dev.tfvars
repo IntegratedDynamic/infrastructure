@@ -101,5 +101,17 @@ oidc_clients = {
     launch_url = "https://openbao.staging.scalepack.fr/ui/"
     section    = "Platform"
   }
+  # headscale: who may log a device into the private network (`tailscale up`).
+  # Admins only: every member device may SSH into the CI runners being debugged
+  # (gitops repo's headscale policy). PUBLIC client with PKCE, like ArgoCD: no
+  # secret to generate or deliver. No UI, hence no tile.
+  headscale = {
+    name          = "Headscale"
+    client_id     = "headscale"
+    client_type   = "public"
+    redirect_uris = ["https://headscale.staging.scalepack.fr/oidc/callback"]
+    groups        = ["platform-admins"]
+    hide_tile     = true
+  }
 }
 
