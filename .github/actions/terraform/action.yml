@@ -1,15 +1,26 @@
 name: OpenTofu
 description: >
-  Run OpenTofu for a workspace-driven root: set up OpenTofu, optionally mint an
-  Infisical OIDC token, authenticate the S3-compatible state backend, then init →
-  workspace select → plan/apply/destroy. The repository must already be checked out.
+  Run one Terragrunt unit (live/<unit>) with OpenTofu: set up OpenTofu and
+  Terragrunt, optionally mint an Infisical OIDC token, authenticate the
+  S3-compatible state backend, then init → plan/apply/destroy. The repository
+  must already be checked out.
+
+  Terragrunt (live/root.hcl) generates the backend, picks the root's
+  env/*.tfvars and the state key — there is no `workspace select` any more: the
+  former workspace's state path is now the key of the default workspace (same
+  object, see live/README.md).
 
   Backend auth has two modes (`state-backend` input), because this repo's roots
   are split across two remote-state homes (see 00-foundation/scaleway/README.md):
     - "aws"      (default): assume an AWS IAM role via OIDC (`aws-role-arn`).
                  For a root whose state still lives in the 00-foundation/aws
                  bucket, or that also carries a real `provider "aws"` block for
-                 its own resources.
+                 its own resources. A root with its own `provider "aws"` and a
+                 Scaleway-hosted state (01-iam/bootstrap/aws, 02-encryption/aws)
+                 reads SCALEWAY_STATE_ACCESS_KEY/_SECRET_KEY from the job env:
+                 root.hcl writes them into the generated backend, so the
+                 assumed AWS role and the Scaleway state key no longer collide
+                 on AWS_ACCESS_KEY_ID (the former "known follow-up").
     - "scaleway": no role assumed — SCALEWAY_STATE_ACCESS_KEY/SCALEWAY_STATE_SECRET_KEY
                  (already in the job env below) are exported as
                  AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY just for the backend,
@@ -36,15 +47,15 @@ description: >
     - SCALEWAY_STATE_ACCESS_KEY / _SECRET_KEY  (state-backend: scaleway only)
     - SCW_DEFAULT_ORGANIZATION_ID / _PROJECT_ID
     - INFISICAL_MACHINE_IDENTITY_ID            (for the minted INFISICAL_AUTH_JWT)
+  Per-run values a unit reads with get_env() (PR_NUMBER, HEAD_REF, ... see
+  live/ephemeral) are set the same way, in the job env.
 
 inputs:
-  root:
-    description: Path to the Terraform root (passed to -chdir).
-    required: true
-  tfvars-file:
+  unit:
     description: >
-      Filename of the .tfvars under env/ (e.g. 10-cluster-scaleway-staging.tfvars).
-      Workspace name is derived by stripping the .tfvars extension.
+      Terragrunt unit to run, relative to live/ (e.g. staging/10-cluster/scaleway
+      or ephemeral/10-cluster/scaleway). The unit's first path segment is the
+      environment, the rest is the root.
     required: true
   command:
     description: >
@@ -90,6 +101,11 @@ runs:
       with:
         # Keep in sync with mise.toml [tools] opentofu version.
         tofu_version: "1.12"
+        # The wrapper would capture/alter stdout, which `state list | xargs`
+        # below (and Terragrunt itself) rely on being untouched.
+        tofu_wrapper: false
+
+    - uses: ./.github/actions/setup-terragrunt
 
     # Keyless Infisical auth: mint a GitHub OIDC JWT into INFISICAL_AUTH_JWT (the
     # provider's default token env var). The audience must match the identity's
@@ -120,19 +136,20 @@ runs:
 
     # Split from the actual plan/apply/destroy step below so GitHub's own
     # per-step timing shows how long the command itself took, separate from
-    # init/workspace-select -- a single combined step only ever showed their
-    # sum. AWS_ACCESS_KEY_ID/_SECRET_ACCESS_KEY (state-backend: scaleway
-    # only) are written to $GITHUB_ENV, not just exported locally, so they
-    # carry over to the next step -- each composite-action step is its own
-    # shell invocation.
-    - name: OpenTofu init
+    # init -- a single combined step only ever showed their sum. Terragrunt would
+    # init on its own anyway; this just makes it a visible step.
+    # AWS_ACCESS_KEY_ID/_SECRET_ACCESS_KEY (state-backend: scaleway only) are
+    # written to $GITHUB_ENV, not just exported locally, so they carry over to the
+    # next steps -- each composite-action step is its own shell invocation.
+    - name: Terragrunt init
       shell: bash
+      working-directory: live/${{ inputs.unit }}
       env:
-        ROOT: ${{ inputs.root }}
-        TFVARS: ${{ inputs.tfvars-file }}
-        COMMAND: ${{ inputs.command }}
         STATE_BACKEND: ${{ inputs.state-backend }}
-        # SCW_* and INFISICAL_MACHINE_IDENTITY_ID are inherited from the job env.
+        # No prompt ever makes sense in CI (Terragrunt's, or OpenTofu's).
+        TG_NON_INTERACTIVE: "true"
+        # SCW_*, SCALEWAY_STATE_* and INFISICAL_MACHINE_IDENTITY_ID are inherited
+        # from the job env.
       run: |
         set -euo pipefail
         # Terraform's s3 backend only ever reads these two literal env var names,
@@ -146,15 +163,10 @@ runs:
           export AWS_ACCESS_KEY_ID="$SCALEWAY_STATE_ACCESS_KEY"
           export AWS_SECRET_ACCESS_KEY="$SCALEWAY_STATE_SECRET_KEY"
         fi
-        ws="${TFVARS%.tfvars}"
-        tofu -chdir="$ROOT" init -input=false
-        # apply may target a brand-new env whose workspace doesn't exist yet;
-        # read paths (plan/destroy) select an existing one.
-        if [ "$COMMAND" = "apply" ]; then
-          tofu -chdir="$ROOT" workspace select -or-create "$ws"
-        else
-          tofu -chdir="$ROOT" workspace select "$ws"
-        fi
+        # An apply may target a brand-new environment (an ephemeral PR cluster):
+        # no `workspace select -or-create` needed, its state object is simply
+        # created by the first apply.
+        terragrunt init -input=false
 
     # hard-destroy only: drop every resource whose deletion normally goes
     # through the Kubernetes API from state *before* destroy runs, so
@@ -170,11 +182,13 @@ runs:
     - name: Strip in-cluster resources from state (hard-destroy)
       if: inputs.command == 'hard-destroy'
       shell: bash
+      working-directory: live/${{ inputs.unit }}
       env:
-        ROOT: ${{ inputs.root }}
+        TG_NON_INTERACTIVE: "true"
       run: |
         set -euo pipefail
-        addrs=$(tofu -chdir="$ROOT" state list | awk -F. '
+        # Terragrunt's own logs go to stderr, so stdout is just the addresses.
+        addrs=$(terragrunt state list | awk -F. '
           { n = NF; type = $(n-1); name = $n
             if (type == "helm_release" || type ~ /^kubernetes_/ \
                 || (type == "null_resource" && name == "velero_namespace_predelete_cleanup")) print }
@@ -198,24 +212,25 @@ runs:
           # passing each address through byte-for-byte. Never triggered
           # before infra#113: this root had no for_each-keyed (bracketed)
           # resource addresses until that refactor.
-          echo "$addrs" | tr '\n' '\0' | xargs -0 tofu -chdir="$ROOT" state rm
+          echo "$addrs" | tr '\n' '\0' | xargs -0 terragrunt state rm
         fi
 
     - name: OpenTofu ${{ inputs.command }}
       shell: bash
+      working-directory: live/${{ inputs.unit }}
       env:
-        ROOT: ${{ inputs.root }}
-        TFVARS: ${{ inputs.tfvars-file }}
         COMMAND: ${{ inputs.command }}
+        TG_NON_INTERACTIVE: "true"
         # AWS_ACCESS_KEY_ID/_SECRET_ACCESS_KEY (state-backend: scaleway) or
         # the assumed role's creds (state-backend: aws) are already in the
-        # job env by this point -- see the previous step.
+        # job env by this point -- see the init step. The unit supplies the
+        # -var-file / -var arguments itself (live/root.hcl and the unit).
       run: |
         set -euo pipefail
         case "$COMMAND" in
-          plan)                 tofu -chdir="$ROOT" plan    -input=false -var-file="env/${TFVARS}" ;;
-          apply)                tofu -chdir="$ROOT" apply   -input=false -auto-approve -var-file="env/${TFVARS}" ;;
-          destroy|hard-destroy) tofu -chdir="$ROOT" destroy -input=false -auto-approve -var-file="env/${TFVARS}" ;;
+          plan)                 terragrunt plan    -input=false ;;
+          apply)                terragrunt apply   -input=false -auto-approve ;;
+          destroy|hard-destroy) terragrunt destroy -input=false -auto-approve ;;
           *) echo "::error::unknown command '$COMMAND' (expected plan|apply|destroy|hard-destroy)"; exit 1 ;;
         esac
 
@@ -238,9 +253,9 @@ runs:
     - name: Release orphaned state lock (cleanup)
       if: failure() || cancelled()
       shell: bash
+      working-directory: live/${{ inputs.unit }}
       env:
-        ROOT: ${{ inputs.root }}
-        TFVARS: ${{ inputs.tfvars-file }}
+        TG_NON_INTERACTIVE: "true"
       run: |
         set -uo pipefail
         # -refresh=false: this only needs to attempt lock ACQUISITION, not
@@ -250,7 +265,7 @@ runs:
         # genuinely (and correctly) locked by a truly concurrent run, rather
         # than hanging on the default wait.
         log=$(mktemp)
-        if tofu -chdir="$ROOT" plan -input=false -refresh=false -lock-timeout=5s -var-file="env/${TFVARS}" >"$log" 2>&1; then
+        if terragrunt plan -input=false -refresh=false -lock-timeout=5s >"$log" 2>&1; then
           echo "State is not locked -- nothing to clean up."
           exit 0
         fi
@@ -261,4 +276,4 @@ runs:
           exit 0
         fi
         echo "Found an orphaned lock ($lock_id, left by this same run) -- releasing it."
-        tofu -chdir="$ROOT" force-unlock -force "$lock_id"
+        terragrunt force-unlock -force "$lock_id"
