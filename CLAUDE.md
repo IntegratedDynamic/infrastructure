@@ -187,6 +187,9 @@ Things that bit us doing this (2026-11-03/04, Crossview rollout):
 ## Commands
 
 ```bash
+# Tests (tests/, .github/workflows/tests.yml): needs a gitops checkout
+GITOPS_DIR=../gitops mise run test
+
 # Provider lock files
 mise run lock            # Re-generate every root's .terraform.lock.hcl for darwin_arm64 + linux_amd64
 
@@ -767,6 +770,12 @@ schedule): no new registration, login or network update then; established tunnel
 hold until a client restarts. Its database and keys live only on its volume,
 snapshotted every 4 hours (`headscale-data`) and restored on a fresh cluster by
 `headscale-restore`, same mechanism as authentik above.
+
+**Tests**: the server, its policy and headscale-sts are tested end to end next to
+the charts (gitops `services/platform/headscale/tests`); this repo's `tests/`
+covers the CI action and what the two repos must agree on. Run
+`GITOPS_DIR=<gitops checkout> mise run test`; `.github/workflows/tests.yml` picks
+the gitops branch of the same name when there is one.
 
 **CI**: `.github/actions/debug-tailscale` joins this network through
 `headscale-sts`, a third-party stopgap until headscale does workload identity

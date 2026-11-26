@@ -5,6 +5,25 @@ actionlint = "1.7"
 helm = "4.1.3"
 argocd = "3.3.6"
 kind = "0.33.0"
+python = "3.13"
+
+# ── Tests (tests/, .github/workflows/tests.yml) ──────────────────────────────
+
+[tasks.test]
+description = "Fast tests, no cloud credentials. Needs a gitops checkout (GITOPS_DIR, default ../gitops)"
+run = """
+set -eu
+python -m venv .venv-tests
+.venv-tests/bin/pip install -q -r tests/requirements.txt
+PYTHONDONTWRITEBYTECODE=1 .venv-tests/bin/pytest -p no:cacheprovider tests
+tofu fmt -check -recursive 10-cluster 14-sso
+for root in 10-cluster/scaleway 14-sso/managed; do
+  # A throwaway data dir: leaves the root's own .terraform (and its backend) alone.
+  data=$(mktemp -d)
+  TF_DATA_DIR="$data" tofu -chdir="$root" init -backend=false -input=false -lockfile=readonly >/dev/null
+  TF_DATA_DIR="$data" tofu -chdir="$root" validate
+done
+"""
 
 # ── VPN (WireGuard, 04-vpn/wireguard-site-to-site) ───────────────────────────
 # `wg-quick`'s own "bare name" lookup only resolves configs already living in
