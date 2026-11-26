@@ -112,16 +112,19 @@ migration: `03-storage/scaleway`'s `loki`/`tempo` buckets' live
 commit was never actually applied. Left alone; not this migration's job to
 fix.
 
-**Known follow-up, not yet done**: `.github/actions/terraform/action.yml`
-still only assumes an AWS role for backend state R/W. Every migrated root's
-GitHub Actions workflow needs that updated to pass Scaleway credentials via
-`-backend-config` instead — locally this was done per-command with an
-explicit `-backend-config=<gitignored file>`, keeping ambient
-`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` free for roots with a real
-`provider "aws"` block (`02-encryption/aws`, `01-iam/bootstrap/aws`) — those
-two need real AWS credentials for their own resources regardless of where
-their backend lives, and would collide with Scaleway backend credentials in
-the same env vars.
+**Follow-up, since resolved by Terragrunt (`live/`)**: `.github/actions/terraform/action.yml`
+used to only assume an AWS role for backend state R/W, and the roots with a real
+`provider "aws"` block (`02-encryption/aws`, `01-iam/bootstrap/aws`) could not
+share `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` between that provider and a
+Scaleway backend — locally this was worked around per-command with an explicit
+`-backend-config=<gitignored file>`. Now `live/root.hcl` generates every root's
+backend, and for exactly those two roots writes the Scaleway state key pair
+(`SCALEWAY_STATE_ACCESS_KEY`/`_SECRET_KEY`, the names CI already uses) into it
+explicitly, leaving `AWS_*` to the AWS provider (checked locally: the state is
+read with `AWS_*` unset; no workflow applies those two roots yet, so the CI side
+of it has not run). The action runs Terragrunt units (`unit` input). The
+historical notes below describe the migration as it
+was done, with `-backend-config` and per-root `backend` blocks.
 
 **The rehearsal's bucket is intentionally still here.** `state_buckets["scratch"]`
 below, and the live `id-terraform-state-99-scratch-migration-test` bucket it
@@ -200,9 +203,12 @@ structurally impossible — a `backend` block can only take literal values or
 read the fixed `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` env var names
 (same hard constraint noted in "Backend keys are decoupled from paths" in
 the root `CLAUDE.md` re: `endpoints.s3` — no variables, no data sources,
-full stop). So **every `tofu init`/`plan`/`apply` run locally against a
-Scaleway-hosted bucket — for every root in this repo, not just this one —
-needs those two exact env vars set to your Scaleway key first**:
+full stop; Terragrunt's `live/root.hcl` now generates the block but is bound by
+the same limit). So **every `tofu`/`terragrunt` `init`/`plan`/`apply` run locally
+against a Scaleway-hosted bucket — for every root in this repo, not just this one
+(the two roots with a real `provider "aws"` take `SCALEWAY_STATE_ACCESS_KEY`/
+`_SECRET_KEY` instead, see `live/root.hcl`) — needs those two exact env vars set
+to your Scaleway key first**:
 
 ```bash
 export AWS_ACCESS_KEY_ID=$(scw config get access-key)

@@ -75,12 +75,14 @@ root exists) the first time, and by either a human (OIDC) or Crossplane
 
 ## Apply
 
+This root runs through Terragrunt (`live/README.md`): the backend, the state key
+and `env/11-secrets-openbao-bootstrap-dev.tfvars` are wired by the unit, so there
+is no `workspace select` and no `-var-file`. Same state object as before.
+
 ```bash
-cd 11-secrets/openbao/bootstrap
-tofu init
-tofu workspace select -or-create 11-secrets-openbao-bootstrap-dev
-tofu plan  -var-file=env/11-secrets-openbao-bootstrap-dev.tfvars    # review first
-tofu apply -var-file=env/11-secrets-openbao-bootstrap-dev.tfvars
+cd live/dev/11-secrets/openbao/bootstrap
+terragrunt plan     # review first
+terragrunt apply
 ```
 
 > Never `tofu apply`/`destroy` here without explicit approval — this is a

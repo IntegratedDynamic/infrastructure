@@ -27,21 +27,49 @@ them. Skipping this fails with an opaque `403 Forbidden` on `ListObjectsV2`
 that looks identical whether credentials are missing, wrong, or real
 (non-Scaleway) AWS credentials are ambient instead.
 
-## Terragrunt (`live/`) — migration in progress
+## Terragrunt (`live/`)
 
-Roots are being moved, one at a time, under Terragrunt (`live/<env>/<root path>/`,
-see `live/README.md`): it generates the s3 backend (no more per-root
-`backend "s3"` block), picks the root's own `env/<workspace>.tfvars`, and runs
-the **default** workspace with `key` set to the former workspace's full state
-path — the same state object, no migration. **A migrated root is run with
-`terragrunt` from its `live/` unit, not bare `tofu`** (bare `tofu` would silently
-use an empty local state). Migrated so far: `03-storage/scaleway` (the spike).
-Every other root still uses the workspace flow described below. Out of scope by
-design: the Crossplane-applied `*/managed` roots and `00-foundation/aws`.
+Every root except the Crossplane-applied `*/managed` ones and `00-foundation/aws`
+(other cloud, one-shot admin apply) runs through Terragrunt, one unit per root and
+environment: `live/<env>/<root path>/terragrunt.hcl` (see `live/README.md` for the
+mechanics). `live/root.hcl` generates the s3 backend (no per-root `backend "s3"`
+block any more), picks the root's own `env/<workspace>.tfvars`, and runs the
+**default** workspace with `key` set to the former workspace's full state path —
+the same state object, nothing was migrated. **Run a root with `terragrunt` from
+its `live/` unit, never bare `tofu`**: bare `tofu` would silently use an empty
+local state.
 
-A root that used `terraform.workspace` in resource names takes a
-`workspace_name` variable instead (that value is `"default"` under Terragrunt) —
-migrating one means a `plan` showing **no changes** before anything else.
+```bash
+cd live/dev/03-storage/scaleway && terragrunt plan      # one unit
+cd live/dev && terragrunt run --all plan                # every foundation root, in dependency order
+```
+
+- Environments: `dev` (foundations, one unit per root), `staging` (the live
+  homelab cluster), `ephemeral` (per-PR cluster, state `10-cluster-scaleway-pr-<PR_NUMBER>`),
+  `github-pr` (the kind cluster, local state). The state key is still
+  `<root path>/<root path flattened>-<env>/terraform.tfstate`.
+- The paid or Docker-bound units (staging, ephemeral, kind) are **excluded from
+  `run --all`** unless `--feature=cluster=true`; run them from their own directory.
+- `run --all apply` auto-approves by default; `mise.toml` sets
+  `TG_NO_AUTO_APPROVE=true` so it asks per unit. Plan first.
+- A saved plan works: `terragrunt plan -out=$PWD/tfplan` then `terragrunt apply $PWD/tfplan`
+  (use an absolute path: Terragrunt runs OpenTofu in its cache directory).
+- A root that used `terraform.workspace` in resource names takes a `workspace_name`
+  variable instead (that value is `"default"` under Terragrunt): `01-iam/workload/scaleway`,
+  `02-encryption/aws`, `03-storage/scaleway`. A change there needs a `plan`
+  showing **no changes** before anything else — a different name renames live IAM resources.
+- `01-iam/bootstrap/aws` and `02-encryption/aws` have a real `provider "aws"`, which
+  would collide with the Scaleway state key on `AWS_ACCESS_KEY_ID`: for those two,
+  `root.hcl` writes `SCALEWAY_STATE_ACCESS_KEY`/`_SECRET_KEY` into the generated
+  backend instead. The state is read correctly with `AWS_*` unset (checked
+  locally); their `plan` needs your AWS SSO session, which was not available when
+  this was built, so it has not been run.
+- `10-cluster/*` keep their own `terraform_remote_state` reads (the outputs are
+  `sensitive`; a Terragrunt `dependency` hand-over would drop that); `dependencies`
+  only orders them after `03-storage`, `02-encryption`, `01-iam/workload`.
+- Terragrunt copies the whole repo into each unit's `.terragrunt-cache`; an
+  `after_hook` prunes the gitignored secrets from that copy (WireGuard keys, other
+  roots' `local.auto.tfvars`), keeping only the root's own `local.auto.tfvars`.
 
 ## Live debugging via Tailscale SSH
 
@@ -150,7 +178,9 @@ How, with the override mechanism `10-cluster/scaleway` already has:
 2. **Point ArgoCD at the branch.**
    - `gitops` change: set `gitops_revision = "<branch>"` in
      `10-cluster/scaleway/local.auto.tfvars` (gitignored — keep the old values
-     as commented lines). Edit that file rather than passing `-var`: a saved
+     as commented lines; in a `git worktree` it does not exist, copy it over).
+     Terragrunt copies it into its cache with the rest of that root. Edit that
+     file rather than passing `-var`: a saved
      plan made with `-var gitops_revision=…` fails at `apply` with "Mismatch
      between input and plan variable value" because `local.auto.tfvars` still
      says `main`.
@@ -166,11 +196,13 @@ How, with the override mechanism `10-cluster/scaleway` already has:
      unpushed branch silently falls back to `main`) when you run the plan, and
      keep it checked out until the apply is done (use a `git worktree` for any
      unrelated edit).
-3. `tofu plan -var-file=env/10-cluster-scaleway-staging.tfvars -out=…`, then
+3. `cd live/staging/10-cluster/scaleway && terragrunt plan -out=$PWD/tfplan`
+   (`-lock=false` for a look that must not block someone else's apply — the
+   cluster is shared with other sessions), then
    confirm it only changes **revisions** plus the throwaway `wait_*` Jobs
    (`7 to add, 13–14 to change, 7 to destroy` is the normal shape of a
    repoint). Anything touching the cluster, node pool or LB is not a repoint.
-4. `tofu apply <planfile>`, in the background. When the domains are healthy the
+4. `terragrunt apply $PWD/tfplan`, in the background. When the domains are healthy the
    gate Jobs finish in about a minute; a long `wait_all` means some Application
    is genuinely not Healthy — look at it, don't wait it out.
 5. **Verify from the real resource**, not from aggregate status: the pod's
@@ -272,6 +304,12 @@ admin creds), `workload/` = admin-applied identities that aren't trust anchors
 (scoped credentials for a specific in-cluster workload, e.g. external-dns).
 
 ```
+live/                          # Terragrunt wiring ("Terragrunt (live/)" above):
+                               #   live/<env>/<root path>/terragrunt.hcl, one unit
+                               #   per root and environment, plus root.hcl. Holds
+                               #   no resources — the code stays in the numbered
+                               #   domains below (their paths are pinned by the
+                               #   Crossplane Workspaces' ?ref=, never move them).
 modules/
   scaleway-machine-identity/   # shared: IAM application + map of policies +
                                #   rotating API key. Used by every Scaleway
@@ -812,7 +850,7 @@ once the headscale path has been seen working on `main`.
 
 **Internal vs external secrets (two lifecycles, one layout `kv/apps/<app>/...`)**: an *external* secret (someone must supply the value: a Slack token, a GitHub App key...) lives in `kv/apps/<app>/credentials`, owned by Terraform as described here — a human seed apply when one is first introduced is expected and unavoidable. An *internal* secret (a purely random string nobody outside the cluster needs) lives in `kv/apps/<app>/eso-generated` and is generated in-cluster by ESO, in the consumer's own chart: `Password` generators -> local Secret -> `PushSecret` (`updatePolicy: IfNotExists`, whole Secret in one object) -> OpenBao -> `ExternalSecret`. No Terraform apply or Crossplane Workspace sits on its path, which removes the chicken-and-egg (a Workspace downstream of the secrets gate cannot create a secret that gate waits for). Terraform never declares an object named `eso-generated`. The `eso-generate` policy (`11-secrets/openbao/managed`) scopes ESO to exactly `kv/{data,metadata}/apps/+/eso-generated`; see its comment for why it cannot be create-only (overwrite protection is the PushSecret's `IfNotExists`) and why it repeats `read` (Vault applies only the most specific matching rule). Reference implementation: `gitops` `services/platform/authentik/secret`. Existing random secrets in `11-secrets/openbao/managed` migrate opportunistically, not in bulk. The goal is that a **fresh cluster is reproducible from git with no manual step**. A secret that can't be generated (issued by a third party) still gets its `vault_kv_secret_v2` resource there, fed through a `sensitive` variable, like `secrets_sync_github_eso_private_key`; secrets Terraform can mint itself use `random_password`. If delivering such a value to the Crossplane-applied Workspace is the hard part, solve that (it is the real work) rather than falling back to a manual write. Applying that root is itself done through Crossplane (the unattended `openbao-managed` Workspace), the convenient path — prefer it to a local `tofu apply`.
 
-**OpenTofu workspaces**: a root that runs through CI declares its workspace variables in an `env/` folder — one `env/<name>.tfvars` per workspace. The **filename (without `.tfvars`) is the OpenTofu workspace name** (so state lands at `<workspace_key_prefix>/<name>/<key>`, isolated per root) and the **file contents are that workspace's variable values**. Name it `<root-path-flattened-with-hyphens>-<env>` (e.g. `11-secrets-openbao-bootstrap-dev`) — see "Backend keys are decoupled from paths" above for the full convention and why a rename needs a real state migration, not just a file rename. The reusable **composite action `.github/actions/terraform`** takes `root` + `tfvars-file` + `command` (`plan`/`apply`/`destroy`) + `aws-role-arn` (all non-secret inputs) and runs `workspace select <name>` + the command `-var-file=env/<name>.tfvars`, after minting an Infisical OIDC token (skippable) and assuming the AWS role via OIDC. The action takes **no secret inputs**: provider credentials (`SCW_*`, `INFISICAL_MACHINE_IDENTITY_ID`) are read from the job env. The calling **workflow** owns the trigger→command mapping (push → apply, schedule → destroy, else plan), the `concurrency` guard, and the `environment` that scopes credentials — Scaleway keys live in the `scaleway` environment and are exposed to the action as job `env:` (never as plain inputs). The repo must be checked out before calling the action (it is a local action). This replaces the old reliance on a local, gitignored `.terraform/environment` (invisible to CI — a `default`-workspace run collides on the state key).
+**OpenTofu workspaces**: a root that runs through CI declares its workspace variables in an `env/` folder — one `env/<name>.tfvars` per workspace. The **filename (without `.tfvars`) is the former OpenTofu workspace name** — now the middle segment of the state key `<root path>/<name>/terraform.tfstate`, isolated per root, that Terragrunt (`live/`, see above) points the default workspace at — and the **file contents are that environment's variable values**. Name it `<root-path-flattened-with-hyphens>-<env>` (e.g. `11-secrets-openbao-bootstrap-dev`) — see "Backend keys are decoupled from paths" above for the full convention and why a rename needs a real state migration, not just a file rename. The reusable **composite action `.github/actions/terraform`** takes `unit` (a Terragrunt unit under `live/`) + `command` (`plan`/`apply`/`destroy`/`hard-destroy`) + `state-backend` + `aws-role-arn` (all non-secret inputs) and runs `terragrunt` in that unit (which supplies the backend, the state key and the `-var-file`; there is no `workspace select` any more), after minting an Infisical OIDC token (skippable) and assuming the AWS role via OIDC. The action takes **no secret inputs**: provider credentials (`SCW_*`, `INFISICAL_MACHINE_IDENTITY_ID`) are read from the job env. The calling **workflow** owns the trigger→command mapping (push → apply, schedule → destroy, else plan), the `concurrency` guard, and the `environment` that scopes credentials — Scaleway keys live in the `scaleway` environment and are exposed to the action as job `env:` (never as plain inputs). The repo must be checked out before calling the action (it is a local action). This replaces the old reliance on a local, gitignored `.terraform/environment` (invisible to CI — a `default`-workspace run collides on the state key); under Terragrunt the environment is the unit's path, so nothing is hidden in local state. Per-run values a unit reads with `get_env()` (`PR_NUMBER`, `HEAD_REF`, see `live/ephemeral`) are set in the job `env:` like the credentials.
 
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
