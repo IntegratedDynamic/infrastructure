@@ -1,43 +1,23 @@
 name: Debug via Tailscale
 description: >
-  Join this runner to the tailnet under tag:ci-debug with Tailscale SSH
-  enabled, so both a human and Claude can `ssh runner@<hostname>` straight into it
-  -- no shared tmux pane, no relay session ID to paste, real SSH exec
-  semantics for non-interactive commands. Drop this step into any workflow
-  that needs live debugging. See the root CLAUDE.md's "Live debugging via
-  Tailscale SSH" section and 13-tailscale/bootstrap/README.md for the full
-  picture -- this replaced an earlier upterm-based approach entirely.
+  Join this runner to the platform's headscale network under tag:ci-debug with
+  Tailscale SSH enabled, so both a human and Claude can `ssh runner@<hostname>`
+  straight into it. Drop this step into any workflow that needs live debugging.
+  See the root CLAUDE.md's "Live debugging via Tailscale SSH" section.
 
-  Authenticates via OIDC workload identity federation, not a static
-  secret: the calling job presents its own GitHub Actions OIDC token
-  directly to Tailscale (validated against the trust configured in
-  13-tailscale/bootstrap's tailscale_federated_identity.ci_debug), so
-  there's no authkey/OAuth-secret to store as a GitHub secret at all. The
-  calling job MUST set `permissions: id-token: write` (GitHub refuses to
-  mint the token otherwise -- composite actions can't grant this
-  themselves, only the workflow that calls them can).
+  No stored secret: the job presents its own GitHub Actions OIDC token to
+  headscale-sts (gitops repo, services/platform/headscale), which returns a
+  single-use, ephemeral, 5-minute preauth key. The calling job MUST set
+  `permissions: id-token: write` (a composite action cannot grant it itself).
+
+  headscale runs in the homelab cluster: while the cluster is down, this step
+  only warns and the job carries on without live debugging.
 
 inputs:
-  oauth-client-id:
-    description: >
-      The federated identity's client ID (13-tailscale/bootstrap's
-      federated_identities["ci_debug"].client_id output). Not sensitive on its own, but
-      delivered as the TS_OAUTH_CLIENT_ID GitHub secret (synced from OpenBao
-      via ESO -- see 13-tailscale/bootstrap/README.md); pass it as
-      secrets.TS_OAUTH_CLIENT_ID from the calling workflow. NOTE: any GitHub
-      Actions expression syntax written in THIS file's own description
-      strings gets parsed by GitHub's template engine too (confirmed live --
-      contexts like `vars` aren't valid inside a composite action's own
-      YAML, only in the calling workflow), so this text deliberately spells
-      the name out instead of wrapping it in that syntax.
-    required: true
-  audience:
-    description: >
-      Must match the federated identity's own `audience` (13-tailscale/bootstrap's
-      federated_identities["ci_debug"].audience output). Not sensitive on its own, but
-      delivered as the TS_AUDIENCE GitHub secret (synced from OpenBao via
-      ESO); pass it as secrets.TS_AUDIENCE from the calling workflow.
-    required: true
+  login-server:
+    description: URL of the headscale server.
+    required: false
+    default: https://headscale.staging.scalepack.fr
   hostname:
     description: >
       Tailscale hostname for this node (must be a valid DNS label: 1-63
@@ -57,16 +37,40 @@ inputs:
 runs:
   using: composite
   steps:
-    # Ephemeral: the node disappears from the tailnet on its own once the
-    # runner disconnects, no manual cleanup. preauthorized-by-scope (the
-    # federated identity's own auth_keys scope) means no admin-console
-    # approval click per run either.
+    - name: Get a headscale preauth key
+      id: authkey
+      shell: bash
+      env:
+        LOGIN_SERVER: ${{ inputs.login-server }}
+      run: |
+        set -euo pipefail
+        if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
+          echo "::error::no OIDC token available: the job needs 'permissions: id-token: write'"
+          exit 1
+        fi
+        if ! curl -fsS --max-time 10 --retry 2 "$LOGIN_SERVER/sts/healthz" >/dev/null; then
+          echo "::warning::headscale is unreachable at $LOGIN_SERVER (cluster down?): no live debugging for this run"
+          exit 0
+        fi
+        token=$(curl -fsS --max-time 30 -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+          "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=$LOGIN_SERVER/sts" | jq -er .value)
+        echo "::add-mask::$token"
+        # Not retried: a token mints one key, a second attempt is refused.
+        key=$(curl --fail-with-body -sS --max-time 30 -X POST \
+          -H "Authorization: Bearer $token" "$LOGIN_SERVER/sts/authkey") || {
+          echo "::error::headscale-sts refused to mint a key: $key"
+          exit 1
+        }
+        echo "::add-mask::$key"
+        echo "key=$key" >>"$GITHUB_OUTPUT"
+
+    # The node is ephemeral and already tagged by the key: headscale removes it
+    # once the runner disconnects.
     - uses: tailscale/github-action@780049a30b6ff5c378a9e7b389d15ece7a204888 # v4.1.3
+      if: steps.authkey.outputs.key != ''
       with:
-        oauth-client-id: ${{ inputs.oauth-client-id }}
-        audience: ${{ inputs.audience }}
-        tags: tag:ci-debug
+        authkey: ${{ steps.authkey.outputs.key }}
         hostname: ${{ inputs.hostname }}
-        # Enables Tailscale SSH on this node -- genuine SSH protocol, no
-        # ForceCommand trick: `ssh <hostname> '<command>'` just works.
-        args: --ssh
+        # --ssh: Tailscale SSH, genuine SSH protocol:
+        # `ssh runner@<hostname> '<command>'` just works.
+        args: --ssh --login-server=${{ inputs.login-server }}

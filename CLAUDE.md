@@ -31,7 +31,8 @@ that looks identical whether credentials are missing, wrong, or real
 
 Any workflow that drops in the `.github/actions/debug-tailscale` step
 (`.github/workflows/kind.yml`/infra#110 is the first consumer) joins the
-runner to this homelab's tailnet under `tag:ci-debug`, with Tailscale SSH
+runner to this homelab's headscale network (see "headscale" below) under
+`tag:ci-debug`, with Tailscale SSH
 enabled (`tailscale up --ssh`). Both a human and Claude then reach it with
 plain, unmodified `ssh` — no relay session ID to paste, no shared terminal,
 no custom protocol.
@@ -80,17 +81,21 @@ ssh runner@<job>-<run_id>               # interactive shell
 # or: tailscale ssh runner@<hostname>
 ```
 
-Requires `tailscale` installed and logged into the same tailnet on the
-connecting machine (one-time local setup, not part of this repo).
+Requires `tailscale` installed and logged into headscale on the connecting
+machine (one-time: `tailscale login --login-server
+https://headscale.staging.scalepack.fr`; `tailscale switch` goes back to
+another profile).
 
-**Provisioning** (the tailnet side — ACL + an OIDC workload identity
-federation trust, so GitHub Actions authenticates with its own per-run
-OIDC token instead of any stored secret): `13-tailscale/bootstrap/`, a
-`01-iam/bootstrap/`-style trust anchor kept as its own top-level domain —
-see that root's README for the full setup (bootstrap API key, first-apply
-ACL-overwrite warning) and its section below. The calling workflow's job
-needs `permissions: id-token: write` for the federation to work at all —
-`kind.yml`'s does.
+**Authentication**: no stored secret. The job presents its own GitHub OIDC
+token to `headscale-sts` (second container of the headscale pod, gitops
+`services/platform/headscale`), which returns a single-use, ephemeral,
+5-minute `tag:ci-debug` preauth key to this repository's jobs only. The calling
+workflow's job needs `permissions: id-token: write` — `kind.yml`'s does. Access
+rules (members → CI runners, never back) are the headscale policy in the same
+gitops directory.
+
+**Only while the cluster is up**: headscale runs in it. Outside those hours the
+step warns and the job goes on without live debugging.
 
 ## Live-cluster testing discipline (`10-cluster/scaleway`)
 
@@ -705,7 +710,7 @@ Scaleway tool buckets + their scoped identities, each with its own bucket AND it
 
 ### `13-tailscale/bootstrap/`
 
-The Tailscale-side trust anchor for live GitHub Actions debugging (infra#110, see "Live debugging via Tailscale SSH" above) — a `tailscale_acl` with TWO grants for `tag:ci-debug` (confirmed live 2026-09-17 that both are required: the `ssh` block alone governs SSH auth but grants no network reachability, so a general `acls` entry -- `autogroup:member` → `tag:ci-debug:*` -- is what actually gets a tag:ci-debug node into a member device's netmap at all; without it the node doesn't even appear as a peer despite joining successfully) plus a `tailscale_federated_identity` trusting GitHub Actions' own OIDC tokens directly (`issuer = token.actions.githubusercontent.com`, `subject = repo:IntegratedDynamic/infrastructure:*`, mirroring this repo's existing AWS OIDC trust scope) — `.github/actions/debug-tailscale` presents the calling job's own token, no static secret ever stored in GitHub. A `01-iam/bootstrap/`-style trust anchor in spirit (human-applied, rare changes, needs a manually-generated Tailscale API key — same chicken-and-egg every other bootstrap root has) but kept as its own top-level domain since it isn't a Scaleway identity; `13-tailscale/workload/` is a natural place for future scoped per-project Tailscale identities without a restructure. `tailscale_acl`'s `overwrite_existing_content = true` means an apply **replaces** the tailnet's whole policy file, not merges — see the root's own README before ever running `apply` here.
+**Superseded by headscale** (see "headscale" above), pending removal. The Tailscale-side trust anchor for live GitHub Actions debugging (infra#110, see "Live debugging via Tailscale SSH" above) — a `tailscale_acl` with TWO grants for `tag:ci-debug` (confirmed live 2026-09-17 that both are required: the `ssh` block alone governs SSH auth but grants no network reachability, so a general `acls` entry -- `autogroup:member` → `tag:ci-debug:*` -- is what actually gets a tag:ci-debug node into a member device's netmap at all; without it the node doesn't even appear as a peer despite joining successfully) plus a `tailscale_federated_identity` trusting GitHub Actions' own OIDC tokens directly (`issuer = token.actions.githubusercontent.com`, `subject = repo:IntegratedDynamic/infrastructure:*`, mirroring this repo's existing AWS OIDC trust scope) — `.github/actions/debug-tailscale` presents the calling job's own token, no static secret ever stored in GitHub. A `01-iam/bootstrap/`-style trust anchor in spirit (human-applied, rare changes, needs a manually-generated Tailscale API key — same chicken-and-egg every other bootstrap root has) but kept as its own top-level domain since it isn't a Scaleway identity; `13-tailscale/workload/` is a natural place for future scoped per-project Tailscale identities without a restructure. `tailscale_acl`'s `overwrite_existing_content = true` means an apply **replaces** the tailnet's whole policy file, not merges — see the root's own README before ever running `apply` here.
 
 ### `14-sso/managed/`
 
@@ -763,10 +768,12 @@ hold until a client restarts. Its database and keys live only on its volume,
 snapshotted every 4 hours (`headscale-data`) and restored on a fresh cluster by
 `headscale-restore`, same mechanism as authentik above.
 
-**Migration state**: CI live debugging (the section above) still uses Tailscale
-SaaS (`13-tailscale/bootstrap`). headscale has no workload identity federation
-(upstream issue juanfont/headscale#3303), so moving it is a separate step; do not
-remove `13-tailscale/` or the `TS_*` secrets before it is done.
+**CI**: `.github/actions/debug-tailscale` joins this network through
+`headscale-sts`, a third-party stopgap until headscale does workload identity
+federation itself (juanfont/headscale#3303); remove it then.
+`13-tailscale/bootstrap` and the `TS_*` secrets are the previous Tailscale SaaS
+setup: no workflow of this branch uses them any more, and they can be removed
+once the headscale path has been seen working on `main`.
 
 ## Conventions
 

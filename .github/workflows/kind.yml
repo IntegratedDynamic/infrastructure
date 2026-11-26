@@ -39,9 +39,9 @@ concurrency:
 
 permissions:
   contents: read
-  # For .github/actions/debug-tailscale's OIDC workload identity
-  # federation -- lets the job mint its own short-lived GitHub OIDC token
-  # to present to Tailscale directly, no static secret needed.
+  # For .github/actions/debug-tailscale -- lets the job mint its own
+  # short-lived GitHub OIDC token and trade it for a headscale preauth key,
+  # no static secret needed.
   id-token: write
 
 jobs:
@@ -92,20 +92,17 @@ jobs:
       # (no ForceCommand trick -- `ssh <hostname> '<command>'` just works,
       # same as an interactive `ssh <hostname>`), the node joins under a
       # predictable hostname (`<job>-<run_id>`) so no session-ID relay
-      # is needed, and OIDC workload identity federation means no static
-      # secret at all -- this job's own `id-token: write` permission
-      # (above) is what lets it authenticate. See CLAUDE.md's "Live
-      # debugging via Tailscale SSH" section and
-      # 13-tailscale/bootstrap/README.md for the full picture.
+      # is needed, and there is no static secret at all -- this job's own
+      # `id-token: write` permission (above) is what lets it authenticate.
+      # The network is the platform's own headscale: if the cluster is down,
+      # the step only warns. See CLAUDE.md's "Live debugging via Tailscale
+      # SSH" section.
       #
       # Only runs when the PR carries the `tailscale` label -- opt-in, not
       # every PR needs live debugging, and every run leaves an ephemeral
       # node briefly joined to the tailnet.
       - uses: ./.github/actions/debug-tailscale
         if: contains(github.event.pull_request.labels.*.name, 'tailscale')
-        with:
-          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
-          audience: ${{ secrets.TS_AUDIENCE }}
 
       - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
         with:
