@@ -48,6 +48,16 @@
 #    never both true at once). This tier's whole point is validating
 #    platform-apps's own DAG, not gitops's separate local-only vendor path.
 #
+# keda-apps IS kept, since 2026-11-26 (it was missing, and this tier was red
+# because of it): gitops main routes grafana and argocd-server through the KEDA
+# HTTP add-on (charts/cold-start: HTTPScaledObject/InterceptorRoute, plus a
+# backendRef to the interceptor Service in the `keda` namespace). Without that
+# domain those CRDs and that Service do not exist: `grafana` and
+# `argocd-config-gateway` fail their sync ("one or more synchronization tasks
+# are not valid") and both *-gateway routes stay Degraded. The tier only went
+# red when its gitops pin to epic/kind-ci-fast-tier (which predates cold-start)
+# was dropped, so nothing showed it earlier. Same domain as the staging one.
+#
 # dex-apps / argocd-config-apps / grafana-apps / argo-workflows-apps ARE
 # kept -- see main.tf's own header comment for why OpenBao here restores a
 # REAL production snapshot instead of a fresh throwaway instance: it's
@@ -104,6 +114,11 @@ domains = {
     needs_networking_controllers = true
     needs_secrets                = true
     needs_backups                = true
+    # argocd-config-gateway renders the cold-start HTTPScaledObject/
+    # InterceptorRoute (CRDs from keda-apps' HTTP Add-on). Gated here so the
+    # order is deterministic; the staging graph leaves it to ArgoCD's sync
+    # retries.
+    needs_keda = true
   }
 
   grafana-apps = {
@@ -113,5 +128,18 @@ domains = {
     ]
     needs_secrets = true
     needs_backups = true
+    # No needs_keda here although grafana renders the cold-start
+    # HTTPScaledObject: grafana-apps is itself one of the gate domains, and a
+    # gate may only set needs_crds (platform-apps-dag/main.tf), so the flag
+    # would be silently ignored. Same as the staging graph: ArgoCD's own sync
+    # retries cover the CRDs arriving from keda-apps.
+  }
+
+  # KEDA + HTTP Add-on. Its chart generates ServiceMonitors, so the
+  # monitoring.coreos.com CRDs from crds-apps must be Established first (same
+  # as the staging graph). Needs no Secret.
+  keda-apps = {
+    value_files = ["values-keda.yaml"]
+    needs_crds  = true
   }
 }
