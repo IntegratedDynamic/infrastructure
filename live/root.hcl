@@ -23,14 +23,22 @@
 # `terraform.workspace` used to be — it is "default" under Terragrunt).
 
 locals {
-  # "dev/03-storage/scaleway" -> env "dev", root path "03-storage/scaleway"
+  # "dev/03-storage/scaleway" -> env dir "dev", root path "03-storage/scaleway"
   parts     = split("/", path_relative_to_include())
-  env       = local.parts[0]
+  env_dir   = local.parts[0]
   root_path = join("/", slice(local.parts, 1, length(local.parts)))
   slug      = replace(local.root_path, "/", "-") # "03-storage-scaleway"
 
+  # live/<env dir>/env.hcl is optional. `locals { name = "pr-123" }` renames the
+  # environment in the workspace/state key (the ephemeral clusters: one state
+  # per PR, same unit); `tfvars_env = "staging"` reads another environment's
+  # env/*.tfvars as the base values.
+  env_cfg = read_terragrunt_config("${get_parent_terragrunt_dir()}/${local.env_dir}/env.hcl", { locals = {} })
+  env     = lookup(local.env_cfg.locals, "name", local.env_dir)
+
   # The workspace name every root used until now: <path flattened>-<env>.
   workspace = "${local.slug}-${local.env}"
+  tfvars    = "${local.slug}-${lookup(local.env_cfg.locals, "tfvars_env", local.env)}.tfvars"
 
   # State buckets are named id-terraform-state-<path flattened> (provisioned by
   # 00-foundation/scaleway's var.state_buckets, not by Terragrunt). A bucket
@@ -40,6 +48,22 @@ locals {
     "11-secrets/openbao/bootstrap" = "id-terraform-state-05-secrets-openbao-bootstrap"
   }
   bucket = lookup(local.bucket_overrides, local.root_path, "id-terraform-state-${local.slug}")
+
+  # The s3 backend only ever reads the literal AWS_ACCESS_KEY_ID /
+  # AWS_SECRET_ACCESS_KEY env vars, which for a Scaleway-hosted state hold the
+  # Scaleway key pair (CLAUDE.md "Setup"). A root with a REAL `provider "aws"`
+  # reads those same two names for its own AWS calls — collision (the "known
+  # follow-up" in CLAUDE.md / 00-foundation/scaleway/README.md). For those
+  # roots the state key pair is written into the generated backend.tf instead,
+  # from SCALEWAY_STATE_ACCESS_KEY / SCALEWAY_STATE_SECRET_KEY (the names CI
+  # already uses). It lands in .terragrunt-cache/ (gitignored) and in that
+  # cache's .terraform/ — the same exposure as the gitignored -backend-config
+  # file this replaces. AWS_* stays free for the AWS provider (aws sso login).
+  explicit_state_credentials_roots = ["01-iam/bootstrap/aws", "02-encryption/aws"]
+  state_credentials = contains(local.explicit_state_credentials_roots, local.root_path) ? {
+    access_key = get_env("SCALEWAY_STATE_ACCESS_KEY")
+    secret_key = get_env("SCALEWAY_STATE_SECRET_KEY")
+  } : {}
 }
 
 terraform {
@@ -59,7 +83,7 @@ terraform {
   # truth while both the classic workflow and Terragrunt exist.
   extra_arguments "env_tfvars" {
     commands           = get_terraform_commands_that_need_vars()
-    required_var_files = ["${get_repo_root()}/${local.root_path}/env/${local.workspace}.tfvars"]
+    required_var_files = ["${get_repo_root()}/${local.root_path}/env/${local.tfvars}"]
   }
 }
 
@@ -76,7 +100,7 @@ remote_state {
     if_exists = "overwrite_terragrunt"
   }
 
-  config = {
+  config = merge({
     bucket  = local.bucket
     key     = "${local.root_path}/${local.workspace}/terraform.tfstate"
     region  = "fr-par"
@@ -93,5 +117,5 @@ remote_state {
     endpoints = {
       s3 = "https://s3.fr-par.scw.cloud"
     }
-  }
+  }, local.state_credentials)
 }
