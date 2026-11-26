@@ -745,6 +745,29 @@ see its README: what it checks, the restore drill), also used for Firefly III's 
 volumes (schedule `firefly-data`, restore entry in the homelab-apps bootstrap), which
 has no domain here: Firefly is deployed after the whole platform, Velero included.
 
+## headscale (self-hosted Tailscale control server)
+
+The replacement for Tailscale's SaaS control plane, at
+`https://headscale.staging.scalepack.fr`; clients stay the official `tailscale`
+ones. A platform app **not managed by Terraform**: charts, config and access policy
+live in the `gitops` repo (`services/platform/headscale`, see its README for
+joining a device, administration and upgrades). This repo only deploys it
+(`headscale-apps` domain, `values-headscale.yaml`; route in
+`networking-resources-apps`) and declares its authentik OIDC client
+(`14-sso/managed`, public PKCE client, `platform-admins` only). Relays are
+Tailscale's public DERP servers.
+
+Accepted trade-off: it is **down whenever the cluster is** (office-hours
+schedule): no new registration, login or network update then; established tunnels
+hold until a client restarts. Its database and keys live only on its volume,
+snapshotted every 4 hours (`headscale-data`) and restored on a fresh cluster by
+`headscale-restore`, same mechanism as authentik above.
+
+**Migration state**: CI live debugging (the section above) still uses Tailscale
+SaaS (`13-tailscale/bootstrap`). headscale has no workload identity federation
+(upstream issue juanfont/headscale#3303), so moving it is a separate step; do not
+remove `13-tailscale/` or the `TS_*` secrets before it is done.
+
 ## Conventions
 
 **Branches**: `<type>/<description>` — lowercase, hyphens only. Types: `feature/`, `bugfix/`, `hotfix/`, `ci/`, `chore/`.

@@ -46,7 +46,9 @@ other and leave a single provider attached (reproduced on kind).
 - `oidc.tf`: the OIDC providers of the platform's own apps (`oidc_clients`).
   ArgoCD is ONE public PKCE client for the UI and `argocd login --sso`:
   authentik's issuer is per application, so a separate CLI client issues
-  tokens argocd-server rejects.
+  tokens argocd-server rejects. headscale (the self-hosted Tailscale control
+  server) is a public PKCE client too, restricted to `platform-admins`: who is in
+  that group decides who may log a device into the private network.
 
 ## Not here yet
 

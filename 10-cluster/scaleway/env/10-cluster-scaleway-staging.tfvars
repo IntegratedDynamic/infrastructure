@@ -155,6 +155,16 @@ domains = {
     needs_backups = true
   }
 
+  # headscale: the self-hosted Tailscale control server. needs_backups: its first
+  # wave restores the data volume before headscale would create an empty one.
+  # needs_crds: ServiceMonitor. It also needs authentik to start, which is left
+  # to restarts on purpose (see values-headscale.yaml).
+  headscale-apps = {
+    value_files   = ["values-headscale.yaml"]
+    needs_crds    = true
+    needs_backups = true
+  }
+
   # ── grafana, extracted from gitops repo (infra#84 follow-up) ──
   #
   # (dex-apps and argocd-config-apps used to sit next to it and are gone with

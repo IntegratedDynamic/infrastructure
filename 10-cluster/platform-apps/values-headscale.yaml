@@ -1,0 +1,22 @@
+# headscale-apps -- headscale, the self-hosted Tailscale control server. All of
+# it lives in the gitops repo (services/platform/headscale, see its README);
+# nothing about it is Terraform-managed except its authentik OIDC client
+# (14-sso/managed).
+#
+#  - wave 0 headscale-restore: puts the data volume (database + server keys)
+#    back from the latest Velero snapshot BEFORE headscale's StatefulSet would
+#    create an empty one. Same reasoning as authentik-restore (values-sso.yaml):
+#    here and not in backups-apps, so that a failing restore holds back only
+#    headscale. Hence the domain `needs_backups`.
+#  - wave 1 headscale: `needs_crds` for its ServiceMonitor. No Secret at all
+#    (the OIDC client is public), hence no `needs_secrets`.
+#  - headscale-gateway (HTTPRoute + upgrade policy) is in
+#    networking-resources-apps' wave 1, like every other product's route.
+#
+# SSO dependency, deliberately not gated: headscale refuses to start until
+# authentik answers for its OIDC application, which needs sso-apps, the gateway
+# and the authentik-managed Workspace (crossplane-apps). None of them depends on
+# this domain, so on a cold start the pod just restarts until they are there.
+apps:
+  - {name: headscale-restore, namespace: headscale, chartPath: services/platform/headscale/restore, valueFile: values.yaml, wave: "0"}
+  - {name: headscale, namespace: headscale, chartPath: services/platform/headscale/chart, valueFile: values.yaml, wave: "1", valueParams: [{name: hostSuffix, valueFrom: hostSuffix}, {name: letsEncryptStaging, valueFrom: letsEncryptStaging}]}

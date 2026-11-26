@@ -54,3 +54,4 @@ apps:
   - {name: authentik-gateway, namespace: authentik, chartPath: services/platform/authentik/gateway, valueFile: values.yaml, wave: "1", valueParams: [{name: hostSuffix, valueFrom: hostSuffix}]}
   - {name: crossview-gateway, namespace: crossview, chartPath: services/platform/crossview/gateway, valueFile: values.yaml, wave: "1", valueParams: [{name: hostSuffix, valueFrom: hostSuffix}]}
   - {name: openbao-gateway, namespace: openbao, chartPath: services/platform/openbao/gateway, valueFile: values-scaleway.yaml, wave: "1", valueParams: [{name: hostSuffix, valueFrom: hostSuffix}]}
+  - {name: headscale-gateway, namespace: headscale, chartPath: services/platform/headscale/gateway, valueFile: values.yaml, wave: "1", valueParams: [{name: hostSuffix, valueFrom: hostSuffix}]}
