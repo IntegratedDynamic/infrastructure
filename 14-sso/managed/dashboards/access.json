@@ -24,7 +24,7 @@
     {
       "title": "Invitations",
       "type": "link",
-      "url": "https://sso.staging.scalepack.fr/if/admin/#/core/invitations",
+      "url": "https://sso.staging.scalepack.fr/if/admin/#/flow/stages/invitations",
       "targetBlank": true,
       "icon": "external link"
     }
