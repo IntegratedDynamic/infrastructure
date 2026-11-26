@@ -221,6 +221,17 @@ jobs:
                   if op:
                       print("  operationState.phase:", op.get("phase"))
                       print("  operationState.message:", op.get("message"))
+                      # "one or more synchronization tasks are not valid" never
+                      # names the resource: the per-resource reason (missing
+                      # CRD, namespace, project restriction...) is only in
+                      # syncResult.resources.
+                      for r in op.get("syncResult", {}).get("resources", []):
+                          if r.get("status") != "Synced" or r.get("hookPhase") not in (None, "Succeeded"):
+                              print("  syncResult:", r.get("kind"), r.get("namespace", ""), r.get("name"), r.get("status"), "-", r.get("message"))
+                  for r in status.get("resources", []):
+                      h = r.get("health", {})
+                      if r.get("status") not in (None, "Synced") or (h and h.get("status") != "Healthy"):
+                          print("  resource:", r.get("kind"), r.get("namespace", ""), r.get("name"), "sync=" + str(r.get("status")), "health=" + str(h.get("status")), h.get("message", ""))
           '
           echo "::endgroup::"
 
