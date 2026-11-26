@@ -1,0 +1,57 @@
+name: Tests
+
+# Fast checks, no cloud credentials: `mise run test` runs the same locally (see
+# tests/). The cluster-level tier is kind.yml; headscale's own end-to-end tests
+# live next to its charts, in the gitops repo.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The wiring tests compare this repo with the gitops repo. A change that
+      # spans both uses the same branch name there.
+      - name: Pick the gitops ref
+        id: gitops
+        env:
+          BRANCH: ${{ github.head_ref || github.ref_name }}
+        run: |
+          set -euo pipefail
+          ref=main
+          if git ls-remote --exit-code https://github.com/IntegratedDynamic/gitops.git "refs/heads/$BRANCH" >/dev/null; then
+            ref=$BRANCH
+          fi
+          echo "ref=$ref" >>"$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: IntegratedDynamic/gitops
+          ref: ${{ steps.gitops.outputs.ref }}
+          path: gitops
+          persist-credentials: false
+
+      - uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78 # v5.3.0
+        with:
+          install_args: helm opentofu python
+
+      - name: Run the tests
+        env:
+          GITOPS_DIR: ${{ github.workspace }}/gitops
+        run: mise run test

@@ -42,27 +42,7 @@ runs:
       shell: bash
       env:
         LOGIN_SERVER: ${{ inputs.login-server }}
-      run: |
-        set -euo pipefail
-        if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
-          echo "::error::no OIDC token available: the job needs 'permissions: id-token: write'"
-          exit 1
-        fi
-        if ! curl -fsS --max-time 10 --retry 2 "$LOGIN_SERVER/sts/healthz" >/dev/null; then
-          echo "::warning::headscale is unreachable at $LOGIN_SERVER (cluster down?): no live debugging for this run"
-          exit 0
-        fi
-        token=$(curl -fsS --max-time 30 -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-          "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=$LOGIN_SERVER/sts" | jq -er .value)
-        echo "::add-mask::$token"
-        # Not retried: a token mints one key, a second attempt is refused.
-        key=$(curl --fail-with-body -sS --max-time 30 -X POST \
-          -H "Authorization: Bearer $token" "$LOGIN_SERVER/sts/authkey") || {
-          echo "::error::headscale-sts refused to mint a key: $key"
-          exit 1
-        }
-        echo "::add-mask::$key"
-        echo "key=$key" >>"$GITHUB_OUTPUT"
+      run: bash "$GITHUB_ACTION_PATH/get-authkey.sh"
 
     # The node is ephemeral and already tagged by the key: headscale removes it
     # once the runner disconnects.

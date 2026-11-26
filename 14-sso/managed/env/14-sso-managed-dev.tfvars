@@ -91,7 +91,7 @@ oidc_clients = {
   # OpenBao: both the UI callback and `bao login -method=oidc`'s loopback port
   # (what the terraform-cli role uses). Admins only, as before.
   openbao = {
-    name = "OpenBao"
+    name      = "OpenBao"
     client_id = "openbao"
     redirect_uris = [
       "https://openbao.staging.scalepack.fr/ui/vault/auth/oidc/oidc/callback",

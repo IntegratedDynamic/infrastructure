@@ -39,3 +39,7 @@ terraform.rc
 .specify
 
 *.conf
+
+# Python test environments
+.venv-tests/
+__pycache__/
