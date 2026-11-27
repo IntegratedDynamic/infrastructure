@@ -6,7 +6,7 @@ root, in which environment, with which state* — never resources.
 
 Out of scope on purpose: the `*/managed` roots applied by Crossplane
 (`11-secrets/openbao/managed`, `12-monitoring/grafana/managed`,
-`14-sso/managed`) and `00-foundation/aws` (other cloud, one-shot admin apply).
+`14-sso/managed`).
 
 ## Layout
 
@@ -25,7 +25,7 @@ that path by `root.hcl`:
 
 | Derived value | Rule | Example |
 |---|---|---|
-| state bucket | `id-terraform-state-<root path, / → ->` (one temporary exception, see `root.hcl`) | `id-terraform-state-03-storage-scaleway` |
+| state bucket | `id-terraform-state-<root path, / → ->` | `id-terraform-state-03-storage-scaleway` |
 | state key | `<root path>/<workspace>/terraform.tfstate` | `03-storage/scaleway/03-storage-scaleway-dev/terraform.tfstate` |
 | legacy workspace name | `<root path flattened>-<env>` | `03-storage-scaleway-dev` |
 | variables | the root's existing `env/<workspace>.tfvars`, verbatim | `03-storage/scaleway/env/03-storage-scaleway-dev.tfvars` |

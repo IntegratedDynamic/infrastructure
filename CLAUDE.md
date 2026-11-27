@@ -10,7 +10,7 @@ mise install          # Install all tools (kubectl, opentofu, terragrunt, helm, 
 ```
 
 **Before running `tofu init`/`plan`/`apply` locally against any
-Scaleway-hosted root** (every root except `00-foundation/aws` — see
+Scaleway-hosted state** (every root — see
 `00-foundation/scaleway/README.md`'s "Cross-root reads need no manual
 credential setup" section for the full explanation):
 
@@ -29,8 +29,7 @@ that looks identical whether credentials are missing, wrong, or real
 
 ## Terragrunt (`live/`)
 
-Every root except the Crossplane-applied `*/managed` ones and `00-foundation/aws`
-(other cloud, one-shot admin apply) runs through Terragrunt, one unit per root and
+Every root except the Crossplane-applied `*/managed` ones runs through Terragrunt, one unit per root and
 environment: `live/<env>/<root path>/terragrunt.hcl` (see `live/README.md` for the
 mechanics). `live/root.hcl` generates the s3 backend (no per-root `backend "s3"`
 block any more), picks the root's own `env/<workspace>.tfvars`, and runs the
@@ -515,13 +514,13 @@ modules/
 **The dependency spine** runs forward: `00-foundation/aws` (bucket + CI's AWS
 role) → everything else, since every other root's backend USED TO point at
 that bucket. As of the AWS→Scaleway state-backend migration
-(`00-foundation/scaleway`, 2026-08-19), only `00-foundation/aws` itself still
-does — every other root's state now lives in its own dedicated bucket under
+(`00-foundation/scaleway`, 2026-08-19, `00-foundation/aws` last, with
+Terragrunt) — every root's state now lives in its own dedicated bucket under
 `00-foundation/scaleway` instead (one bucket per root, see that root's
 README for why). `terraform-state-access` (the role every workflow assumes
 by default) is scoped to exactly S3 read/write on the AWS state bucket — no
 IAM-management capability at all — but is now only load-bearing for roots
-that still live there (`00-foundation/aws` itself); its continued presence
+that still live there (none any more); its continued presence
 in `.github/actions/terraform/action.yml` as a required input is dead weight
 for every migrated root's workflow until that action is updated to pass
 Scaleway credentials instead (follow-up work, not yet done). Only one other
@@ -683,12 +682,12 @@ namespace and secret-delivery decisions), and `gitops` repo's
 
 ### `00-foundation/aws/`
 
-The shared org S3 bucket holding **every** root's remote state (built on `terraform-aws-modules/s3-bucket`: versioning, SSE, public-access block, TLS-only). Chicken-and-egg: its own state lives in the bucket it creates (one-time local-state bootstrap — see its README). Also creates the GitHub OIDC provider and the one role, `terraform-state-access` (via `terraform-aws-modules/iam`), every GitHub Actions workflow in this repo assumes — trust scoped to `repo:IntegratedDynamic/infrastructure:*`, policy scoped to exactly S3 list/get/put/delete on the state bucket, nothing else. Wired to CI via `vars.AWS_TERRAFORM_ROLE_ARN`. Applied by an admin (this root creates the very identity CI would otherwise need to apply it). See its README.
+The org S3 bucket that held **every** root's remote state before the move to Scaleway (built on `terraform-aws-modules/s3-bucket`: versioning, SSE, public-access block, TLS-only). Its own state now lives in Scaleway too (`id-terraform-state-00-foundation-aws`, moved with Terragrunt). Also creates the GitHub OIDC provider and the one role, `terraform-state-access` (via `terraform-aws-modules/iam`), every GitHub Actions workflow in this repo assumes — trust scoped to `repo:IntegratedDynamic/infrastructure:*`, policy scoped to exactly S3 list/get/put/delete on the state bucket, nothing else. Wired to CI via `vars.AWS_TERRAFORM_ROLE_ARN`. Applied by an admin (this root creates the very identity CI would otherwise need to apply it). See its README.
 
 ### `00-foundation/scaleway/`
 
 Scaleway counterpart to `00-foundation/aws/` — and, as of 2026-08-19, where
-every root's state actually lives except `00-foundation/aws` itself. Unlike
+every root's state lives. Unlike
 the AWS bucket (one bucket, many `workspace_key_prefix` values), this is
 **one dedicated Object Storage bucket per consuming root module**
 (`var.state_buckets`, a `for_each` map — add a future root's bucket by

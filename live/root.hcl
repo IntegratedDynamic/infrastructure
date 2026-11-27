@@ -17,9 +17,6 @@ locals {
 
   workspace = "${local.slug}-${local.env}"
   tfvars    = "${local.slug}-${lookup(local.env_cfg.locals, "tfvars_env", local.env)}.tfvars"
-
-  # TEMPORARY, removed once this state is copied to the bucket its path implies.
-  bucket = local.root_path == "11-secrets/openbao/bootstrap" ? "id-terraform-state-05-secrets-openbao-bootstrap" : "id-terraform-state-${local.slug}"
 }
 
 terraform {
@@ -73,7 +70,7 @@ remote_state {
   }
 
   config = {
-    bucket  = local.bucket
+    bucket  = "id-terraform-state-${local.slug}"
     key     = "${local.root_path}/${local.workspace}/terraform.tfstate"
     region  = "fr-par"
     encrypt = true
