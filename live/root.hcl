@@ -1,22 +1,24 @@
-# Shared Terragrunt config, included by every unit under live/<env>/<root path>/.
+# Shared Terragrunt config, included by every unit:
+#   live/core/<core>/<root path>/       the platform a cluster needs
+#   live/clusters/<cluster>/<root path>/
 # Everything is derived from that path; see live/README.md.
 
 locals {
-  # "dev/03-storage/scaleway" -> env dir "dev", root path "03-storage/scaleway"
-  parts     = split("/", path_relative_to_include())
-  env_dir   = local.parts[0]
-  root_path = join("/", slice(local.parts, 1, length(local.parts)))
-  root_dir  = "${get_repo_root()}/${local.root_path}"
-  slug      = replace(local.root_path, "/", "-") # "03-storage-scaleway"
+  # Example values for live/core/main/03-storage/scaleway.
+  parts     = split("/", path_relative_to_include())                # ["core", "main", "03-storage", "scaleway"]
+  group     = local.parts[0]                                        # "core" (or "clusters")
+  folder    = local.parts[1]                                        # "main" (or "staging", "ephemeral", "kind")
+  root_path = join("/", slice(local.parts, 2, length(local.parts))) # "03-storage/scaleway"
+  root_dir  = "${get_repo_root()}/${local.root_path}"               # "<repo>/03-storage/scaleway"
+  slug      = replace(local.root_path, "/", "-")                    # "03-storage-scaleway"
 
-  # live/<env dir>/env.hcl is optional: `name` renames the environment in the
-  # state key (one state per PR), `tfvars_env` borrows another environment's
-  # tfvars. Only live/ephemeral has one.
-  env_cfg = read_terragrunt_config("${get_parent_terragrunt_dir()}/${local.env_dir}/env.hcl", { locals = {} })
-  env     = lookup(local.env_cfg.locals, "name", local.env_dir)
-
-  workspace = "${local.slug}-${local.env}"
-  tfvars    = "${local.slug}-${lookup(local.env_cfg.locals, "tfvars_env", local.env)}.tfvars"
+  # A cluster's cluster.hcl, empty for a core. `name` renames the instance (one
+  # state per PR for "ephemeral"), `tfvars_env` borrows another one's tfvars.
+  cluster = read_terragrunt_config( # { locals = {} }
+    "${get_parent_terragrunt_dir()}/${local.group}/${local.folder}/cluster.hcl", { locals = {} }
+  )
+  instance = lookup(local.cluster.locals, "name", local.folder)                                   # "main" ("pr-123")
+  tfvars   = "${local.slug}-${lookup(local.cluster.locals, "tfvars_env", local.instance)}.tfvars" # "03-storage-scaleway-main.tfvars"
 }
 
 terraform {
@@ -53,7 +55,7 @@ terraform {
 # For the roots that build resource names from it (`terraform.workspace` is
 # always "default" here). Roots without that variable ignore it.
 inputs = {
-  workspace_name = local.workspace
+  workspace_name = "${local.slug}-${local.instance}" # "03-storage-scaleway-main"
 }
 
 # One bucket per root, created by 00-foundation/scaleway. The state credentials
@@ -71,7 +73,7 @@ remote_state {
 
   config = {
     bucket  = "id-terraform-state-${local.slug}"
-    key     = "${local.root_path}/${local.workspace}/terraform.tfstate"
+    key     = "${local.root_path}/${local.instance}/terraform.tfstate" # "03-storage/scaleway/main/terraform.tfstate"
     region  = "fr-par"
     encrypt = true
 

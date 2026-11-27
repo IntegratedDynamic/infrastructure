@@ -7,7 +7,7 @@ alongside it. That directory rename was a pure `git mv` — `workspace_key_prefi
 and the tfvars filename/workspace name were left untouched at the time, so it
 needed zero state migration.
 
-`workspace_key_prefix` and the workspace name (`env/04-vpn-wireguard-site-to-site-dev.tfvars`)
+`workspace_key_prefix` and the workspace name (`env/04-vpn-wireguard-site-to-site-main.tfvars`)
 now mirror this root's own path (2026-08-24 workspace-naming refacto — this
 one *did* need a real state migration, since the prefix/workspace were
 changing; see root `CLAUDE.md`'s "Backend keys are decoupled from paths").
@@ -31,7 +31,7 @@ configs already living in its own config directory, not ones Terraform
 generates here.
 
 Adding a new peer: add an entry to `var.peers` (both `variables.tf`'s
-default and `env/04-vpn-wireguard-site-to-site-dev.tfvars`), `mise run vpn-generate`,
+default and `env/04-vpn-wireguard-site-to-site-main.tfvars`), `mise run vpn-generate`,
 then do the manual hand-offs below for just that new entry.
 
 ## Manual hand-offs — hardcoded cross-repo coupling to track

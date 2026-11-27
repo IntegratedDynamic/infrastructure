@@ -76,11 +76,11 @@ root exists) the first time, and by either a human (OIDC) or Crossplane
 ## Apply
 
 This root runs through Terragrunt (`live/README.md`): the backend, the state key
-and `env/11-secrets-openbao-bootstrap-dev.tfvars` are wired by the unit, so there
+and `env/11-secrets-openbao-bootstrap-main.tfvars` are wired by the unit, so there
 is no `workspace select` and no `-var-file`. Same state object as before.
 
 ```bash
-cd live/dev/11-secrets/openbao/bootstrap
+cd live/core/main/11-secrets/openbao/bootstrap
 terragrunt plan     # review first
 terragrunt apply
 ```
