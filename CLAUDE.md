@@ -58,18 +58,16 @@ cd live/dev && terragrunt run --all plan                # every foundation root,
   variable instead (that value is `"default"` under Terragrunt): `01-iam/workload/scaleway`,
   `02-encryption/aws`, `03-storage/scaleway`. A change there needs a `plan`
   showing **no changes** before anything else — a different name renames live IAM resources.
-- `01-iam/bootstrap/aws` and `02-encryption/aws` have a real `provider "aws"`, which
-  would collide with the Scaleway state key on `AWS_ACCESS_KEY_ID`: for those two,
-  `root.hcl` writes `SCALEWAY_STATE_ACCESS_KEY`/`_SECRET_KEY` into the generated
-  backend instead. The state is read correctly with `AWS_*` unset (checked
-  locally); their `plan` needs your AWS SSO session, which was not available when
-  this was built, so it has not been run.
+- One credential rule: `AWS_ACCESS_KEY_ID`/`_SECRET_ACCESS_KEY` are the Scaleway
+  state key. Roots with a real `provider "aws"` use the CLI profile in their
+  tfvars' `aws_profile` (`aws sso login --profile infrastructure`).
 - `10-cluster/*` keep their own `terraform_remote_state` reads (the outputs are
   `sensitive`; a Terragrunt `dependency` hand-over would drop that); `dependencies`
   only orders them after `03-storage`, `02-encryption`, `01-iam/workload`.
-- Terragrunt copies the whole repo into each unit's `.terragrunt-cache`; an
-  `after_hook` prunes the gitignored secrets from that copy (WireGuard keys, other
-  roots' `local.auto.tfvars`), keeping only the root's own `local.auto.tfvars`.
+- Terragrunt copies the whole repo into each unit's `.terragrunt-cache`;
+  `exclude_from_copy` keeps secrets out, and a root's own `*.auto.tfvars` are
+  passed from the real tree. Tooling here means Terragrunt and mise options, not
+  wrapper scripts.
 
 ## Live debugging via Tailscale SSH
 

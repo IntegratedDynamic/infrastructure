@@ -38,5 +38,6 @@ terraform {
 # existed, the only CI role available (terraform-state-access) was
 # S3-state-only and couldn't touch KMS/IAM at all.
 provider "aws" {
-  region = var.aws_region
+  region  = var.aws_region
+  profile = var.aws_profile
 }

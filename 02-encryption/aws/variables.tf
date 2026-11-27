@@ -13,3 +13,9 @@ variable "workspace_name" {
   EOT
   type        = string
 }
+
+variable "aws_profile" {
+  description = "AWS CLI profile the AWS provider authenticates with. An explicit profile wins over AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY, which hold the Scaleway state key. null: the SDK's default chain (CI with an assumed role)."
+  type        = string
+  default     = null
+}

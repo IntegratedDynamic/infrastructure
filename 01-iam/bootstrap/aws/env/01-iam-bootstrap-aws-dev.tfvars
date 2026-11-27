@@ -6,3 +6,6 @@ region = "eu-west-3"
 remote_state_aws_bucket = "id-terraform-state20260612164136440800000001"
 remote_state_aws_region = "eu-west-3"
 remote_state_aws_key    = "00-foundation/aws/00-foundation-aws-dev/terraform.tfstate"
+
+# `aws sso login --profile infrastructure` first.
+aws_profile = "infrastructure"

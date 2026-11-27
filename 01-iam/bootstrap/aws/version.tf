@@ -27,5 +27,6 @@ terraform {
 #   - local: `aws sso login` -> the provider defaults to your SSO admin session
 #   - CI:    GitHub OIDC -> aws-actions/configure-aws-credentials sets env vars
 provider "aws" {
-  region = var.region
+  region  = var.region
+  profile = var.aws_profile
 }

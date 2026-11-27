@@ -14,8 +14,7 @@ name: kind — fast platform-apps DAG validation
 # cluster and its kubeconfig are both ephemeral within this one job and die
 # with the runner, so there's nothing to persist across runs and no reason to
 # want a remote backend. It is still a Terragrunt unit
-# (live/github-pr/10-cluster/kind): root.hcl gives it a local backend, so only
-# the Terragrunt install is shared with that action.
+# (live/github-pr/10-cluster/kind), which declares its own local backend.
 #
 # Not yet a required check (issue's own checklist item) -- promote once a
 # handful of green runs prove this isn't flaky. Known open risk, not yet
@@ -106,14 +105,10 @@ jobs:
       - uses: ./.github/actions/debug-tailscale
         if: contains(github.event.pull_request.labels.*.name, 'tailscale')
 
-      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+      # OpenTofu + Terragrunt, at the versions mise.toml pins.
+      - uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78 # v5.3.0
         with:
-          # Keep in sync with mise.toml [tools] opentofu version.
-          tofu_version: "1.12"
-          # Terragrunt calls `tofu` itself; the wrapper only gets in its way.
-          tofu_wrapper: false
-
-      - uses: ./.github/actions/setup-terragrunt
+          install_args: opentofu terragrunt
 
       - name: Install kind
         env:

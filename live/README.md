@@ -12,8 +12,7 @@ Out of scope on purpose: the `*/managed` roots applied by Crossplane
 
 ```
 live/
-  root.hcl                          # shared: backend, source, tfvars, lock policy, prune hook
-  scripts/prune-cache-copy.sh       # called by root.hcl's after_hook
+  root.hcl                          # shared: backend, source, tfvars, copy exclusions
   dev/<root path>/terragrunt.hcl    # the foundation roots (00-foundation … 13-tailscale)
   staging/10-cluster/scaleway/      # the live homelab cluster
   ephemeral/{env.hcl,10-cluster/scaleway/}   # one cluster + state per PR
@@ -26,7 +25,7 @@ that path by `root.hcl`:
 
 | Derived value | Rule | Example |
 |---|---|---|
-| state bucket | `id-terraform-state-<root path, / → ->` (exceptions: `bucket_overrides`) | `id-terraform-state-03-storage-scaleway` |
+| state bucket | `id-terraform-state-<root path, / → ->` (one temporary exception, see `root.hcl`) | `id-terraform-state-03-storage-scaleway` |
 | state key | `<root path>/<workspace>/terraform.tfstate` | `03-storage/scaleway/03-storage-scaleway-dev/terraform.tfstate` |
 | legacy workspace name | `<root path flattened>-<env>` | `03-storage-scaleway-dev` |
 | variables | the root's existing `env/<workspace>.tfvars`, verbatim | `03-storage/scaleway/env/03-storage-scaleway-dev.tfvars` |
@@ -56,10 +55,11 @@ dependency order. Mind two defaults:
   Terragrunt as one string and is rejected). Run from their own directory they
   always work.
 
-Roots with a real `provider "aws"` (`01-iam/bootstrap/aws`, `02-encryption/aws`) take
-the state key pair from `SCALEWAY_STATE_ACCESS_KEY` / `SCALEWAY_STATE_SECRET_KEY`
-instead (`explicit_state_credentials_roots` in `root.hcl`), so `AWS_*` stays free
-for the provider (`aws sso login`).
+Credentials are the same rule for every unit: `AWS_ACCESS_KEY_ID` /
+`AWS_SECRET_ACCESS_KEY` are the Scaleway **state** key. A root with a real
+`provider "aws"` authenticates with the CLI profile named by `aws_profile` in its
+tfvars (an explicit profile wins over those variables), so run
+`aws sso login --profile infrastructure` first.
 
 ### Saved plans
 
@@ -122,18 +122,15 @@ changes** before anything else — a different name renames live IAM resources.
 - **Backend bootstrap is off** (`disable_init = true`): the buckets come from
   `00-foundation/scaleway`, Terragrunt must not create or alter them.
 - **Source copy**: `terraform.source` uses `//` at the repo root so `../../modules`,
-  `platform-apps/` and `files/` resolve inside Terragrunt's cache copy. That copies
-  the **whole repo**, gitignored files included. `root.hcl`'s `after_hook` runs
-  `scripts/prune-cache-copy.sh` on the copy right after: it drops `generated/`
-  (WireGuard private keys), `*.conf` and every `*.auto.tfvars` except the root's
-  own (the `local.auto.tfvars` override of `10-cluster/scaleway`). The script
-  refuses any path outside a `.terragrunt-cache`, so it cannot touch the real
-  tree. The cache lives in `.terragrunt-cache/` (gitignored).
+  `platform-apps/` and `files/` resolve inside Terragrunt's cache copy.
+  `exclude_from_copy` keeps `generated/` (WireGuard private keys), `*.conf`,
+  `*.auto.tfvars` and state files out of it. A root's own `*.auto.tfvars` (the
+  `local.auto.tfvars` override of `10-cluster/scaleway`) are passed as
+  `-var-file` from the real tree, below the env tfvars in precedence.
 - **The cluster root keeps its `terraform_remote_state` reads**: their outputs are
   `sensitive`, which a Terragrunt `dependency` → `inputs` hand-over would drop.
   The units only declare `dependencies` for ordering.
 - **Terragrunt logs go to stderr**, tofu's output to stdout, so
   `terragrunt state list | …` and `terragrunt output -json | jq` work as with `tofu`.
-- **In CI**, `.github/actions/terraform` takes a `unit` input; `kind.yml` uses only
-  `.github/actions/setup-terragrunt` (pinned release, checksum-verified; keep its
-  version in step with `mise.toml`).
+- **In CI**, `.github/actions/terraform` takes a `unit` input. OpenTofu and
+  Terragrunt come from `mise.toml` through `jdx/mise-action`.
