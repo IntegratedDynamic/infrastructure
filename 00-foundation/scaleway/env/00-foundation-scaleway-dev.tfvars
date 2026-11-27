@@ -59,4 +59,12 @@ state_buckets = {
   sso_managed = {
     bucket_name = "id-terraform-state-14-sso-managed"
   }
+  foundation_aws = {
+    bucket_name = "id-terraform-state-00-foundation-aws"
+  }
+  # Replaces secrets_openbao_bootstrap above, whose bucket kept the root's former
+  # name. The old bucket stays (rollback copy of the state).
+  openbao_bootstrap = {
+    bucket_name = "id-terraform-state-11-secrets-openbao-bootstrap"
+  }
 }
