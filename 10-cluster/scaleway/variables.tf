@@ -125,8 +125,8 @@ variable "letsencrypt_staging" {
 # The platform's own base public domain -- every *-gateway chart (gitops
 # repo) and this root's own Dex/ArgoCD OIDC config (argocd.tf) build their
 # public hostname as "<service>${local.host_suffix}.${var.domain}". Plain
-# required variable, set per workspace's own env/*.tfvars -- "staging.
-# scalepack.fr" today, a future prod workspace's own tfvars would set
+# required variable, set per core in live/core/<core>/wiring.hcl -- "staging.
+# scalepack.fr" today, a future prod core's wiring would set
 # "prod.scalepack.fr" instead. No default on purpose: every workspace
 # (staging, a future prod, the ephemeral workflow's copy of staging's own
 # tfvars) must say explicitly which domain it serves.
@@ -227,7 +227,7 @@ variable "dns_scaleway_state_key" {
 # infra#113: the whole platform-apps DAG this homelab runs, as data -- see
 # modules/platform-apps-dag/variables.tf's own var.domains for the full
 # schema (kept in sync by hand, Terraform has no cross-root shared-type
-# import). Populated by env/10-cluster-scaleway-staging.tfvars; this root's own
+# import). Populated by the cluster recipe, live/types/main.hcl; this root's own
 # argocd.tf only merges in the handful of dynamic values (resolved
 # revision, letsencrypt_staging/env_suffix-derived parameters, main.tf's own
 # Secret dependencies) that can't be expressed as tfvars data before calling

@@ -14,6 +14,15 @@ include "core" {
   path = find_in_parent_folders("core.hcl")
 }
 
+include "type" {
+  path = "${get_repo_root()}/live/types/main.hcl"
+}
+
+# This cluster's own identity. Changing it replaces the live cluster.
+inputs = {
+  cluster_name = "scaleway-homelab"
+}
+
 feature "cluster" {
   default = false
 }

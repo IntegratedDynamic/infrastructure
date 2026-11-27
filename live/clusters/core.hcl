@@ -1,6 +1,6 @@
 # Included by the units of a cluster that runs on a core platform. Which core is
 # said in one place only: `core` in the cluster's cluster.hcl. From it come the
-# run order and the core states the cluster root reads.
+# run order, the core states the cluster root reads and the core's wiring.hcl.
 
 locals {
   # Example values for live/clusters/staging/10-cluster/scaleway.
@@ -19,11 +19,11 @@ dependencies {
   ]
 }
 
-inputs = {
+inputs = merge(read_terragrunt_config("${local.core_dir}/wiring.hcl").inputs, {
   backup_scaleway_state_bucket    = "id-terraform-state-03-storage-scaleway"
   backup_scaleway_state_key       = "03-storage/scaleway/${local.core}/terraform.tfstate"
   openbao_unseal_aws_state_bucket = "id-terraform-state-02-encryption-aws"
   openbao_unseal_aws_state_key    = "02-encryption/aws/${local.core}/terraform.tfstate"
   dns_scaleway_state_bucket       = "id-terraform-state-01-iam-workload-scaleway"
   dns_scaleway_state_key          = "01-iam/workload/scaleway/${local.core}/terraform.tfstate"
-}
+})

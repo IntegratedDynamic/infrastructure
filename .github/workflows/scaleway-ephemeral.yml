@@ -29,8 +29,8 @@ run-name: "OpenTofu ${{ (github.event.action == 'closed' || github.event.action 
 #
 # One job (it used to be two): a generate-tfvars job built a per-PR copy of the
 # staging tfvars with `cp` + `sed` and uploaded it as an artifact. That is gone:
-# live/clusters/ephemeral (cluster.hcl + terragrunt.hcl) takes the staging env/*.tfvars as its
-# base and puts the per-PR overrides (cluster_name, env_suffix, Let's Encrypt
+# live/clusters/ephemeral (cluster.hcl + terragrunt.hcl) takes the main recipe and the core's
+# wiring as its base and puts the per-PR overrides (cluster_name, env_suffix, Let's Encrypt
 # staging, infra_revision = the PR's head ref, ...) on the command line, from the
 # two variables below. The inputs are the committed unit plus those two values,
 # both visible in the run.

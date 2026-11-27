@@ -1,9 +1,8 @@
 # A full copy of the homelab cluster for one PR (label `ephemeral-cluster`),
 # in its own state (10-cluster/scaleway/pr-<PR_NUMBER>/), every platform
-# hostname suffixed -pr-<N>. Replaces the `cp` + `sed` that
-# scaleway-ephemeral.yml used to run on the staging tfvars: the base values are
-# the staging env/*.tfvars (see ../../cluster.hcl), the overrides below go on the
-# command line, which beats a -var-file.
+# hostname suffixed -pr-<N>. Same recipe (live/types/main.hcl) and core wiring as
+# the staging cluster; the overrides below go on the command line, which beats
+# `inputs`.
 #
 # Opt-in for `run --all` like the staging cluster (it is a paid cluster).
 
@@ -15,6 +14,10 @@ include "root" {
 
 include "core" {
   path = find_in_parent_folders("core.hcl")
+}
+
+include "type" {
+  path = "${get_repo_root()}/live/types/main.hcl"
 }
 
 locals {
