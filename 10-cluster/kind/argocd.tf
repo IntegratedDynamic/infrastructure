@@ -1,5 +1,5 @@
 # infra#110 + infra#113: this tier's whole platform-apps DAG lives as DATA
-# in env/10-cluster-kind-github-pr.tfvars (var.domains, see
+# in env/10-cluster-kind-kind.tfvars (var.domains, see
 # modules/platform-apps-dag/variables.tf's own description) -- this file now
 # only holds ArgoCD's own bootstrap (helm_release.argocd, no OIDC login
 # here, unlike 10-cluster/scaleway's authentik login -- every access here is
@@ -11,7 +11,7 @@
 # collapse into always-hard), and 10-cluster/platform-apps/README.md
 # for the platform-wide DAG this wiring encodes.
 #
-# See env/10-cluster-kind-github-pr.tfvars for what's trimmed relative to
+# See env/10-cluster-kind-kind.tfvars for what's trimmed relative to
 # the Scaleway DAG (wireguard-apps/crossplane-apps/monitoring-apps, no
 # `bootstrap` Application) and why.
 

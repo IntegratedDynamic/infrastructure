@@ -5,10 +5,8 @@ description: >
   S3-compatible state backend, then init → plan/apply/destroy. The repository
   must already be checked out.
 
-  Terragrunt (live/root.hcl) generates the backend, picks the root's
-  env/*.tfvars and the state key — there is no `workspace select` any more: the
-  former workspace's state path is now the key of the default workspace (same
-  object, see live/README.md).
+  Terragrunt (live/root.hcl) generates the backend and picks the root's
+  env/*.tfvars and state key from the unit's path (see live/README.md).
 
   Backend auth has two modes (`state-backend` input), because this repo's roots
   are split across two remote-state homes (see 00-foundation/scaleway/README.md):
@@ -43,14 +41,13 @@ description: >
     - SCW_DEFAULT_ORGANIZATION_ID / _PROJECT_ID
     - INFISICAL_MACHINE_IDENTITY_ID            (for the minted INFISICAL_AUTH_JWT)
   Per-run values a unit reads with get_env() (PR_NUMBER, HEAD_REF, ... see
-  live/ephemeral) are set the same way, in the job env.
+  live/clusters/ephemeral) are set the same way, in the job env.
 
 inputs:
   unit:
     description: >
-      Terragrunt unit to run, relative to live/ (e.g. staging/10-cluster/scaleway
-      or ephemeral/10-cluster/scaleway). The unit's first path segment is the
-      environment, the rest is the root.
+      Terragrunt unit to run, relative to live/ (e.g. clusters/staging/10-cluster/scaleway
+      or clusters/ephemeral/10-cluster/scaleway). See live/README.md for the layout.
     required: true
   command:
     description: >

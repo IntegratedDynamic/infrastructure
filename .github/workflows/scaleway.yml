@@ -105,7 +105,7 @@ permissions:
 # `vars.*` later if more than this one workflow ever needs to agree on
 # them.
 env:
-  TG_UNIT: staging/10-cluster/scaleway
+  TG_UNIT: clusters/staging/10-cluster/scaleway
 
 jobs:
   terraform:

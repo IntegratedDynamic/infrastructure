@@ -76,12 +76,12 @@ wired by Terragrunt like every other root, so there is no chicken-and-egg left:
 aws sso login --profile infrastructure
 export AWS_ACCESS_KEY_ID=$(scw config get access-key)       # the state backend
 export AWS_SECRET_ACCESS_KEY=$(scw config get secret-key)
-cd live/dev/00-foundation/aws
+cd live/core/main/00-foundation/aws
 terragrunt plan
 ```
 
 The AWS provider uses the profile named by `aws_profile` in
-`env/00-foundation-aws-dev.tfvars`.
+`env/00-foundation-aws-main.tfvars`.
 
 The AWS bucket above still exists and is still what `terraform-state-access`
 grants; it holds the previous copies of the states that used to live there.

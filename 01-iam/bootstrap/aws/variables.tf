@@ -29,7 +29,7 @@ variable "remote_state_aws_bucket" {
 variable "remote_state_aws_key" {
   description = "Object key for 00-foundation/aws's state within remote_state_aws_bucket."
   type        = string
-  default     = "00-foundation/aws/00-foundation-aws-dev/terraform.tfstate"
+  default     = "00-foundation/aws/main/terraform.tfstate"
 }
 
 variable "aws_profile" {

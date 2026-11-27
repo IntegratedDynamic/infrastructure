@@ -33,31 +33,27 @@ variable "infra_revision" {
 variable "backup_scaleway_state_bucket" {
   description = "Scaleway bucket holding 03-storage/scaleway's remote state."
   type        = string
-  default     = "id-terraform-state-03-storage-scaleway"
 }
 
 variable "backup_scaleway_state_key" {
   description = "Object key for 03-storage/scaleway's state within backup_scaleway_state_bucket."
   type        = string
-  default     = "03-storage/scaleway/03-storage-scaleway-dev/terraform.tfstate"
 }
 
 variable "openbao_unseal_aws_state_bucket" {
   description = "Scaleway bucket holding 02-encryption/aws's remote state."
   type        = string
-  default     = "id-terraform-state-02-encryption-aws"
 }
 
 variable "openbao_unseal_aws_state_key" {
   description = "Object key for 02-encryption/aws's state within openbao_unseal_aws_state_bucket."
   type        = string
-  default     = "02-encryption/aws/02-encryption-aws-dev/terraform.tfstate"
 }
 
 # infra#113: the whole platform-apps DAG this tier validates, as data -- see
 # modules/platform-apps-dag/variables.tf's own var.domains for the full
 # schema (kept in sync by hand, Terraform has no cross-root shared-type
-# import). Populated by env/10-cluster-kind-github-pr.tfvars; this root's
+# import). Populated by env/10-cluster-kind-kind.tfvars; this root's
 # own argocd.tf only merges in the handful of Secret dependencies that live
 # in main.tf (can't be expressed as tfvars data -- see that file's own
 # comment) before calling the module.

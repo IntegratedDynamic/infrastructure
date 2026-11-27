@@ -11,6 +11,10 @@ include "root" {
   merge_strategy = "deep"
 }
 
+include "core" {
+  path = find_in_parent_folders("core.hcl")
+}
+
 remote_state {
   backend = "local"
 
@@ -22,15 +26,6 @@ remote_state {
   config = {
     path = "${get_terragrunt_dir()}/terraform.tfstate"
   }
-}
-
-# Ordering only (see ../../../staging/10-cluster/scaleway): the root reads these
-# two states through its own terraform_remote_state data sources.
-dependencies {
-  paths = [
-    "../../../dev/03-storage/scaleway",
-    "../../../dev/02-encryption/aws",
-  ]
 }
 
 terraform {

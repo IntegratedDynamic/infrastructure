@@ -1,8 +1,8 @@
 # A full copy of the homelab cluster for one PR (label `ephemeral-cluster`),
-# in its own state (workspace 10-cluster-scaleway-pr-<PR_NUMBER>), every
-# platform hostname suffixed -pr-<N>. Replaces the `cp` + `sed` that
+# in its own state (10-cluster/scaleway/pr-<PR_NUMBER>/), every platform
+# hostname suffixed -pr-<N>. Replaces the `cp` + `sed` that
 # scaleway-ephemeral.yml used to run on the staging tfvars: the base values are
-# the staging env/*.tfvars (see ../../env.hcl), the overrides below go on the
+# the staging env/*.tfvars (see ../../cluster.hcl), the overrides below go on the
 # command line, which beats a -var-file.
 #
 # Opt-in for `run --all` like the staging cluster (it is a paid cluster).
@@ -13,30 +13,26 @@ include "root" {
   merge_strategy = "deep"
 }
 
-dependencies {
-  paths = [
-    "../../../dev/03-storage/scaleway",
-    "../../../dev/02-encryption/aws",
-    "../../../dev/01-iam/workload/scaleway",
-  ]
+include "core" {
+  path = find_in_parent_folders("core.hcl")
 }
 
 locals {
-  env = include.root.locals.env # "pr-<PR_NUMBER>"
+  instance = include.root.locals.instance # "pr-<PR_NUMBER>"
 }
 
 # One cache per PR: the state key (backend) depends on PR_NUMBER, and OpenTofu
 # refuses to re-init a cache whose backend config changed ("Backend configuration
 # changed"). Sharing one cache dir would make switching PR_NUMBER locally fail.
 # Still under .terragrunt-cache/, so gitignored.
-download_dir = "${get_terragrunt_dir()}/.terragrunt-cache/${local.env}"
+download_dir = "${get_terragrunt_dir()}/.terragrunt-cache/${local.instance}"
 
 terraform {
   extra_arguments "ephemeral_overrides" {
     commands = get_terraform_commands_that_need_vars()
     arguments = flatten([
-      ["-var", "cluster_name=${local.env}"],
-      ["-var", "env_suffix=${local.env}"],
+      ["-var", "cluster_name=${local.instance}"],
+      ["-var", "env_suffix=${local.instance}"],
       # Each ephemeral cluster orders its own *.staging.scalepack.fr wildcard;
       # prod Let's Encrypt's rate limit (5 duplicate certs/week) would be burnt
       # by a few PR clusters.
