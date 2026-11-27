@@ -15,12 +15,7 @@ description: >
     - "aws"      (default): assume an AWS IAM role via OIDC (`aws-role-arn`).
                  For a root whose state still lives in the 00-foundation/aws
                  bucket, or that also carries a real `provider "aws"` block for
-                 its own resources. A root with its own `provider "aws"` and a
-                 Scaleway-hosted state (01-iam/bootstrap/aws, 02-encryption/aws)
-                 reads SCALEWAY_STATE_ACCESS_KEY/_SECRET_KEY from the job env:
-                 root.hcl writes them into the generated backend, so the
-                 assumed AWS role and the Scaleway state key no longer collide
-                 on AWS_ACCESS_KEY_ID (the former "known follow-up").
+                 its own resources.
     - "scaleway": no role assumed — SCALEWAY_STATE_ACCESS_KEY/SCALEWAY_STATE_SECRET_KEY
                  (already in the job env below) are exported as
                  AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY just for the backend,
@@ -97,15 +92,10 @@ inputs:
 runs:
   using: composite
   steps:
-    - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+    # OpenTofu + Terragrunt, at the versions mise.toml pins.
+    - uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78 # v5.3.0
       with:
-        # Keep in sync with mise.toml [tools] opentofu version.
-        tofu_version: "1.12"
-        # The wrapper would capture/alter stdout, which `state list | xargs`
-        # below (and Terragrunt itself) rely on being untouched.
-        tofu_wrapper: false
-
-    - uses: ./.github/actions/setup-terragrunt
+        install_args: opentofu terragrunt
 
     # Keyless Infisical auth: mint a GitHub OIDC JWT into INFISICAL_AUTH_JWT (the
     # provider's default token env var). The audience must match the identity's

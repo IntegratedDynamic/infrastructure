@@ -1,8 +1,6 @@
 # kind.yml's on-every-PR validation of the platform-apps DAG against a
-# disposable kind cluster. No remote state (dies with the CI runner, see
-# 10-cluster/kind/version.tf): root.hcl's `local_state_roots` gives this root a
-# local backend, the state file sitting next to this unit (gitignored
-# *.tfstate).
+# disposable kind cluster. Its state dies with the cluster, so this unit
+# replaces the shared s3 backend with a local one (gitignored *.tfstate).
 #
 # Needs Docker + kind and a root-capable cloud-provider-kind, so opt-in for
 # `run --all` (`--feature cluster=true`).
@@ -11,6 +9,19 @@ include "root" {
   path           = find_in_parent_folders("root.hcl")
   expose         = true
   merge_strategy = "deep"
+}
+
+remote_state {
+  backend = "local"
+
+  generate = {
+    path      = "backend.tf"
+    if_exists = "overwrite_terragrunt"
+  }
+
+  config = {
+    path = "${get_terragrunt_dir()}/terraform.tfstate"
+  }
 }
 
 # Ordering only (see ../../../staging/10-cluster/scaleway): the root reads these

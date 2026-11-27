@@ -117,12 +117,10 @@ used to only assume an AWS role for backend state R/W, and the roots with a real
 `provider "aws"` block (`02-encryption/aws`, `01-iam/bootstrap/aws`) could not
 share `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` between that provider and a
 Scaleway backend — locally this was worked around per-command with an explicit
-`-backend-config=<gitignored file>`. Now `live/root.hcl` generates every root's
-backend, and for exactly those two roots writes the Scaleway state key pair
-(`SCALEWAY_STATE_ACCESS_KEY`/`_SECRET_KEY`, the names CI already uses) into it
-explicitly, leaving `AWS_*` to the AWS provider (checked locally: the state is
-read with `AWS_*` unset; no workflow applies those two roots yet, so the CI side
-of it has not run). The action runs Terragrunt units (`unit` input). The
+`-backend-config=<gitignored file>`. Under Terragrunt those two roots keep
+`AWS_*` for the state, like every other root, and their AWS provider (and AWS
+state reads) use the CLI profile set by `aws_profile` in their tfvars. No
+workflow applies them yet. The action runs Terragrunt units (`unit` input). The
 historical notes below describe the migration as it
 was done, with `-backend-config` and per-root `backend` blocks.
 
@@ -205,10 +203,8 @@ read the fixed `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` env var names
 the root `CLAUDE.md` re: `endpoints.s3` — no variables, no data sources,
 full stop; Terragrunt's `live/root.hcl` now generates the block but is bound by
 the same limit). So **every `tofu`/`terragrunt` `init`/`plan`/`apply` run locally
-against a Scaleway-hosted bucket — for every root in this repo, not just this one
-(the two roots with a real `provider "aws"` take `SCALEWAY_STATE_ACCESS_KEY`/
-`_SECRET_KEY` instead, see `live/root.hcl`) — needs those two exact env vars set
-to your Scaleway key first**:
+against a Scaleway-hosted bucket — for every root in this repo, not just this one —
+needs those two exact env vars set to your Scaleway key first**:
 
 ```bash
 export AWS_ACCESS_KEY_ID=$(scw config get access-key)

@@ -22,9 +22,10 @@ data "aws_partition" "current" {}
 data "terraform_remote_state" "remote_state_aws" {
   backend = "s3"
   config = {
-    bucket = var.remote_state_aws_bucket
-    region = var.remote_state_aws_region
-    key    = var.remote_state_aws_key
+    bucket  = var.remote_state_aws_bucket
+    region  = var.remote_state_aws_region
+    key     = var.remote_state_aws_key
+    profile = var.aws_profile
   }
 }
 

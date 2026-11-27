@@ -4,3 +4,6 @@
 # terraform.workspace, which comes from this filename. Renaming it would make
 # Terraform want to rename/recreate the KMS alias and IAM user in place.
 aws_region = "eu-west-3"
+
+# `aws sso login --profile infrastructure` first.
+aws_profile = "infrastructure"
