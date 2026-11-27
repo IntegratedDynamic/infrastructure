@@ -14,18 +14,23 @@ data "aws_partition" "current" {}
 
 # 00-foundation/aws's own state — read to attach the SAME state-bucket
 # policy its terraform-state-access role uses, rather than duplicating the
-# policy document or hardcoding its ARN. 00-foundation/aws never migrates off
-# the AWS bucket (it IS the AWS bucket — see its own README), so this is the
-# one cross-root reference in the repo that stays AWS-hosted permanently;
-# still parametrized like every other one, so the target is visible as
-# config in env/, not buried in code.
+# policy document or hardcoding its ARN. Like every cross-root read, the target
+# is config in env/ and the credentials are the AWS_* state key.
 data "terraform_remote_state" "remote_state_aws" {
   backend = "s3"
   config = {
-    bucket  = var.remote_state_aws_bucket
-    region  = var.remote_state_aws_region
-    key     = var.remote_state_aws_key
-    profile = var.aws_profile
+    bucket = var.remote_state_aws_bucket
+    key    = var.remote_state_aws_key
+
+    region                      = "fr-par"
+    skip_credentials_validation = true
+    skip_region_validation      = true
+    skip_requesting_account_id  = true
+    skip_s3_checksum            = true
+    use_path_style              = true
+    endpoints = {
+      s3 = "https://s3.fr-par.scw.cloud"
+    }
   }
 }
 

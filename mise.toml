@@ -8,6 +8,16 @@ kind = "0.33.0"
 terragrunt = "1.2.3"
 python = "3.13"
 
+[env]
+# `terragrunt run --all apply|destroy` appends -auto-approve on its own. Across
+# a dozen roots (IAM, state buckets, the cluster) that is a blind multi-root
+# apply, so make it ask per unit instead. Single-unit runs and the tasks below
+# are unaffected (they pass -auto-approve explicitly where they want it).
+TG_NO_AUTO_APPROVE = "true"
+
+# Terragrunt-managed roots run from live/<env>/<root path>, not from the root's
+# own directory — see live/README.md. The tasks below that touch them cd there.
+
 # ── Tests (tests/, .github/workflows/tests.yml) ──────────────────────────────
 
 [tasks.test]
@@ -25,16 +35,6 @@ for root in 10-cluster/scaleway 14-sso/managed; do
   TF_DATA_DIR="$data" tofu -chdir="$root" validate
 done
 """
-
-[env]
-# `terragrunt run --all apply|destroy` appends -auto-approve on its own. Across
-# a dozen roots (IAM, state buckets, the cluster) that is a blind multi-root
-# apply, so make it ask per unit instead. Single-unit runs and the tasks below
-# are unaffected (they pass -auto-approve explicitly where they want it).
-TG_NO_AUTO_APPROVE = "true"
-
-# Terragrunt-managed roots run from live/<env>/<root path>, not from the root's
-# own directory — see live/README.md. The tasks below that touch them cd there.
 
 # ── VPN (WireGuard, 04-vpn/wireguard-site-to-site) ───────────────────────────
 # `wg-quick`'s own "bare name" lookup only resolves configs already living in

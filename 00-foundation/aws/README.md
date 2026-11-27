@@ -7,8 +7,8 @@ file is the how, not the why.
 
 It provisions:
 
-1. A single **AWS S3 bucket** holding the Terraform remote state for the
-   **whole org**. Every other root points its `backend "s3"` at this bucket.
+1. A single **AWS S3 bucket**, which held the Terraform remote state for the
+   whole org before every root moved to Scaleway (see [State](#state)).
 2. The **GitHub OIDC provider** + the **one AWS IAM role**
    (`terraform-state-access`) every GitHub Actions workflow in this repo
    assumes to read/write that bucket — see [CI's AWS access](#cis-aws-access).
@@ -66,72 +66,22 @@ Every workflow in `.github/workflows/` assumes this one role (via
 `vars.AWS_TERRAFORM_ROLE_ARN`) for every root's `plan`/`apply`/`destroy` — see
 the composite action in `.github/actions/terraform/`.
 
-## Credentials
+## State
 
-The AWS provider **and** the S3 backend resolve credentials through the standard
-AWS SDK chain — nothing is hardcoded in the `.tf`. The same code authenticates
-two different ways depending on where it runs:
+This root's state lives in Scaleway
+(`id-terraform-state-00-foundation-aws`, created by `00-foundation/scaleway`),
+wired by Terragrunt like every other root, so there is no chicken-and-egg left:
 
-| | Source | Setup |
-|---|---|---|
-| **Local** | AWS SSO | `aws sso login --profile infrastructure` then `export AWS_PROFILE=infrastructure` |
-| **CI** | GitHub OIDC | `aws-actions/configure-aws-credentials` exchanges the OIDC token for STS creds and exports them as env vars |
-
-Because STS env vars sit at the top of the SDK chain, CI needs no provider
-changes — only the `id-token: write` permission and the configure-credentials
-step in the workflow.
-
-## Bootstrapping (chicken-and-egg)
-
-This root creates the very bucket it then stores its state in. Bootstrap order:
-
-1. Log in and select the profile:
-   ```bash
-   aws sso login --profile infrastructure
-   export AWS_PROFILE=infrastructure
-   ```
-2. Apply once with **local state** — temporarily comment out the `backend "s3"`
-   block in `version.tf` so the bucket gets created:
-   ```bash
-   tofu -chdir=00-foundation/aws init
-   tofu -chdir=00-foundation/aws apply   # creates the bucket (billable)
-   ```
-3. Re-add the `backend "s3"` block and migrate the local state into the bucket
-   it now manages:
-   ```bash
-   tofu -chdir=00-foundation/aws init -migrate-state
-   ```
-
-After that, this root's own state lives at `state-backend/terraform.tfstate`
-inside the bucket, just like every other root.
-
-## Pointing another root at this bucket
-
-Add a `backend "s3"` block to the consuming root and run `tofu init`
-(`-migrate-state` if it already has local state). Give each root a distinct
-`key` *and* `workspace_key_prefix` so its state (and workspaces) stay separate
-inside the one shared bucket.
-
-```hcl
-terraform {
-  backend "s3" {
-    bucket = "id-terraform-state"
-    key    = "cluster/scaleway/terraform.tfstate" # per-root; pick a unique path
-    region = "eu-west-3"
-
-    # Per-root prefix; non-default workspaces land under <prefix>/<name>/<key>.
-    workspace_key_prefix = "cluster/scaleway"
-
-    encrypt      = true
-    use_lockfile = true
-  }
-}
+```bash
+aws sso login --profile infrastructure
+export AWS_ACCESS_KEY_ID=$(scw config get access-key)       # the state backend
+export AWS_SECRET_ACCESS_KEY=$(scw config get secret-key)
+cd live/dev/00-foundation/aws
+terragrunt plan
 ```
 
-> **Note — `bucket_name` and `region` do not flow into the backend.** Terraform
-> backend blocks cannot reference variables, so `bucket` and `region` are
-> hardcoded in every `backend "s3"` block (including this root's own
-> `version.tf`). The variables only affect the bucket *resource*. If you ever
-> change the bucket name or region, you must update those backend blocks by
-> hand. In practice you don't rename the state bucket often, so this is a minor
-> day-to-day caveat.
+The AWS provider uses the profile named by `aws_profile` in
+`env/00-foundation-aws-dev.tfvars`.
+
+The AWS bucket above still exists and is still what `terraform-state-access`
+grants; it holds the previous copies of the states that used to live there.
