@@ -16,7 +16,9 @@ GITOPS = pathlib.Path(os.environ.get("GITOPS_DIR", ROOT.parent / "gitops")).reso
 PLATFORM_APPS = ROOT / "10-cluster/platform-apps"
 HEADSCALE = GITOPS / "services/platform/headscale"
 VALUE_FILES = sorted(PLATFORM_APPS.glob("values-*.yaml"))
-CLUSTER_TFVARS = sorted(ROOT.glob("10-cluster/*/env/*.tfvars"))
+# Where a cluster's domains map is declared: a recipe (live/types/*.hcl, under
+# `inputs`) or a root's tfvars.
+CLUSTER_VARIABLES = sorted(ROOT.glob("10-cluster/*/env/*.tfvars")) + sorted(ROOT.glob("live/types/*.hcl"))
 
 
 def load_yaml(path):
@@ -63,9 +65,15 @@ def test_platform_apps_renders(path):
     subprocess.run(["helm", "template", "platform-apps", PLATFORM_APPS, "-f", path], check=True, capture_output=True)
 
 
-@pytest.mark.parametrize("path", CLUSTER_TFVARS, ids=lambda p: p.name)
+def domains_of(path):
+    data = tfvars(path)
+    return data.get("inputs", data).get("domains", {})
+
+
+@pytest.mark.parametrize("path", CLUSTER_VARIABLES, ids=lambda p: p.name)
 def test_every_domain_uses_values_files_that_exist(path):
-    for name, domain in tfvars(path).get("domains", {}).items():
+    assert domains_of(path), f"no domains found in {path.name}"
+    for name, domain in domains_of(path).items():
         for values_file in domain.get("value_files", []):
             assert (PLATFORM_APPS / values_file).is_file(), f"{name}: {values_file}"
 
@@ -105,5 +113,5 @@ def test_this_repository_may_get_ci_keys(headscale):
 def test_headscale_is_deployed_restore_first():
     apps = {a["name"]: a for _, a in APPS}
     assert int(apps["headscale-restore"]["wave"]) < int(apps["headscale"]["wave"])
-    domains = tfvars(ROOT / "10-cluster/scaleway/env/10-cluster-scaleway-staging.tfvars")["domains"]
+    domains = domains_of(ROOT / "live/types/main.hcl")
     assert domains["headscale-apps"]["needs_backups"] is True

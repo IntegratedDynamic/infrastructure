@@ -1,5 +1,5 @@
 # infra#113: this homelab's whole platform-apps DAG lives as DATA in
-# env/10-cluster-scaleway-staging.tfvars (var.domains, see
+# live/types/main.hcl (var.domains, see
 # modules/platform-apps-dag/variables.tf's own description) -- this file now
 # only holds what's genuinely environment-specific and can't be expressed as
 # tfvars: ArgoCD's own bootstrap (OIDC login through authentik, public URL, RBAC

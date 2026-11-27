@@ -25,7 +25,7 @@
 # of secrets-apps never turned Healthy.
 
 # infra#113: the whole platform-apps DAG this tier validates. Trimmed
-# relative to 10-cluster/scaleway/env/10-cluster-scaleway-staging.tfvars' own
+# relative to live/types/main.hcl's own
 # domains, and why:
 #  - wireguard-apps: a real external WireGuard tunnel/peer config, no
 #    orchestration-DAG content of its own -- nothing this tier would

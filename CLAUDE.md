@@ -35,10 +35,17 @@ platform a cluster needs, `live/clusters/<cluster>/<root path>/` for the cluster
 Each cluster says which core it uses in **one place**, `cluster.hcl`
 (`core = "main"`); `live/clusters/core.hcl` derives from it the run order and the
 core states the cluster reads. `live/root.hcl` generates the s3 backend (no per-root
-`backend "s3"` block), picks `env/<root path flattened>-<instance>.tfvars` and sets
+`backend "s3"` block), picks `env/<root path flattened>-<instance>.tfvars` if the
+root has it, and sets
 the state key to `<root path>/<instance>/terraform.tfstate`. **Run a root with
 `terragrunt` from its `live/` unit, never bare `tofu`**: bare `tofu` would silently
 use an empty local state.
+
+The Scaleway clusters have no tfvars: what they run is a **recipe**,
+`live/types/main.hcl` (the `domains` map and the node count), what differs between
+cores is `live/core/<core>/wiring.hcl` (domain, certificates), and the unit gives
+the cluster its name. These are Terragrunt `inputs`, so a `local.auto.tfvars` or a
+`-var` still overrides them.
 
 ```bash
 cd live/core/main/03-storage/scaleway && terragrunt plan      # one unit
@@ -399,8 +406,8 @@ modules/
                                #   — platform-apps-dag (the ONE module both
                                #   roots call: builds every domain's own
                                #   ArgoCD Application from a `domains` map
-                               #   input, mostly sourced straight from
-                               #   env/*.tfvars — see that module's own
+                               #   input, mostly sourced from live/types/
+                               #   (or kind's env/*.tfvars) — see that module's own
                                #   variables.tf), argocd-base-values
                                #   (shared ArgoCD helm_release resource
                                #   sizing/GOMEMLIMIT/health-customization
@@ -588,7 +595,7 @@ Terraform here is only a **one-time bootstrapper** — everything after ArgoCD i
 module, `10-cluster/modules/platform-apps-dag` (infra#113) — each root's own
 `argocd.tf` declares a `domains` map (which Applications, their `value_files`/
 `parameters`, and which of six well-known gates they need) mostly sourced
-straight from `env/*.tfvars`, merges on top the handful of genuinely dynamic
+from `live/types/main.hcl` (`kind/`: its `env/*.tfvars`), merges on top the handful of genuinely dynamic
 values that can't be tfvars literals (resolved revision, root-owned Secret
 dependencies), and calls the module once. `argocd-base-values` (the ArgoCD
 `helm_release`'s own shared resource-sizing/GOMEMLIMIT/health-customization

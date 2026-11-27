@@ -28,7 +28,7 @@
 #    every 4 hours, kept 60 days (gitops, velero chart: `authentik-data`) and authentik-restore (wave 0,
 #    first) puts the latest snapshot back on a fresh cluster BEFORE authentik's own
 #    StatefulSet would create an empty volume. Ordering, and why it cannot deadlock:
-#     - this domain `needs_backups` (10-cluster/scaleway/env/*.tfvars): Velero and its
+#     - this domain `needs_backups` (live/types/main.hcl): Velero and its
 #       bucket sync are up before authentik-restore runs. backups-apps NEVER needs
 #       this domain, so the dependency is one-way.
 #     - the restore lives HERE and not in backups-apps (where grafana-restore and

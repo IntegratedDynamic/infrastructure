@@ -13,7 +13,9 @@ Out of scope on purpose: the `*/managed` roots applied by Crossplane
 ```
 live/
   root.hcl                          # shared by every unit: source, tfvars, backend
+  types/<type>.hcl                  # recipe of a cluster type: features and size
   core/main/<root path>/            # a core: what a cluster needs to exist
+  core/main/wiring.hcl              # what is specific to this core (domain, certificates)
   clusters/
     core.hcl                        # shared: the link from a cluster to its core
     staging/{cluster.hcl,10-cluster/scaleway/}     # the homelab, *.staging.scalepack.fr
@@ -29,7 +31,7 @@ A unit is `live/core/<core>/<root path>/` or `live/clusters/<cluster>/<root path
 |---|---|---|
 | state bucket | `id-terraform-state-<root path, / → ->` | `id-terraform-state-03-storage-scaleway` |
 | state key | `<root path>/<instance>/terraform.tfstate` | `03-storage/scaleway/main/terraform.tfstate` |
-| variables | `env/<root path flattened>-<instance>.tfvars` | `03-storage/scaleway/env/03-storage-scaleway-main.tfvars` |
+| variables (if the root has that file) | `env/<root path flattened>-<instance>.tfvars` | `03-storage/scaleway/env/03-storage-scaleway-main.tfvars` |
 | `workspace_name` input | `<root path flattened>-<instance>` (names live IAM resources) | `03-storage-scaleway-main` |
 
 ## Which cluster uses which core
@@ -49,9 +51,22 @@ and not include `core.hcl`. A second core is a new folder under `core/`, with it
 own tfvars (`env/<root>-<core>.tfvars`); buckets are shared per root, the key
 separates the cores.
 
-`cluster.hcl` may also set `name` (renames the instance) and `tfvars_env` (reads
-another instance's tfvars as the base). Only `ephemeral` does (`pr-<PR_NUMBER>`,
-base `staging`).
+`cluster.hcl` may also set `name`, which renames the instance. Only `ephemeral`
+does (`pr-<PR_NUMBER>`).
+
+## What a cluster is made of
+
+The Scaleway clusters have no tfvars. Their variables are Terragrunt `inputs`:
+
+| Where | Says | Example |
+|---|---|---|
+| `types/main.hcl` | the recipe: features (`domains`), size | every `main`-like cluster |
+| `core/<core>/wiring.hcl` | what differs between cores, added by `clusters/core.hcl` | `domain`, `letsencrypt_staging` |
+| the unit | the cluster's own identity | `cluster_name` |
+
+A unit includes `root`, `core` and its type. Precedence, lowest first: `inputs`,
+then a root's `*.auto.tfvars` or `env/` file, then `-var` (how `ephemeral`
+overrides them). `kind` still has its own tfvars.
 
 ## Running it
 
@@ -103,8 +118,8 @@ auto-detects the checked-out branch, as for the staging cluster).
 
 1. Create the unit with the `include "root"` block (see
    `core/main/03-storage/scaleway/`); a cluster unit also includes `core.hcl`.
-2. Add `env/<root path flattened>-<instance>.tfvars` in the root, and its bucket in
-   `00-foundation/scaleway`'s `state_buckets`. The root has no `backend` block.
+2. Add `env/<root path flattened>-<instance>.tfvars` in the root (or `inputs`, see
+   above), and its bucket in `00-foundation/scaleway`'s `state_buckets`. The root has no `backend` block.
 3. `terragrunt plan`.
 
 Moving a unit or renaming an instance changes its state key: copy the state object

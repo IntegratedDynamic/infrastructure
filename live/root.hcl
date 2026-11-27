@@ -13,12 +13,12 @@ locals {
   slug      = replace(local.root_path, "/", "-")                    # "03-storage-scaleway"
 
   # A cluster's cluster.hcl, empty for a core. `name` renames the instance (one
-  # state per PR for "ephemeral"), `tfvars_env` borrows another one's tfvars.
+  # state per PR for "ephemeral").
   cluster = read_terragrunt_config( # { locals = {} }
     "${get_parent_terragrunt_dir()}/${local.group}/${local.folder}/cluster.hcl", { locals = {} }
   )
-  instance = lookup(local.cluster.locals, "name", local.folder)                                   # "main" ("pr-123")
-  tfvars   = "${local.slug}-${lookup(local.cluster.locals, "tfvars_env", local.instance)}.tfvars" # "03-storage-scaleway-main.tfvars"
+  instance = lookup(local.cluster.locals, "name", local.folder) # "main" ("pr-123")
+  tfvars   = "${local.slug}-${local.instance}.tfvars"           # "03-storage-scaleway-main.tfvars"
 }
 
 terraform {
@@ -46,9 +46,10 @@ terraform {
     ]
   }
 
+  # Optional: a cluster built from a recipe (live/types/) has no tfvars at all.
   extra_arguments "env_tfvars" {
     commands           = get_terraform_commands_that_need_vars()
-    required_var_files = ["${local.root_dir}/env/${local.tfvars}"]
+    optional_var_files = ["${local.root_dir}/env/${local.tfvars}"]
   }
 }
 
