@@ -236,7 +236,7 @@ data "terraform_remote_state" "openbao_unseal_aws" {
   })
 }
 
-# Scaleway Domains/DNS credentials — source: 01-iam/workload/scaleway's
+# Scaleway Domains/DNS credentials — source: 05-dns/scaleway's
 # external-dns identity (DomainsDNSFullAccess). Same remote state key
 # 11-secrets/openbao/managed reads as its own `dns_scaleway` data source.
 data "terraform_remote_state" "dns_scaleway" {
@@ -500,7 +500,7 @@ resource "kubernetes_secret" "velero_scaleway_credentials" {
 # live: cert-manager-webhook-scaleway's pod stuck on `secret
 # "scaleway-dns-credentials" not found` while ESO was still catching up,
 # contributing to module.wait_networking_healthy's slow convergence. Same
-# Scaleway Domains/DNS credential (01-iam/workload/scaleway's external-dns
+# Scaleway Domains/DNS credential (05-dns/scaleway's external-dns
 # identity) materialized into both namespaces, matching the two consumers'
 # existing key names 1:1 so the ESO Merge above is a no-op once it runs.
 resource "kubernetes_namespace" "cert_manager" {
@@ -524,8 +524,8 @@ resource "kubernetes_secret" "scaleway_dns_credentials" {
   }
 
   data = {
-    SCW_ACCESS_KEY = data.terraform_remote_state.dns_scaleway.outputs.workload_access_key
-    SCW_SECRET_KEY = data.terraform_remote_state.dns_scaleway.outputs.workload_secret_key
+    SCW_ACCESS_KEY = data.terraform_remote_state.dns_scaleway.outputs.access_key
+    SCW_SECRET_KEY = data.terraform_remote_state.dns_scaleway.outputs.secret_key
   }
 
   # Unlike thanos/loki/tempo/velero's Secrets above, ESO's own ExternalSecret
@@ -548,8 +548,8 @@ resource "kubernetes_secret" "external_dns_scaleway_credentials" {
   }
 
   data = {
-    SCW_ACCESS_KEY = data.terraform_remote_state.dns_scaleway.outputs.workload_access_key
-    SCW_SECRET_KEY = data.terraform_remote_state.dns_scaleway.outputs.workload_secret_key
+    SCW_ACCESS_KEY = data.terraform_remote_state.dns_scaleway.outputs.access_key
+    SCW_SECRET_KEY = data.terraform_remote_state.dns_scaleway.outputs.secret_key
   }
 
   # See kubernetes_secret.scaleway_dns_credentials above -- same ESO Merge

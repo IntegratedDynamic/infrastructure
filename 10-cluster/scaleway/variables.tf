@@ -215,12 +215,12 @@ variable "openbao_unseal_aws_state_key" {
 }
 
 variable "dns_scaleway_state_bucket" {
-  description = "Scaleway bucket holding 01-iam/workload/scaleway's remote state."
+  description = "Scaleway bucket holding 05-dns/scaleway's remote state."
   type        = string
 }
 
 variable "dns_scaleway_state_key" {
-  description = "Object key for 01-iam/workload/scaleway's state within dns_scaleway_state_bucket."
+  description = "Object key for 05-dns/scaleway's state within dns_scaleway_state_bucket."
   type        = string
 }
 

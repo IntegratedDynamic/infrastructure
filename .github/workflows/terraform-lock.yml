@@ -30,6 +30,7 @@ jobs:
           - 01-iam/workload/scaleway
           - 02-encryption/aws
           - 03-storage/scaleway
+          - 05-dns/scaleway
           - 10-cluster/scaleway
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2

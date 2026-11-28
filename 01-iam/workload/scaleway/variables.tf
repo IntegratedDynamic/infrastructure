@@ -5,7 +5,7 @@ variable "project_id" {
 
 # One Scaleway machine identity per entry, via
 # modules/scaleway-machine-identity. Single policy per identity — this domain
-# is for simple scoped workload credentials (like external-dns), not CI trust
+# is for simple scoped workload credentials, not CI trust
 # anchors that might need several policies (see 01-iam/bootstrap/scaleway for
 # that shape instead).
 variable "identities" {

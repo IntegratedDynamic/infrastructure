@@ -1,8 +1,7 @@
 # Non-bucket Scaleway workload identities — one Scaleway machine identity per
 # entry in var.identities (see variables.tf), no owned bucket, no CI trust
-# anchor. external-dns today (DNS zone record management only, no DNS zone
-# resource is Terraform-managed here). Add a future workload identity by
-# adding a map entry, no new .tf resources.
+# anchor. DNS credentials live in their own domain, 05-dns/scaleway. Add a
+# future workload identity by adding a map entry, no new .tf resources.
 module "identities" {
   source   = "../../../modules/scaleway-machine-identity"
   for_each = var.identities
