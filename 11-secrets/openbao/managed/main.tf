@@ -866,24 +866,22 @@ resource "vault_kv_secret_v2" "argo_workflows_logs_scaleway_s3_credentials" {
   })
 }
 
-# apps/argo-workflows/scaleway-state-credentials — read by the gitops repo's
-# Argo Workflows CronWorkflow (services/platform/argo-workflows) for both its
-# own `terraform init` backend (this root's own bucket, R/W) and the
-# data.external.scw_credentials fallback above (the other state buckets this
-# file's data.terraform_remote_state blocks read). A dedicated workload
-# identity (01-iam/workload/scaleway's "argo-workflows-state"), not one of
+# State credentials of the Crossplane Workspaces (gitops repo
+# services/platform/crossplane/config): their own `backend "s3"` and the
+# cross-root terraform_remote_state reads. A dedicated workload identity
+# (01-iam/workload/scaleway's "crossplane-state"), not one of
 # 00-foundation/scaleway's state-bucket identities reused — this credential
-# leaves the admin's own machine and lands on the cluster, unlike every
-# other cross-root read on this page, so it gets its own identity in
-# 01-iam/ like any other in-cluster workload, not a
-# repurposed foundation-layer one.
+# leaves the admin's own machine and lands on the cluster, unlike every other
+# cross-root read on this page. The path still says argo-workflows, for which
+# it was first written: gitops reads it, and this root may not delete under
+# kv/apps/, so moving it is a change of its own.
 resource "vault_kv_secret_v2" "argo_workflows_scaleway_state_credentials" {
   mount = vault_mount.kv.path
   name  = "apps/argo-workflows/scaleway-state-credentials"
 
   data_json = jsonencode({
-    SCW_ACCESS_KEY = data.terraform_remote_state.iam_workload_scaleway.outputs.access_keys["argo-workflows-state"]
-    SCW_SECRET_KEY = data.terraform_remote_state.iam_workload_scaleway.outputs.secret_keys["argo-workflows-state"]
+    SCW_ACCESS_KEY = data.terraform_remote_state.iam_workload_scaleway.outputs.access_keys["crossplane-state"]
+    SCW_SECRET_KEY = data.terraform_remote_state.iam_workload_scaleway.outputs.secret_keys["crossplane-state"]
   })
 }
 

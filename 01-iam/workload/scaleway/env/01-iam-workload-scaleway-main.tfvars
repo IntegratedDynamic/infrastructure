@@ -1,11 +1,10 @@
 project_id = "6283c05b-a4c7-4f83-a75f-83adad236d54"
 
 identities = {
-  # Landed on the cluster itself (gitops repo services/platform/argo-
-  # workflows, via OpenBao/ESO) for the terraform-apply CronWorkflows —
-  # unlike every other identity in this repo, this one's key leaves the
-  # admin's own machine. A dedicated workload identity for that reason
-  # alone, not reused from any state bucket's own identity.
+  # The state credentials of every Crossplane Workspace (OpenBao, then ESO).
+  # Unlike every other identity in this repo, this one's key leaves the admin's
+  # own machine: a dedicated workload identity for that reason alone, not reused
+  # from any state bucket's own identity.
   #
   # Project-scoped rule only, same as every other identity in this repo —
   # NOT also gated by a scaleway_object_bucket_policy per bucket. That was
@@ -25,8 +24,8 @@ identities = {
   # application/policy descriptions at 200 runes total, prefix included
   # (confirmed live — a longer purpose string here hit exactly that error
   # on apply).
-  argo-workflows-state = {
-    purpose            = "reads/writes Scaleway state buckets for the terraform-apply CronWorkflows (11-secrets, 12-monitoring)"
+  crossplane-state = {
+    purpose            = "reads/writes the Terraform state buckets for the Crossplane Workspaces"
     policy_description = "Object Storage read/write, project-scoped (Scaleway IAM has no bucket-level rule field)."
     rules = [
       {

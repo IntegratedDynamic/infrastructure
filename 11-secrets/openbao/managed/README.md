@@ -100,8 +100,8 @@ output), so `data_json` costs nothing extra and buys real drift detection:
   `opentofu.upbound.io/Workspace` `openbao-managed`, gitops repo's
   `services/platform/crossplane` — issue #101, replacing the Argo Workflows
   CronWorkflow this KV path was named for). A dedicated workload identity
-  (`01-iam/workload/scaleway`'s `argo-workflows-state`,
-  `data.terraform_remote_state.dns_scaleway`), not a reused state-bucket
+  (`01-iam/workload/scaleway`'s `crossplane-state`,
+  `data.terraform_remote_state.iam_workload_scaleway`), not a reused state-bucket
   identity — this credential is landed on the cluster, unlike every other
   cross-root read in this file, so it gets its own identity like any other
   in-cluster workload. (The `argo-workflows/` path prefix is kept for

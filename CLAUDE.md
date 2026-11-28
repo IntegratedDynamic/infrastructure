@@ -363,7 +363,7 @@ modules/
   workload/
     scaleway/                  #   simple scoped workload identities, one
                                #     module block per var.identities entry:
-                               #     today argo-workflows-state (Object Storage
+                               #     today crossplane-state (Object Storage
                                #     R/W for in-cluster applies' state reads).
                                #     DNS credentials are in 05-dns/
 02-encryption/
@@ -764,7 +764,7 @@ Standalone root that stands up the **Scaleway IAM identity GitHub Actions uses t
 
 ### `01-iam/workload/scaleway/`
 
-One `module "identities" { for_each = var.identities }` block (via `modules/scaleway-machine-identity`, single policy per identity — this domain is for simple scoped workload credentials, not CI trust anchors) — one identity today: `argo-workflows-state` (Object Storage R/W, project-scoped, named after the Argo Workflows CronWorkflows it was made for and now used by the Crossplane Workspaces' state reads — its key leaves the admin's machine and lands on the cluster itself). Add a future workload identity by adding a map entry to `var.identities`, no new `.tf` resources; its keys come out of the `access_keys`/`secret_keys` map outputs. The DNS identity moved to `05-dns/scaleway`: a domain is named after what it provides, not after the API it calls.
+One `module "identities" { for_each = var.identities }` block (via `modules/scaleway-machine-identity`, single policy per identity — this domain is for simple scoped workload credentials, not CI trust anchors) — one identity today: `crossplane-state` (Object Storage R/W, project-scoped, the state credentials of the Crossplane Workspaces — its key leaves the admin's machine and lands on the cluster itself). Add a future workload identity by adding a map entry to `var.identities`, no new `.tf` resources; its keys come out of the `access_keys`/`secret_keys` map outputs. The DNS identity moved to `05-dns/scaleway`: a domain is named after what it provides, not after the API it calls.
 
 ### `05-dns/scaleway/`
 

@@ -21,3 +21,10 @@ module "identities" {
   api_key_description   = "${each.key} workload credentials (${var.workspace_name})."
   api_key_rotation_days = each.value.api_key_rotation_days
 }
+
+# Renamed from "argo-workflows-state" (Argo Workflows is gone, Crossplane uses
+# it): renamed in place, so the API key does not change.
+moved {
+  from = module.identities["argo-workflows-state"]
+  to   = module.identities["crossplane-state"]
+}
