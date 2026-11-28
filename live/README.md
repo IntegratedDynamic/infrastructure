@@ -15,7 +15,7 @@ live/
   root.hcl                          # shared by every unit: source, tfvars, backend
   types/<type>.hcl                  # recipe of a cluster type: features and size
   core/main/<root path>/            # a core: what a cluster needs to exist
-  core/main/wiring.hcl              # what is specific to this core (domain, certificates)
+  core/main/wiring.hcl              # what is specific to this core (the domain)
   clusters/
     core.hcl                        # shared: the link from a cluster to its core
     staging/{cluster.hcl,10-cluster/scaleway/}     # the homelab, *.staging.scalepack.fr
@@ -44,9 +44,9 @@ locals {
 }
 ```
 
-Its units include `clusters/core.hcl`, which derives from that value both the run
-order (`dependencies`) and the state bucket/key of every core root the cluster
-reads. Neither is written anywhere else. A cluster with no core would declare none
+Its units include `clusters/core.hcl`, which turns that value into Terragrunt
+`dependency` blocks: the core units' outputs become the cluster root's `core_*`
+variables, and give the run order. No state bucket or key is written for them. A cluster with no core would declare none
 and not include `core.hcl`. A second core is a new folder under `core/`, with its
 own tfvars (`env/<root>-<core>.tfvars`); buckets are shared per root, the key
 separates the cores.
@@ -143,9 +143,10 @@ from `workspace_name` also renames live resources.
   `*.auto.tfvars` and state files out of it. A root's own `*.auto.tfvars` (the
   `local.auto.tfvars` override of `10-cluster/scaleway`) are passed as
   `-var-file` from the real tree, below the env tfvars in precedence.
-- **The cluster root keeps its `terraform_remote_state` reads**: their outputs are
-  `sensitive`, which a Terragrunt `dependency` → `inputs` hand-over would drop.
-  The units only declare `dependencies` for ordering.
+- **Roots receive other roots' outputs through Terragrunt** (`dependency` blocks in
+  `clusters/core.hcl`). A core unit must have been applied before a cluster can
+  plan. The values travel as environment
+  variables and are stored in saved plan files.
 - **Terragrunt logs go to stderr**, tofu's output to stdout, so
   `terragrunt state list | …` and `terragrunt output -json | jq` work as with `tofu`.
 - **In CI**, `.github/actions/terraform` takes a `unit` input. OpenTofu and

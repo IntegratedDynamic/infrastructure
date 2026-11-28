@@ -122,9 +122,9 @@ credential values (per the issue's own comment thread). What's gone is the
 second half — ESO is no longer in the loop for these four. This root's
 `main.tf` now writes the Kubernetes Secret directly
 (`thanos-objstore-config`, `loki-s3-credentials`, `tempo-s3-credentials`,
-`velero-scaleway-credentials`), reading the same
-`data.terraform_remote_state.backup_scaleway` outputs
-`11-secrets/openbao/managed` already reads — no new cross-root wiring, and
+`velero-scaleway-credentials`), from the same `03-storage/scaleway` outputs
+`11-secrets/openbao/managed` reads (here `var.core_storage`, see
+`live/clusters/core.hcl`) — no new cross-root wiring, and
 one fewer async hop between "Terraform knows the credential" and "the pod
 that needs it can read it". The four gitops-repo charts that used to do
 this via `ExternalSecret` (`services/platform/velero/secret`,

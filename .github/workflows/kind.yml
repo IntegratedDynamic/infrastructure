@@ -51,21 +51,10 @@ jobs:
     # ~35min worst-case DAG convergence + action-upterm's own
     # wait-timeout-minutes: 20 post-job debug window.
     timeout-minutes: 60
-    # Same GitHub environment as every other Scaleway-touching workflow --
-    # this root needs read access to 03-storage/scaleway's "backup" bucket
-    # (OpenBao's real raft snapshot) and 02-encryption/aws's KMS
-    # unseal credentials (10-cluster/kind/main.tf's own header comment
-    # explains why a real snapshot restore, not a fresh throwaway instance,
-    # is the whole point). Whether SCW_ACCESS_KEY (the general CI identity)
-    # actually has read on those two specific buckets, or whether a
-    # narrower dedicated identity needs minting first, is an open question
-    # -- first real run here is the way to find out.
+    # Same GitHub environment as every other Scaleway-touching workflow: this
+    # tier restores OpenBao's real raft snapshot, so it reads the core states
+    # (live/clusters/core.hcl) for the backup bucket and the unseal key.
     environment: scaleway
-    env:
-      SCW_ACCESS_KEY: ${{ secrets.SCW_ACCESS_KEY }}
-      SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
-      SCW_DEFAULT_ORGANIZATION_ID: ${{ vars.SCW_DEFAULT_ORGANIZATION_ID }}
-      SCW_DEFAULT_PROJECT_ID: ${{ vars.SCW_DEFAULT_PROJECT_ID }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -164,6 +153,9 @@ jobs:
         env:
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
           TG_NON_INTERACTIVE: "true"
+          # State key: how Terragrunt reads the core units' outputs.
+          AWS_ACCESS_KEY_ID: ${{ secrets.SCALEWAY_STATE_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.SCALEWAY_STATE_SECRET_KEY }}
         run: terragrunt apply -input=false -auto-approve
 
       # Aggregate ArgoCD/Terraform exit status alone isn't proof (CLAUDE.md's

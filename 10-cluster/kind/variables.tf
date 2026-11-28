@@ -30,24 +30,24 @@ variable "infra_revision" {
 # real snapshot restorable). Needs real Scaleway state-bucket credentials in
 # CI (AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY, same as every other Scaleway-
 # hosted root's cross-root read -- see this repo's CLAUDE.md Setup section).
-variable "backup_scaleway_state_bucket" {
-  description = "Scaleway bucket holding 03-storage/scaleway's remote state."
-  type        = string
+# Not `sensitive` on purpose: these only reach kubernetes_secret data, which the
+# provider already hides, and marking them made OpenTofu plan an update of every
+# such Secret without any value changing. Keep them out of anything else.
+variable "core_storage" {
+  description = "Outputs of the core's 03-storage/scaleway (buckets and their workload keys), passed by live/clusters/core.hcl."
+  type = object({
+    bucket_name         = string
+    workload_access_key = string
+    workload_secret_key = string
+  })
 }
 
-variable "backup_scaleway_state_key" {
-  description = "Object key for 03-storage/scaleway's state within backup_scaleway_state_bucket."
-  type        = string
-}
-
-variable "openbao_unseal_aws_state_bucket" {
-  description = "Scaleway bucket holding 02-encryption/aws's remote state."
-  type        = string
-}
-
-variable "openbao_unseal_aws_state_key" {
-  description = "Object key for 02-encryption/aws's state within openbao_unseal_aws_state_bucket."
-  type        = string
+variable "core_unseal" {
+  description = "Outputs of the core's 02-encryption/aws (the IAM key OpenBao auto-unseals with), passed by live/clusters/core.hcl."
+  type = object({
+    openbao_unseal_access_key_id     = string
+    openbao_unseal_secret_access_key = string
+  })
 }
 
 # infra#113: the whole platform-apps DAG this tier validates, as data -- see

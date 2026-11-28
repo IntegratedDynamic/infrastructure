@@ -1,6 +1,11 @@
 # Included by the units of a cluster that runs on a core platform. Which core is
 # said in one place only: `core` in the cluster's cluster.hcl. From it come the
-# run order, the core states the cluster root reads and the core's wiring.hcl.
+# core units the cluster depends on, whose outputs become its variables, and the
+# core's wiring.hcl.
+#
+# Terragrunt reads those outputs from the core states (AWS_ACCESS_KEY_ID /
+# AWS_SECRET_ACCESS_KEY), so a core unit must have been applied first. The roots
+# declare the matching variables and keep only the attributes they use.
 
 locals {
   # Example values for live/clusters/staging/10-cluster/scaleway.
@@ -8,22 +13,20 @@ locals {
   core_dir = "${get_repo_root()}/live/core/${local.core}"                              # "<repo>/live/core/main"
 }
 
-# Ordering only: the root reads these states through its own
-# `terraform_remote_state` data sources, because their outputs are `sensitive`
-# and a Terragrunt `dependency` -> `inputs` hand-over would drop that marking.
-dependencies {
-  paths = [
-    "${local.core_dir}/03-storage/scaleway",
-    "${local.core_dir}/02-encryption/aws",
-    "${local.core_dir}/05-dns/scaleway",
-  ]
+dependency "storage" {
+  config_path = "${local.core_dir}/03-storage/scaleway"
+}
+
+dependency "unseal" {
+  config_path = "${local.core_dir}/02-encryption/aws"
+}
+
+dependency "dns" {
+  config_path = "${local.core_dir}/05-dns/scaleway"
 }
 
 inputs = merge(read_terragrunt_config("${local.core_dir}/wiring.hcl").inputs, {
-  backup_scaleway_state_bucket    = "id-terraform-state-03-storage-scaleway"
-  backup_scaleway_state_key       = "03-storage/scaleway/${local.core}/terraform.tfstate"
-  openbao_unseal_aws_state_bucket = "id-terraform-state-02-encryption-aws"
-  openbao_unseal_aws_state_key    = "02-encryption/aws/${local.core}/terraform.tfstate"
-  dns_scaleway_state_bucket       = "id-terraform-state-05-dns-scaleway"
-  dns_scaleway_state_key          = "05-dns/scaleway/${local.core}/terraform.tfstate"
+  core_storage = dependency.storage.outputs
+  core_unseal  = dependency.unseal.outputs
+  core_dns     = dependency.dns.outputs
 })

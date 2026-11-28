@@ -12,28 +12,6 @@
 data "aws_caller_identity" "current" {}
 data "aws_partition" "current" {}
 
-# 00-foundation/aws's own state — read to attach the SAME state-bucket
-# policy its terraform-state-access role uses, rather than duplicating the
-# policy document or hardcoding its ARN. Like every cross-root read, the target
-# is config in env/ and the credentials are the AWS_* state key.
-data "terraform_remote_state" "remote_state_aws" {
-  backend = "s3"
-  config = {
-    bucket = var.remote_state_aws_bucket
-    key    = var.remote_state_aws_key
-
-    region                      = "fr-par"
-    skip_credentials_validation = true
-    skip_region_validation      = true
-    skip_requesting_account_id  = true
-    skip_s3_checksum            = true
-    use_path_style              = true
-    endpoints = {
-      s3 = "https://s3.fr-par.scw.cloud"
-    }
-  }
-}
-
 data "aws_iam_policy_document" "openbao_unseal_management" {
   statement {
     sid    = "KmsKeyAndAliasCrud"
@@ -113,7 +91,7 @@ module "openbao_unseal_role" {
 
   policies = {
     openbao-unseal         = module.openbao_unseal_policy.arn
-    terraform-state-access = data.terraform_remote_state.remote_state_aws.outputs.terraform_state_access_policy_arn
+    terraform-state-access = var.state_access_policy_arn
   }
 
   tags = {
