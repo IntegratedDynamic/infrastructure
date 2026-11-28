@@ -285,6 +285,14 @@ data "terraform_remote_state" "dns_scaleway" {
   })
 }
 
+data "terraform_remote_state" "iam_workload_scaleway" {
+  backend = "s3"
+  config = merge(local.scaleway_state_backend, {
+    bucket = var.iam_workload_state_bucket
+    key    = var.iam_workload_state_key
+  })
+}
+
 data "terraform_remote_state" "backup_scaleway" {
   backend = "s3"
   config = merge(local.scaleway_state_backend, {
@@ -318,8 +326,8 @@ data "terraform_remote_state" "wireguard" {
 # from another root (no prior example) -- needed because
 # secrets_sync_github_infrastructure_scaleway below was, until 2026-08-25,
 # silently sourcing SCW_ACCESS_KEY/SCW_SECRET_KEY from
-# data.terraform_remote_state.dns_scaleway's workload_access_key/
-# workload_secret_key instead (01-iam/workload/scaleway's external-dns
+# data.terraform_remote_state.dns_scaleway's keys instead (05-dns/scaleway's
+# external-dns
 # identity -- DNS-only permissions). That bug was invisible as long as
 # scaleway's own secrets-sync push stayed disabled (targets: [] in the
 # gitops repo's values-scaleway.yaml); enabling it live-overwrote the
@@ -598,8 +606,8 @@ resource "vault_kv_secret_v2" "external_dns_scaleway_dns_credentials" {
   name  = "apps/external-dns/scaleway-dns-credentials"
 
   data_json = jsonencode({
-    SCW_ACCESS_KEY = data.terraform_remote_state.dns_scaleway.outputs.workload_access_key
-    SCW_SECRET_KEY = data.terraform_remote_state.dns_scaleway.outputs.workload_secret_key
+    SCW_ACCESS_KEY = data.terraform_remote_state.dns_scaleway.outputs.access_key
+    SCW_SECRET_KEY = data.terraform_remote_state.dns_scaleway.outputs.secret_key
   })
 }
 
@@ -656,8 +664,8 @@ resource "vault_kv_secret_v2" "secrets_sync_github_infrastructure_scaleway" {
     var.secrets_sync_github.repos["infrastructure"].environments["scaleway"],
     {
       # github-ci's own key (01-iam/bootstrap/scaleway) -- NOT
-      # dns_scaleway.outputs.workload_access_key/secret_key, which is
-      # 01-iam/workload/scaleway's external-dns identity (DNS-only). See the
+      # dns_scaleway.outputs.access_key/secret_key, which is
+      # 05-dns/scaleway's external-dns identity (DNS-only). See the
       # data.terraform_remote_state.iam_bootstrap_scaleway comment above.
       SCW_ACCESS_KEY = data.terraform_remote_state.iam_bootstrap_scaleway.outputs.access_key
       SCW_SECRET_KEY = data.terraform_remote_state.iam_bootstrap_scaleway.outputs.secret_key
@@ -867,15 +875,15 @@ resource "vault_kv_secret_v2" "argo_workflows_logs_scaleway_s3_credentials" {
 # 00-foundation/scaleway's state-bucket identities reused — this credential
 # leaves the admin's own machine and lands on the cluster, unlike every
 # other cross-root read on this page, so it gets its own identity in
-# 01-iam/ like any other in-cluster workload (external-dns, above), not a
+# 01-iam/ like any other in-cluster workload, not a
 # repurposed foundation-layer one.
 resource "vault_kv_secret_v2" "argo_workflows_scaleway_state_credentials" {
   mount = vault_mount.kv.path
   name  = "apps/argo-workflows/scaleway-state-credentials"
 
   data_json = jsonencode({
-    SCW_ACCESS_KEY = data.terraform_remote_state.dns_scaleway.outputs.access_keys["argo-workflows-state"]
-    SCW_SECRET_KEY = data.terraform_remote_state.dns_scaleway.outputs.secret_keys["argo-workflows-state"]
+    SCW_ACCESS_KEY = data.terraform_remote_state.iam_workload_scaleway.outputs.access_keys["argo-workflows-state"]
+    SCW_SECRET_KEY = data.terraform_remote_state.iam_workload_scaleway.outputs.secret_keys["argo-workflows-state"]
   })
 }
 

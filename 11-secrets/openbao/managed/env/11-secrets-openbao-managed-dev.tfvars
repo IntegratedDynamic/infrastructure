@@ -7,8 +7,11 @@
 # bucket list. Keys updated 2026-08-24 (workspace-naming refacto) to point
 # at each target root's new prefix/workspace.
 
-dns_scaleway_state_bucket = "id-terraform-state-01-iam-workload-scaleway"
-dns_scaleway_state_key    = "01-iam/workload/scaleway/main/terraform.tfstate"
+dns_scaleway_state_bucket = "id-terraform-state-05-dns-scaleway"
+dns_scaleway_state_key    = "05-dns/scaleway/main/terraform.tfstate"
+
+iam_workload_state_bucket = "id-terraform-state-01-iam-workload-scaleway"
+iam_workload_state_key    = "01-iam/workload/scaleway/main/terraform.tfstate"
 
 backup_scaleway_state_bucket = "id-terraform-state-03-storage-scaleway"
 backup_scaleway_state_key    = "03-storage/scaleway/main/terraform.tfstate"

@@ -61,7 +61,7 @@ cd live/core/main && terragrunt run --all plan                # every root of th
 - A saved plan works: `terragrunt plan -out=$PWD/tfplan` then `terragrunt apply $PWD/tfplan`
   (use an absolute path: Terragrunt runs OpenTofu in its cache directory).
 - Some roots build resource names from `var.workspace_name`
-  (`<root path flattened>-<instance>`): `01-iam/workload/scaleway`,
+  (`<root path flattened>-<instance>`): `01-iam/workload/scaleway`, `05-dns/scaleway`,
   `02-encryption/aws`, `03-storage/scaleway`. Renaming an instance renames live
   IAM resources: `plan` must show in-place changes only.
 - One credential rule: `AWS_ACCESS_KEY_ID`/`_SECRET_ACCESS_KEY` are the Scaleway
@@ -269,6 +269,7 @@ tofu -chdir=02-encryption/aws                  providers lock -platform=darwin_a
 tofu -chdir=03-storage/scaleway                providers lock -platform=darwin_arm64 -platform=linux_amd64
 tofu -chdir=04-vpn/wireguard-site-to-site      providers lock -platform=darwin_arm64 -platform=linux_amd64
 tofu -chdir=04-vpn/wireguard-exit              providers lock -platform=darwin_arm64 -platform=linux_amd64
+tofu -chdir=05-dns/scaleway                    providers lock -platform=darwin_arm64 -platform=linux_amd64
 tofu -chdir=10-cluster/scaleway                providers lock -platform=darwin_arm64 -platform=linux_amd64
 tofu -chdir=11-secrets/openbao/bootstrap        providers lock -platform=darwin_arm64 -platform=linux_amd64
 tofu -chdir=11-secrets/openbao/managed          providers lock -platform=darwin_arm64 -platform=linux_amd64
@@ -286,7 +287,7 @@ Terraform roots are organized by **domain** — the top-level folder is a numeri
 literally owns (`00-foundation`, `01-iam`, `02-encryption`...). The number
 roughly encodes apply order / blast-radius
 across domains, though it's a convention, not something any tooling enforces.
-Gaps in the sequence (`05`-`09`) are deliberate — room for future domains
+Gaps in the sequence (`06`-`09`) are deliberate — room for future domains
 without a renumbering cascade; `10-cluster` in particular was moved up from
 `02-` on purpose to free up low numbers for domains like `02-encryption`.
 `11-secrets` and `12-monitoring` (2026-08-24, moved from `05-secrets` and
@@ -362,11 +363,9 @@ modules/
   workload/
     scaleway/                  #   simple scoped workload identities, one
                                #     module block per var.identities entry:
-                               #     external-dns (DNS zone record R/W only —
-                               #     no bucket, no DNS zone resource managed
-                               #     here) and argo-workflows-state (Object
-                               #     Storage R/W for the terraform-apply
-                               #     CronWorkflows' own state reads)
+                               #     today argo-workflows-state (Object Storage
+                               #     R/W for in-cluster applies' state reads).
+                               #     DNS credentials are in 05-dns/
 02-encryption/
   aws/                         # domain: AWS KMS key + dedicated IAM user for
                                #   OpenBao's auto-unseal. Standalone rather than
@@ -399,6 +398,11 @@ modules/
                                #   threat model, deliberately not an
                                #   extension of wireguard-site-to-site/. Own
                                #   keys, own gitops app, own README
+05-dns/
+  scaleway/                    # domain: what a cluster needs to manage DNS --
+                               #   the external-dns identity (DNS zone records
+                               #   only), also used by cert-manager's DNS01
+                               #   webhook. No zone/record is Terraform-managed
 10-cluster/                    # domain: the Kubernetes platform (moved up from
                                #   02- to free up low numbers for future domains)
   modules/                     #   shared Terraform behind BOTH kind/ and
@@ -573,7 +577,7 @@ left orphaned in the same bucket, never deleted — see each root's
 `ForceNew`**, so a workspace rename there would rotate OpenBao's unseal
 credential unless the derived name is first frozen to a hardcoded local, as
 `02-encryption/aws/main.tf`'s `local.unseal_name` now is), `03-storage/scaleway`,
-and `01-iam/workload/scaleway` (both Scaleway IAM application/policy names —
+`01-iam/workload/scaleway` and `05-dns/scaleway` (Scaleway IAM application/policy names —
 confirmed in-place-renamable, no credential rotation, since Scaleway API keys
 are tied to `application_id` not name) — always verify with `tofu plan`
 before applying a workspace rename, and don't assume every provider handles
@@ -760,7 +764,11 @@ Standalone root that stands up the **Scaleway IAM identity GitHub Actions uses t
 
 ### `01-iam/workload/scaleway/`
 
-One `module "identities" { for_each = var.identities }` block (via `modules/scaleway-machine-identity`, single policy per identity — this domain is for simple scoped workload credentials, not CI trust anchors) — two identities today: `external-dns` (Scaleway `DomainsDNSFullAccess`, scoped to the project scalepack.fr's zone lives in; no DNS zone/record resource is Terraform-managed here) and `argo-workflows-state` (Object Storage R/W, project-scoped, for the terraform-apply CronWorkflows' own cross-root state reads — its key leaves the admin's machine and lands on the cluster itself, unlike every other identity in this repo). Add a future workload identity by adding a map entry to `var.identities`, no new `.tf` resources. `workload_access_key`/`workload_secret_key` outputs stay pinned to `external-dns` specifically (11-secrets/openbao/managed's `terraform_remote_state` reads them) — new identities' keys come from the generic `access_keys`/`secret_keys` map outputs instead. Moved here from `04-dns/scaleway` since it owns no bucket and isn't a CI trust anchor.
+One `module "identities" { for_each = var.identities }` block (via `modules/scaleway-machine-identity`, single policy per identity — this domain is for simple scoped workload credentials, not CI trust anchors) — one identity today: `argo-workflows-state` (Object Storage R/W, project-scoped, named after the Argo Workflows CronWorkflows it was made for and now used by the Crossplane Workspaces' state reads — its key leaves the admin's machine and lands on the cluster itself). Add a future workload identity by adding a map entry to `var.identities`, no new `.tf` resources; its keys come out of the `access_keys`/`secret_keys` map outputs. The DNS identity moved to `05-dns/scaleway`: a domain is named after what it provides, not after the API it calls.
+
+### `05-dns/scaleway/`
+
+What a cluster needs to manage DNS: the `external-dns` identity (Scaleway `DomainsDNSFullAccess`, scoped to the project scalepack.fr's zone lives in), used in-cluster by external-dns and cert-manager's DNS01 webhook. Outputs `access_key`/`secret_key`, read by `10-cluster/scaleway` and `11-secrets/openbao/managed`. No DNS zone or record is Terraform-managed here.
 
 ### `02-encryption/aws/`
 

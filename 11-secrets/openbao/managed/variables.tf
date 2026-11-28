@@ -123,11 +123,21 @@ variable "vault_address" {
 # ── Cross-root state reads (Scaleway state buckets, see 00-foundation/scaleway) ──
 
 variable "dns_scaleway_state_bucket" {
-  description = "Scaleway bucket holding 01-iam/workload/scaleway's remote state."
+  description = "Scaleway bucket holding 05-dns/scaleway's remote state."
   type        = string
 }
 variable "dns_scaleway_state_key" {
-  description = "Object key for 01-iam/workload/scaleway's state within dns_scaleway_state_bucket."
+  description = "Object key for 05-dns/scaleway's state within dns_scaleway_state_bucket."
+  type        = string
+}
+
+variable "iam_workload_state_bucket" {
+  description = "Scaleway bucket holding 01-iam/workload/scaleway's remote state."
+  type        = string
+}
+
+variable "iam_workload_state_key" {
+  description = "Object key for 01-iam/workload/scaleway's state within iam_workload_state_bucket."
   type        = string
 }
 

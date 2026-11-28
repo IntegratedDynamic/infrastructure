@@ -67,4 +67,7 @@ state_buckets = {
   openbao_bootstrap = {
     bucket_name = "id-terraform-state-11-secrets-openbao-bootstrap"
   }
+  dns_scaleway = {
+    bucket_name = "id-terraform-state-05-dns-scaleway"
+  }
 }
