@@ -7,6 +7,31 @@
 inputs = {
   node_count = 2
 
+  # "staging" here (var.letsencrypt_staging / letsencrypt-staging ClusterIssuer)
+  # is Let's Encrypt's own ACME environment (vs. letsencrypt-prod's tight rate
+  # limits) -- an UNRELATED axis from this homelab also being named
+  # "staging" (this homelab's own environment tier, *.staging.scalepack.fr,
+  # vs. a future *.prod.scalepack.fr cluster not yet created). Don't conflate
+  # the two: a cluster of any tier can run on EITHER ACME environment.
+  #
+  # A main cluster runs on Let's Encrypt PROD certs (switched 2026-11-17). The
+  # ephemeral unit overrides this to true.
+  #
+  # It used to sit on STAGING for two reasons, neither holds anymore:
+  #  1. the cluster was rebuilt (up/down) often enough that LE's prod rate limit
+  #     (5 duplicate certs/week) was a real risk -- it is no longer torn down
+  #     routinely;
+  #  2. gateway/cert-restore restores the wildcard TLS Secret from the latest
+  #     Velero backup, and every backup then was staging-issued, so the platform
+  #     had to trust the staging root. cert-manager re-issues when the Secret's
+  #     issuer differs from the active ClusterIssuer, which is what the flip
+  #     relies on.
+  # Reason to flip back to true: a burst of same-week rebuilds hitting the rate
+  # limit again (and then flip it back once the window passes). Public webhooks
+  # (GitHub -> hooks.staging.scalepack.fr) need a publicly trusted cert, which is
+  # why this moved.
+  letsencrypt_staging = false
+
   # infra#113: the whole platform-apps DAG of a main cluster. See
   # 10-cluster/modules/platform-apps-dag/variables.tf's own var.domains for
   # the field meanings, and that module's main.tf header comment for why the

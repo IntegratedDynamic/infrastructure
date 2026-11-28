@@ -60,8 +60,8 @@ The Scaleway clusters have no tfvars. Their variables are Terragrunt `inputs`:
 
 | Where | Says | Example |
 |---|---|---|
-| `types/main.hcl` | the recipe: features (`domains`), size | every `main`-like cluster |
-| `core/<core>/wiring.hcl` | what differs between cores, added by `clusters/core.hcl` | `domain`, `letsencrypt_staging` |
+| `types/main.hcl` | the recipe: features (`domains`), size, certificate authority (`letsencrypt_staging`) | every `main`-like cluster |
+| `core/<core>/wiring.hcl` | what differs between cores, added by `clusters/core.hcl` | `domain` |
 | the unit | the cluster's own identity | `cluster_name` |
 
 A unit includes `root`, `core` and its type. Precedence, lowest first: `inputs`,

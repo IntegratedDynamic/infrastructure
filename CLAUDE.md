@@ -42,8 +42,8 @@ the state key to `<root path>/<instance>/terraform.tfstate`. **Run a root with
 use an empty local state.
 
 The Scaleway clusters have no tfvars: what they run is a **recipe**,
-`live/types/main.hcl` (the `domains` map and the node count), what differs between
-cores is `live/core/<core>/wiring.hcl` (domain, certificates), and the unit gives
+`live/types/main.hcl` (the `domains` map, the node count, the certificate authority), what differs between
+cores is `live/core/<core>/wiring.hcl` (the domain), and the unit gives
 the cluster its name. These are Terragrunt `inputs`, so a `local.auto.tfvars` or a
 `-var` still overrides them.
 
