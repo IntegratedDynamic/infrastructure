@@ -234,6 +234,12 @@ jobs:
           kubectl get pods -A --field-selector=status.phase!=Running,status.phase!=Succeeded
           echo "::endgroup::"
 
+          # A pod stuck in ImagePullBackOff or Pending says why only in its
+          # events (registry rate limit, missing tag, no room on the node).
+          echo "::group::Warning events, cluster-wide"
+          kubectl get events -A --field-selector=type=Warning --sort-by=.lastTimestamp | tail -40
+          echo "::endgroup::"
+
           echo "::group::cloud-provider-kind log"
           cat /tmp/cloud-provider-kind.log 2>&1 || true
           echo "::endgroup::"
