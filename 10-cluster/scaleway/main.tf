@@ -175,77 +175,9 @@ resource "null_resource" "update_kubeconfig" {
 }
 
 
-# Credentials for the cross-root Scaleway state reads below. Two execution
-# contexts apply this root: an admin's machine (scw CLI configured) and
-# .github/workflows/scaleway.yml's CI job, which already sets
-# SCW_ACCESS_KEY/SCW_SECRET_KEY as job env (for `provider "scaleway" {}`)
-# but had no way to hand them to this data source — env vars now win when
-# set, falling back to `scw config get` for the admin path. Same fix as
-# 11-secrets/openbao/managed/main.tf's identical comment (that root's own
-# CronWorkflow prompted finding this one too — see infra PR #66).
-data "external" "scw_credentials" {
-  program = ["sh", "-c", <<-EOT
-    jq -n \
-      --arg ak "$${SCW_ACCESS_KEY:-$(scw config get access-key)}" \
-      --arg sk "$${SCW_SECRET_KEY:-$(scw config get secret-key)}" \
-      '{access_key:$ak, secret_key:$sk}'
-  EOT
-  ]
-}
-
-# Shared technical attributes for every cross-root Scaleway state read below
-# — not "config" in the meaningful sense (they never vary), just the
-# Scaleway S3-compatible endpoint mechanics repeated per data source
-# otherwise. The actual config — which bucket/key, i.e. which root's state —
-# is parametrized via variables.tf + env/, visible there instead of buried
-# here.
-locals {
-  scaleway_state_backend = {
-    region                      = "fr-par"
-    access_key                  = data.external.scw_credentials.result.access_key
-    secret_key                  = data.external.scw_credentials.result.secret_key
-    skip_credentials_validation = true
-    skip_region_validation      = true
-    skip_requesting_account_id  = true
-    skip_s3_checksum            = true
-    use_path_style              = true
-    endpoints = {
-      s3 = "https://s3.fr-par.scw.cloud"
-    }
-  }
-}
-
-# scaleway-s3-credentials source: 03-storage/scaleway's "backup" bucket + its
-# scoped workload identity. Same remote state key 11-secrets/openbao/managed
-# reads as its own `backup_scaleway` data source.
-data "terraform_remote_state" "backup_scaleway" {
-  backend = "s3"
-  config = merge(local.scaleway_state_backend, {
-    bucket = var.backup_scaleway_state_bucket
-    key    = var.backup_scaleway_state_key
-  })
-}
-
-# AWS credentials OpenBao reads at startup for KMS auto-unseal (seal "awskms")
-# — source: 02-encryption/aws's KMS key + dedicated IAM user.
-data "terraform_remote_state" "openbao_unseal_aws" {
-  backend = "s3"
-  config = merge(local.scaleway_state_backend, {
-    bucket = var.openbao_unseal_aws_state_bucket
-    key    = var.openbao_unseal_aws_state_key
-  })
-}
-
-# Scaleway Domains/DNS credentials — source: 05-dns/scaleway's
-# external-dns identity (DomainsDNSFullAccess). Same remote state key
-# 11-secrets/openbao/managed reads as its own `dns_scaleway` data source.
-data "terraform_remote_state" "dns_scaleway" {
-  backend = "s3"
-  config = merge(local.scaleway_state_backend, {
-    bucket = var.dns_scaleway_state_bucket
-    key    = var.dns_scaleway_state_key
-  })
-}
+# The core platform this cluster runs on (buckets, unseal key, DNS identity) arrives
+# as variables.core_*, from the core states, through Terragrunt: see
+# live/clusters/core.hcl.
 
 resource "kubernetes_namespace" "openbao" {
   metadata {
@@ -261,9 +193,9 @@ resource "kubernetes_secret" "scaleway_s3_credentials" {
   }
 
   data = {
-    bucket                = data.terraform_remote_state.backup_scaleway.outputs.bucket_name
-    AWS_ACCESS_KEY_ID     = data.terraform_remote_state.backup_scaleway.outputs.workload_access_key
-    AWS_SECRET_ACCESS_KEY = data.terraform_remote_state.backup_scaleway.outputs.workload_secret_key
+    bucket                = var.core_storage.bucket_name
+    AWS_ACCESS_KEY_ID     = var.core_storage.workload_access_key
+    AWS_SECRET_ACCESS_KEY = var.core_storage.workload_secret_key
   }
 }
 
@@ -279,8 +211,8 @@ resource "kubernetes_secret" "openbao_unseal_aws" {
   }
 
   data = {
-    AWS_ACCESS_KEY_ID     = data.terraform_remote_state.openbao_unseal_aws.outputs.openbao_unseal_access_key_id
-    AWS_SECRET_ACCESS_KEY = data.terraform_remote_state.openbao_unseal_aws.outputs.openbao_unseal_secret_access_key
+    AWS_ACCESS_KEY_ID     = var.core_unseal.openbao_unseal_access_key_id
+    AWS_SECRET_ACCESS_KEY = var.core_unseal.openbao_unseal_secret_access_key
   }
 }
 
@@ -416,7 +348,7 @@ resource "null_resource" "velero_namespace_predelete_cleanup" {
 # monitoring/thanos-secret, loki-secret, tempo-secret, velero/secret charts
 # — deleted, see platform-apps/README.md's "The secret-delivery pattern").
 # Terraform already originates all four credentials (03-storage/scaleway's
-# workload identities, read here via the same data.terraform_remote_state.backup_scaleway
+# workload identities, received here as var.core_storage, the same outputs
 # 11-secrets/openbao/managed also reads) so there's no reason to hand them
 # to ESO just to hand them back — OpenBao stays the audited source of truth
 # via 11-secrets/openbao/managed's own vault_kv_secret_v2 writes (unchanged,
@@ -436,11 +368,11 @@ resource "kubernetes_secret" "thanos_objstore_config" {
     "objstore.yaml" = yamlencode({
       type = "S3"
       config = {
-        bucket     = data.terraform_remote_state.backup_scaleway.outputs.thanos_bucket_name
+        bucket     = var.core_storage.thanos_bucket_name
         endpoint   = "s3.fr-par.scw.cloud"
         region     = "fr-par"
-        access_key = data.terraform_remote_state.backup_scaleway.outputs.thanos_workload_access_key
-        secret_key = data.terraform_remote_state.backup_scaleway.outputs.thanos_workload_secret_key
+        access_key = var.core_storage.thanos_workload_access_key
+        secret_key = var.core_storage.thanos_workload_secret_key
       }
     })
   }
@@ -453,8 +385,8 @@ resource "kubernetes_secret" "loki_s3_credentials" {
   }
 
   data = {
-    AWS_ACCESS_KEY_ID     = data.terraform_remote_state.backup_scaleway.outputs.loki_workload_access_key
-    AWS_SECRET_ACCESS_KEY = data.terraform_remote_state.backup_scaleway.outputs.loki_workload_secret_key
+    AWS_ACCESS_KEY_ID     = var.core_storage.loki_workload_access_key
+    AWS_SECRET_ACCESS_KEY = var.core_storage.loki_workload_secret_key
   }
 }
 
@@ -465,8 +397,8 @@ resource "kubernetes_secret" "tempo_s3_credentials" {
   }
 
   data = {
-    AWS_ACCESS_KEY_ID     = data.terraform_remote_state.backup_scaleway.outputs.tempo_workload_access_key
-    AWS_SECRET_ACCESS_KEY = data.terraform_remote_state.backup_scaleway.outputs.tempo_workload_secret_key
+    AWS_ACCESS_KEY_ID     = var.core_storage.tempo_workload_access_key
+    AWS_SECRET_ACCESS_KEY = var.core_storage.tempo_workload_secret_key
   }
 }
 
@@ -482,8 +414,8 @@ resource "kubernetes_secret" "velero_scaleway_credentials" {
     # velero-plugin-for-aws reads via credentials.existingSecret).
     cloud = <<-EOT
       [default]
-      aws_access_key_id=${data.terraform_remote_state.backup_scaleway.outputs.velero_workload_access_key}
-      aws_secret_access_key=${data.terraform_remote_state.backup_scaleway.outputs.velero_workload_secret_key}
+      aws_access_key_id=${var.core_storage.velero_workload_access_key}
+      aws_secret_access_key=${var.core_storage.velero_workload_secret_key}
     EOT
   }
 }
@@ -524,8 +456,8 @@ resource "kubernetes_secret" "scaleway_dns_credentials" {
   }
 
   data = {
-    SCW_ACCESS_KEY = data.terraform_remote_state.dns_scaleway.outputs.access_key
-    SCW_SECRET_KEY = data.terraform_remote_state.dns_scaleway.outputs.secret_key
+    SCW_ACCESS_KEY = var.core_dns.access_key
+    SCW_SECRET_KEY = var.core_dns.secret_key
   }
 
   # Unlike thanos/loki/tempo/velero's Secrets above, ESO's own ExternalSecret
@@ -548,8 +480,8 @@ resource "kubernetes_secret" "external_dns_scaleway_credentials" {
   }
 
   data = {
-    SCW_ACCESS_KEY = data.terraform_remote_state.dns_scaleway.outputs.access_key
-    SCW_SECRET_KEY = data.terraform_remote_state.dns_scaleway.outputs.secret_key
+    SCW_ACCESS_KEY = var.core_dns.access_key
+    SCW_SECRET_KEY = var.core_dns.secret_key
   }
 
   # See kubernetes_secret.scaleway_dns_credentials above -- same ESO Merge

@@ -67,9 +67,9 @@ cd live/core/main && terragrunt run --all plan                # every root of th
 - One credential rule: `AWS_ACCESS_KEY_ID`/`_SECRET_ACCESS_KEY` are the Scaleway
   state key. Roots with a real `provider "aws"` use the CLI profile in their
   tfvars' `aws_profile` (`aws sso login --profile infrastructure`).
-- `10-cluster/*` keep their own `terraform_remote_state` reads (the outputs are
-  `sensitive`; a Terragrunt `dependency` hand-over would drop that); `core.hcl`
-  supplies their bucket/key and orders the run.
+- `10-cluster/*` receive the core they run on as `var.core_*`, from Terragrunt `dependency` blocks in `live/clusters/core.hcl`:
+  no bucket or key is written for them. The `*/managed` roots, run by Crossplane
+  with `tofu`, still read states with `terraform_remote_state`.
 - Terragrunt copies the whole repo into each unit's `.terragrunt-cache`;
   `exclude_from_copy` keeps secrets out, and a root's own `*.auto.tfvars` are
   passed from the real tree. Tooling here means Terragrunt and mise options, not

@@ -50,61 +50,9 @@
 # self-heal possible at all -- ESO can never satisfy a Merge target it's
 # structurally forbidden from creating.
 
-# Credentials for the two cross-root Scaleway state reads below. Unlike a
-# plain `scw config get` (admin's machine only, where `scw` is already
-# configured), this root ALSO runs unattended in CI
-# (.github/workflows/kind.yml), which has no `scw` config file at all --
-# only env vars. Same env-var-first pattern 11-secrets/openbao/managed/main.tf
-# already established for exactly this "two genuinely different execution
-# contexts" need: SCW_ACCESS_KEY/SCW_SECRET_KEY win when set (CI), falling
-# back to `scw config get` otherwise (an admin's machine). Plain `printf`,
-# not `jq -n`, for the same reason that file gives: Scaleway access/secret
-# keys are `[A-Za-z0-9-]` only, so no JSON escaping is needed.
-data "external" "scw_credentials" {
-  program = ["sh", "-c", <<-EOT
-    printf '{"access_key":"%s","secret_key":"%s"}' \
-      "$${SCW_ACCESS_KEY:-$(scw config get access-key)}" \
-      "$${SCW_SECRET_KEY:-$(scw config get secret-key)}"
-  EOT
-  ]
-}
-
-locals {
-  scaleway_state_backend = {
-    region                      = "fr-par"
-    access_key                  = data.external.scw_credentials.result.access_key
-    secret_key                  = data.external.scw_credentials.result.secret_key
-    skip_credentials_validation = true
-    skip_region_validation      = true
-    skip_requesting_account_id  = true
-    skip_s3_checksum            = true
-    use_path_style              = true
-    endpoints = {
-      s3 = "https://s3.fr-par.scw.cloud"
-    }
-  }
-}
-
-# 03-storage/scaleway's "backup" bucket + its scoped workload identity --
-# same remote-state key 10-cluster/scaleway/main.tf already reads.
-data "terraform_remote_state" "backup_scaleway" {
-  backend = "s3"
-  config = merge(local.scaleway_state_backend, {
-    bucket = var.backup_scaleway_state_bucket
-    key    = var.backup_scaleway_state_key
-  })
-}
-
-# 02-encryption/aws's KMS key + dedicated IAM user -- the real AWS
-# credentials OpenBao's seal "awskms" needs at startup to unseal a restored
-# snapshot. Same remote-state key 10-cluster/scaleway/main.tf already reads.
-data "terraform_remote_state" "openbao_unseal_aws" {
-  backend = "s3"
-  config = merge(local.scaleway_state_backend, {
-    bucket = var.openbao_unseal_aws_state_bucket
-    key    = var.openbao_unseal_aws_state_key
-  })
-}
+# The core platform this cluster runs on (buckets, unseal key) arrives
+# as variables.core_*, from the core states, through Terragrunt: see
+# live/clusters/core.hcl.
 
 resource "kubernetes_namespace" "openbao" {
   metadata {
@@ -119,9 +67,9 @@ resource "kubernetes_secret" "scaleway_s3_credentials" {
   }
 
   data = {
-    bucket                = data.terraform_remote_state.backup_scaleway.outputs.bucket_name
-    AWS_ACCESS_KEY_ID     = data.terraform_remote_state.backup_scaleway.outputs.workload_access_key
-    AWS_SECRET_ACCESS_KEY = data.terraform_remote_state.backup_scaleway.outputs.workload_secret_key
+    bucket                = var.core_storage.bucket_name
+    AWS_ACCESS_KEY_ID     = var.core_storage.workload_access_key
+    AWS_SECRET_ACCESS_KEY = var.core_storage.workload_secret_key
   }
 }
 
@@ -132,8 +80,8 @@ resource "kubernetes_secret" "openbao_unseal_aws" {
   }
 
   data = {
-    AWS_ACCESS_KEY_ID     = data.terraform_remote_state.openbao_unseal_aws.outputs.openbao_unseal_access_key_id
-    AWS_SECRET_ACCESS_KEY = data.terraform_remote_state.openbao_unseal_aws.outputs.openbao_unseal_secret_access_key
+    AWS_ACCESS_KEY_ID     = var.core_unseal.openbao_unseal_access_key_id
+    AWS_SECRET_ACCESS_KEY = var.core_unseal.openbao_unseal_secret_access_key
   }
 }
 

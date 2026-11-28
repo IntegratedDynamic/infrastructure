@@ -16,20 +16,9 @@ variable "github_repo" {
   default     = "infrastructure"
 }
 
-# ── 00-foundation/aws remote state (cross-root read) ─────────────────────────
-# Parametrized like every other cross-root state reference in the repo, so the
-# target is visible as config in env/, not hardcoded in main.tf.
-
-variable "remote_state_aws_bucket" {
-  description = "S3 bucket holding 00-foundation/aws's own remote state."
+variable "state_access_policy_arn" {
+  description = "00-foundation/aws's state-bucket policy, attached to this role too rather than duplicating it. Passed by this root's Terragrunt unit from that root's output."
   type        = string
-  default     = "id-terraform-state-00-foundation-aws"
-}
-
-variable "remote_state_aws_key" {
-  description = "Object key for 00-foundation/aws's state within remote_state_aws_bucket."
-  type        = string
-  default     = "00-foundation/aws/main/terraform.tfstate"
 }
 
 variable "aws_profile" {

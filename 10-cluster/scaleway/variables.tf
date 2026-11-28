@@ -194,34 +194,41 @@ variable "argocd_admin_password_hash" {
 
 # ── Cross-root state reads (Scaleway state buckets, see 00-foundation/scaleway) ──
 
-variable "backup_scaleway_state_bucket" {
-  description = "Scaleway bucket holding 03-storage/scaleway's remote state."
-  type        = string
+# Not `sensitive` on purpose: these only reach kubernetes_secret data, which the
+# provider already hides, and marking them made OpenTofu plan an update of every
+# such Secret without any value changing. Keep them out of anything else.
+variable "core_storage" {
+  description = "Outputs of the core's 03-storage/scaleway (buckets and their workload keys), passed by live/clusters/core.hcl."
+  type = object({
+    bucket_name                = string
+    workload_access_key        = string
+    workload_secret_key        = string
+    velero_workload_access_key = string
+    velero_workload_secret_key = string
+    thanos_bucket_name         = string
+    thanos_workload_access_key = string
+    thanos_workload_secret_key = string
+    loki_workload_access_key   = string
+    loki_workload_secret_key   = string
+    tempo_workload_access_key  = string
+    tempo_workload_secret_key  = string
+  })
 }
 
-variable "backup_scaleway_state_key" {
-  description = "Object key for 03-storage/scaleway's state within backup_scaleway_state_bucket."
-  type        = string
+variable "core_unseal" {
+  description = "Outputs of the core's 02-encryption/aws (the IAM key OpenBao auto-unseals with), passed by live/clusters/core.hcl."
+  type = object({
+    openbao_unseal_access_key_id     = string
+    openbao_unseal_secret_access_key = string
+  })
 }
 
-variable "openbao_unseal_aws_state_bucket" {
-  description = "Scaleway bucket holding 02-encryption/aws's remote state."
-  type        = string
-}
-
-variable "openbao_unseal_aws_state_key" {
-  description = "Object key for 02-encryption/aws's state within openbao_unseal_aws_state_bucket."
-  type        = string
-}
-
-variable "dns_scaleway_state_bucket" {
-  description = "Scaleway bucket holding 05-dns/scaleway's remote state."
-  type        = string
-}
-
-variable "dns_scaleway_state_key" {
-  description = "Object key for 05-dns/scaleway's state within dns_scaleway_state_bucket."
-  type        = string
+variable "core_dns" {
+  description = "Outputs of the core's 05-dns/scaleway (the DNS identity's key), passed by live/clusters/core.hcl."
+  type = object({
+    access_key = string
+    secret_key = string
+  })
 }
 
 # infra#113: the whole platform-apps DAG this homelab runs, as data -- see
